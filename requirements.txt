@@ -1,0 +1,10 @@
+# telegram_betting_bot_simple/requirements.txt
+python-telegram-bot==20.8
+pydantic>=2.0
+pydantic-settings>=2.0
+python-dotenv>=1.0
+requests>=2.31
+aiohttp>=3.9
+pandas>=1.5
+numpy>=1.24
+pytest>=7.4
