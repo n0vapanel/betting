@@ -1,0 +1,81 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____________ test_features_match_hand_computed_single_game_history _____________
+
+    def test_features_match_hand_computed_single_game_history() -> None:
+        players, teams, games = make_data()
+        players = pd.concat([
+            players, pd.DataFrame([player_row("0022199999", "2021-11-01", 99, 9999)])
+        ], ignore_index=True)
+        teams = pd.concat([
+            teams,
+            pd.DataFrame([{
+                **games.iloc[-1][KEYS].to_dict(), "PLUS_MINUS": -999999,
+            }]),
+        ], ignore_index=True)
+        result = pf.build_player_features(players, teams, games)
+>       assert len(result) == 1
+E       assert 0 == 1
+E        +  where 0 = len(Empty DataFrame\nColumns: []\nIndex: [])
+
+backtest/v3/test_player_features.py:79: AssertionError
+=========================== short test summary info ============================
+FAILED backtest/v3/test_player_features.py::test_features_match_hand_computed_single_game_history
+1 failed in 0.52s
+EXIT_CODE=1
+
+===== STEP 1: PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m pytest -p no:cacheprovider backtest/v3/test_player_features.py -q =====
+.......................                                                  [100%]
+23 passed in 1.15s
+EXIT_CODE=0
+
+===== STEP 2: PYTHONDONTWRITEBYTECODE=1 .venv/bin/python backtest/v3/player_features.py =====
+10-row preview:
+TEAM_ABBREVIATION  GAME_DATE    GAME_ID  team_rating  top8_share  depth_dropoff  pts_margin_ewma  margin_std_ewma  plus_minus_ewma
+              CHA 2021-11-01 0022100094    36.083025    0.900821       6.101340         3.042971        12.364151         2.146879
+              CLE 2021-11-01 0022100094    32.303748    0.858786      15.184748        -1.675888        11.564852        -1.570989
+              IND 2021-11-01 0022100095    31.857971    0.875812       8.555700        -4.590860         8.918011        -2.358305
+              SAS 2021-11-01 0022100095    34.109793    0.853618       2.612568         1.292657        12.841714         0.113066
+              PHI 2021-11-01 0022100096    33.456789    0.872168     -26.923889         8.708662        15.575312         4.990938
+              POR 2021-11-01 0022100096    35.408053    0.841728      -4.906562         3.666279        22.489604         1.830118
+              ATL 2021-11-01 0022100097    34.034860    0.834005       4.713828        -1.415828        19.846255        -1.999504
+              WAS 2021-11-01 0022100097    32.500365    0.854726       8.272099         4.151165        10.020103         1.849053
+              BOS 2021-11-01 0022100098    34.446594    0.863808      13.908293        -4.089632        15.184645         0.730708
+              CHI 2021-11-01 0022100098    34.028792    0.893485      -0.287728         7.524557         6.660811         4.974615
+
+Row count: 2,274
+Date range: 2021-11-01 to 2022-04-10
+
+Null counts:
+TEAM_ABBREVIATION    0
+GAME_DATE            0
+GAME_ID              0
+team_rating          0
+top8_share           0
+depth_dropoff        0
+pts_margin_ewma      0
+margin_std_ewma      0
+plus_minus_ewma      0
+
+Numeric sanity stats:
+      team_rating  top8_share  depth_dropoff  pts_margin_ewma  margin_std_ewma  plus_minus_ewma
+min     27.387202    0.623189     -47.491822       -17.429560         6.373434        -9.979464
+max     41.296598    0.956853      45.483916        17.021526        30.146795        10.225468
+mean    33.602259    0.820508       0.799077         0.004881        14.146291         0.463987
+
+No-lookahead assertion passed for all 2,274 rows: source dates < GAME_DATE.
+Feature file: /Users/x/Desktop/x/Coding Projects/bb-v3-data/backtest/v3/player_features_2021_22.csv
+Row count: 2274
+EXIT_CODE=0
+
+LEAD INDEPENDENT CSV AUDIT
+PASS: exact nine-column schema, all 2,274 schedule keys, 1,137 paired games, leading-zero IDs, zero nulls/infinities, and bounded minutes shares.
+PASS: all six numeric CSV features match independent pandas-EWMA calculations from strictly prior histories for every row; margins independently derived from opponent scores.
+Maximum absolute differences:
+team_rating        2.131628e-14
+top8_share         3.330669e-16
+depth_dropoff      3.552714e-14
+pts_margin_ewma    1.776357e-15
+margin_std_ewma    3.552714e-15
+plus_minus_ewma    3.552714e-15
+AUDIT_EXIT_CODE=0
