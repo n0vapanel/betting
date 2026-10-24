@@ -126,3 +126,15 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home
 .venv/bin/python backtest/v2/run_v2.py
 ```
 
+
+## Addendum — Winner-Side Conviction Gate (verified by Ops)
+
+The main gate above bets the side where the model leans relative to the market (it LOSES: the market's disagreement is better-informed). An alternative interpretation bets the model's predicted winner only when the model beats the market price on that side:
+
+| eps | n_bets | win rate | ROI | bootstrap 95% CI |
+|---|---:|---:|---:|---:|
+| 0.01 | 175 | 68.6% | +2.42% | [-9.1%, +13.9%] |
+| 0.02 | 166 | 69.3% | +3.16% | [-8.6%, +15.2%] |
+| 0.03 | 158 | 69.0% | +2.57% | [-9.5%, +14.5%] |
+
+Positive point estimates, but all CIs include 0 at n≈160-175 bets — NOT statistically distinguishable from break-even. Both gate interpretations agree with the verdict: the closing NBA line is efficient even against four factors + Elo + official injury reports.
