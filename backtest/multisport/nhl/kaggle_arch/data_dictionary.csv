@@ -1,0 +1,28 @@
+table,column,type,description
+games,game_id,numeric,Game identifier used by every table in this dataset.
+games,competition,string,"Competition name as published (sponsor names are kept, so a league can appear under more than one name over the years)."
+games,season,string,"Season label. Split-year seasons are written like 2021-22, calendar-year seasons as the year."
+games,round,string,"Round or stage label as published, for example 25. Round or Play Offs."
+games,date,string,Calendar date of the game.
+games,home_team,string,Home team (the team listed first by the source).
+games,away_team,string,Away team.
+games,home_score,numeric,"Final home score, including overtime or extra time where played."
+games,away_score,numeric,"Final away score, including overtime or extra time where played."
+games,avg_home_odds,numeric,Average closing decimal price for a home win across the bookmakers listed on the results page.
+games,avg_draw_odds,numeric,Average closing decimal price for a draw in regulation time (three-way markets only).
+games,avg_away_odds,numeric,Average closing decimal price for an away win across the bookmakers listed on the results page.
+games,home_p1,numeric,"Home score in period 1 (first quarter for the NBA, first half for college basketball, first period for the NHL)."
+games,away_p1,numeric,Away score in period 1.
+games,home_p2,numeric,Home score in period 2.
+games,away_p2,numeric,Away score in period 2.
+games,home_ot,numeric,"Home score after regulation (overtime, plus shootout goals in the NHL)."
+games,away_ot,numeric,"Away score after regulation (overtime, plus shootout goals in the NHL)."
+games,has_closing_odds,string,True when the game has rows in closing_odds.
+closing_odds,game_id,numeric,Game identifier used by every table in this dataset.
+closing_odds,bookmaker,string,Bookmaker or odds provider name as published.
+closing_odds,market,string,"Betting market: moneyline (winner including overtime), 1x2 (three-way result in regulation), spread (handicap) or total (over/under points)."
+closing_odds,home_odds,numeric,"Decimal price for the home side (home win, or home on the spread)."
+closing_odds,draw_odds,numeric,Decimal price for a draw (1x2 market only).
+closing_odds,away_odds,numeric,Decimal price for the away side.
+closing_odds,last_update_utc,datetime,"Time this closing price was last changed, in UTC. Empty where the page shows the price without a time."
+closing_odds,line_active,string,False for alternative lines the bookmaker had already taken down before the start.

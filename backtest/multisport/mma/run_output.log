@@ -1,0 +1,164 @@
+n core feats: 27 | n all feats: 34
+train: 1901 | test primary (2020-01..2021-03): 559 | test extended (2020..2026): 3096
+primary test with odds: 559 | extended with odds: 2843
+
+=== CV for feature set: all ===
+  LR C=0.03: val logloss 0.6877
+  LR C=0.1: val logloss 0.7000
+  LR C=0.3: val logloss 0.7086
+  LR C=1.0: val logloss 0.7144
+  LR C=3.0: val logloss 0.7172
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+  LGBM leaves=15 lr=0.03: val logloss 0.4853
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+  LGBM leaves=15 lr=0.06: val logloss 0.4896
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+  LGBM leaves=31 lr=0.03: val logloss 0.4873
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+  LGBM leaves=31 lr=0.06: val logloss 0.4883
+  -> LR C=0.03 (0.6877), LGBM (15, 0.03) (0.4853)
+  NaN in OOF: LR=483 LGBM=483
+  NaN in y: 0
+  NaN in X cols: [0 0 0 0 0 0 0 0 0 0 0]
+  OOF AUC  LR: 0.5949 | LGBM: 0.8313
+
+=== CV for feature set: core ===
+  LR C=0.03: val logloss 0.6853
+  LR C=0.1: val logloss 0.6960
+  LR C=0.3: val logloss 0.7034
+  LR C=1.0: val logloss 0.7085
+  LR C=3.0: val logloss 0.7121
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+  LGBM leaves=15 lr=0.03: val logloss 0.5111
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+  LGBM leaves=15 lr=0.06: val logloss 0.5125
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+  LGBM leaves=31 lr=0.03: val logloss 0.5137
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+  LGBM leaves=31 lr=0.06: val logloss 0.5119
+  -> LR C=0.03 (0.6853), LGBM (15, 0.03) (0.5111)
+  NaN in OOF: LR=483 LGBM=483
+  NaN in y: 0
+  NaN in X cols: [0 0 0 0 0 0 0 0 0 0 0]
+  OOF AUC  LR: 0.6002 | LGBM: 0.8095
+
+market (de-vigged closing) on 2017-2019 train rows: logloss 0.6153, brier 0.2137, acc 0.6544
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+
+final fits done
+{
+ "all": {
+  "lr_C": 0.03,
+  "gbm": [
+   15,
+   0.03
+  ],
+  "cv_lr": 0.6876547268568038,
+  "cv_gbm": 0.485253815676234
+ },
+ "core": {
+  "lr_C": 0.03,
+  "gbm": [
+   15,
+   0.03
+  ],
+  "cv_lr": 0.6852893139902011,
+  "cv_gbm": 0.5110880163650809
+ }
+}
+
+=== PRIMARY test (2020-01 -> 2021-03-20, strike features) ===
+acc: {'lr': 0.5939, 'gbm': 0.7764, 'ens': 0.7657, 'market_fav': 0.6351}
+auc: {'lr': 0.5775, 'gbm': 0.8515, 'ens': 0.829}
+brier: {'lr': 0.2383, 'gbm': 0.1494, 'ens': 0.173, 'market': 0.2231}
+
+=== EXTENDED test (2020-01 -> 2026-03, core features) ===
+acc: {'lr': 0.6166, 'gbm': 0.7717, 'ens': 0.771, 'market_fav': 0.6785}
+auc: {'lr': 0.6591, 'gbm': 0.8567, 'ens': 0.8515}
+brier: {'lr': 0.2296, 'gbm': 0.1467, 'ens': 0.166, 'market': 0.2072}
+
+=== betting: PRIMARY (ensemble prob) ===
+  eps=0.0: n= 559  win_rate=0.612  flat_ROI=+0.3271  profit=+182.9
+  eps=0.02: n= 521  win_rate=0.626  flat_ROI=+0.3676  profit=+191.5
+  eps=0.05: n= 445  win_rate=0.643  flat_ROI=+0.4435  profit=+197.4
+  best gate eps=0.05 -> q-Kelly: final_bank=62967215.34 ROI=0.710170018066168 n=445
+
+=== betting: EXTENDED (ensemble prob) ===
+  eps=0.0: n=2843  win_rate=0.606  flat_ROI=+0.2761  profit=+784.9
+  eps=0.02: n=2625  win_rate=0.613  flat_ROI=+0.3096  profit=+812.7
+  eps=0.05: n=2273  win_rate=0.618  flat_ROI=+0.3602  profit=+818.7
+  best gate eps=0.05 -> q-Kelly: final_bank=272502834412313961824256.00 ROI=0.6546899124822072 n=2271
+
+=== EXTENDED per-year (ensemble) ===
+  2020: n= 451 acc=0.752 auc=0.810 flatROI(eps0)=+0.277 (n_bets=451)
+  2021: n= 493 acc=0.751 auc=0.841 flatROI(eps0)=+0.337 (n_bets=493)
+  2022: n= 487 acc=0.795 auc=0.855 flatROI(eps0)=+0.286 (n_bets=487)
+  2023: n= 416 acc=0.772 auc=0.861 flatROI(eps0)=+0.239 (n_bets=416)
+  2024: n= 383 acc=0.768 auc=0.850 flatROI(eps0)=+0.235 (n_bets=383)
+  2025: n= 499 acc=0.794 auc=0.873 flatROI(eps0)=+0.315 (n_bets=499)
+  2026: n= 114 acc=0.746 auc=0.899 flatROI(eps0)=+0.070 (n_bets=114)
+
+bootstrap (2000):
+  flat ROI eps=0: mean=+0.3259 95% CI [+0.2291, +0.4232]
+  flat ROI best gate (0.05): mean=+0.4437 95% CI [+0.3302, +0.5663]
+  accuracy: mean=0.7653 95% CI [0.7317, 0.8014]
+
+calibration (ensemble, primary):
+              n  winrate  pmean
+(0.1, 0.2]    4    0.000  0.145
+(0.2, 0.3]   52    0.019  0.252
+(0.3, 0.4]   52    0.135  0.343
+(0.4, 0.5]   62    0.500  0.458
+(0.5, 0.6]  144    0.660  0.564
+(0.6, 0.7]  133    0.729  0.639
+(0.7, 0.8]   47    0.894  0.756
+(0.8, 0.9]   65    0.969  0.814
+
+wrote mma_predictions.csv (559, 17)
+wrote mma_predictions_extended.csv (2843, 15)
+wrote metrics.json
+
+KEY: n_test=559 acc=0.7657 flat_roi(eps0)=+0.3271 best_gate=0.05 best_roi=+0.4435 kelly_bank=62967215.34

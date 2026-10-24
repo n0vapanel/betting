@@ -1,0 +1,8 @@
+# Ignore downloaded raw data (re-downloadable; keep code, predictions, reports)
+**/raw*/
+**/*.parquet
+**/all_teams.csv
+**/teams_*.csv
+**/atp_*.csv
+**/*.feather
+**/__pycache__/

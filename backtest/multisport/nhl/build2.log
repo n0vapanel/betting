@@ -1,0 +1,22 @@
+games: 1401
+with odds: 1401
+compat: 0=exact 1=SO-diff 2=conflict
+{0: 1299, 1: 102}
+offsets: {0: 156, 1: 1245}
+conflicts: 0
+Empty DataFrame
+Columns: [date, home_name, away_name, mp_hg, mp_ag, home_goals, away_goals]
+Index: []
+
+SO games: 102
+
+mallari joined: 1311 / 1401
+mallari score agreement: 1311 / 1311
+Empty DataFrame
+Columns: [date, home_name, away_name, home_goals, h_tot, away_goals, a_tot, moneyline, fav]
+Index: []
+favorite side agreement: 1258 / 1311
+corr(implied fav prob mallari vs arch): 0.7589
+
+saved games_full.parquet
+test window (Mar-Jun): 555 of 555

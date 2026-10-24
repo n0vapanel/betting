@@ -1,0 +1,25 @@
+## Sat Oct 24 19:41:42 EDT 2026 python version
+Python 3.11.15
+exit 0
+## import nfl_data_py
+nfl_data_py None
+exit 0
+## import pandas
+pandas 2.2.3
+exit 0
+## import numpy
+numpy 2.4.6
+exit 0
+## import scipy
+scipy 1.17.1
+exit 0
+## import sklearn
+sklearn 1.9.1
+exit 0
+## import pyarrow
+pyarrow 26.0.0
+exit 0
+## import lightgbm
+lightgbm 4.7.0
+exit 0
+0.3.3
