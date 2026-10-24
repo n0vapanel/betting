@@ -1,0 +1,6 @@
+[features] games with complete features: 1072 (train 843, test 229)
+[features] dropped: {'no_rolling_stats': 76, 'no_injury_report': 0, 'other': 0}
+[features] injury source: {'game-day 5PM': 1018, 'game-day 1PM (early tip)': 54}
+[model] calibration holdout: 163 Feb-2022 rows; chosen isotonic (holdout LL 0.5617)
+[v2] accuracy=68.122271%, ROI=+0.099423%, Brier=0.213078, market=0.201028; gate=True
+SANITY_EXIT: 0

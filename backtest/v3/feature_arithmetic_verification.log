@@ -1,0 +1,8 @@
+PASS: supplied-player dates match actual NBA game dates; no team doubleheaders; 56 unique features and disjoint train/test windows
+PASS: all six supplied player feature diffs, sample 2022-03-01 DET at WAS
+PASS: corrected offensive rebound denominators and season-to-date means by independent sample arithmetic
+PASS: advanced net rating, true shooting, four-quarter consistency and EWMA sample arithmetic
+PASS: pre-tip injury minutes use the most recent actual prior appearance and prior-ten mean
+PASS: team-side historical CLV signs and prior-ten aggregation from frozen diagnostics
+PASS: all 229 captured market probabilities, outcomes and payout prices match fixed Kaggle source; all odds game dates match NBA dates
+FEATURE_ARITHMETIC_EXIT: 0

@@ -1,0 +1,10 @@
+Changed clock labels: [{'game_date': '2022-02-03', 'matchup': 'MIA@SAS', 'game_time': '08:30 (ET)'}, {'game_date': '2022-02-03', 'matchup': 'MIA@SAS', 'game_time': '07:00 (ET)'}]
+CONFIRMED V2 NOON ROUTING 2021-12-12 MIL@NYK 12:00 (ET) game-day 5PM
+CONFIRMED V2 NOON ROUTING 2021-12-18 HOU@DET 12:00 (ET) game-day 5PM
+CONFIRMED V2 NOON ROUTING 2021-12-25 ATL@NYK 12:00 (ET) game-day 5PM
+CONFIRMED V2 NOON ROUTING 2022-01-09 SAS@BKN 12:00 (ET) game-day 5PM
+CONFIRMED V2 NOON ROUTING 2022-01-17 NOP@BOS 12:30 (ET) game-day 5PM
+CONFIRMED V2 NOON ROUTING 2022-02-26 BOS@DET 12:00 (ET) game-day 5PM
+V2 same-day 5PM reports for noon games in training: 6
+American ML mismatches vs raw Kaggle: 0
+BASELINE_TEMPORAL_AUDIT_EXIT: 0

@@ -1,0 +1,362 @@
+== V2 published-model reproduction sanity gate ==
+[v2] Reusing fingerprint-verified reproduction
+[features] Reusing fingerprint-verified feature capture
+
+== Train-only candidate: all_features ==
+[all_features] backward selection: 56 features, CV LL 0.652214
+[all_features] drop orb_away: CV LL 0.646695 (55 left)
+[all_features] drop player_depth_dropoff_diff: CV LL 0.642455 (54 left)
+[all_features] drop ftr_home: CV LL 0.638226 (53 left)
+[all_features] drop inj_away: CV LL 0.635330 (52 left)
+[all_features] drop tov_away: CV LL 0.633381 (51 left)
+[all_features] drop player_adv_turnover_diff: CV LL 0.631702 (50 left)
+[all_features] drop inj_questionable_diff: CV LL 0.630103 (49 left)
+[all_features] drop player_adv_usage_hhi_diff: CV LL 0.628322 (48 left)
+[all_features] drop pace_diff: CV LL 0.626874 (47 left)
+[all_features] drop box_pace_diff: CV LL 0.624834 (46 left)
+[all_features] drop player_team_rating_diff: CV LL 0.622895 (45 left)
+[all_features] drop inj_diff: CV LL 0.620995 (44 left)
+[all_features] drop inj_scoring_diff: CV LL 0.619162 (43 left)
+[all_features] drop inj_home: CV LL 0.617148 (42 left)
+[all_features] drop player_adv_ts_diff: CV LL 0.615728 (41 left)
+[all_features] drop off_eFG_away: CV LL 0.614775 (40 left)
+[all_features] drop box_off_diff: CV LL 0.613811 (39 left)
+[all_features] drop prior_steam_diff: CV LL 0.612883 (38 left)
+[all_features] drop box_q_score_std_diff: CV LL 0.612009 (37 left)
+[all_features] drop box_q_margin_std_diff: CV LL 0.610996 (36 left)
+[all_features] drop xprod_home: CV LL 0.609929 (35 left)
+[all_features] drop b2b_away: CV LL 0.608924 (34 left)
+[all_features] drop elo_diff: CV LL 0.608157 (33 left)
+[all_features] drop player_adv_pie_diff: CV LL 0.607549 (32 left)
+[all_features] drop orb_home: CV LL 0.607104 (31 left)
+[all_features] drop box_off_proxy_diff: CV LL 0.606647 (30 left)
+[all_features] drop player_top8_share_diff: CV LL 0.606187 (29 left)
+[all_features] drop box_def_diff: CV LL 0.605786 (28 left)
+[all_features] drop box_three_rate_diff: CV LL 0.605461 (27 left)
+[all_features] drop box_ast_to_diff: CV LL 0.604924 (26 left)
+[all_features] drop box_def_proxy_diff: CV LL 0.604454 (25 left)
+[all_features] drop box_net_diff: CV LL 0.604179 (24 left)
+[all_features] drop player_plus_minus_ewma_diff: CV LL 0.603968 (23 left)
+[all_features] drop box_ts_ewma_diff: CV LL 0.603775 (22 left)
+[all_features] drop player_pts_margin_ewma_diff: CV LL 0.603568 (21 left)
+[all_features] drop player_adv_net_diff: CV LL 0.603223 (20 left)
+[all_features] drop box_net_ewma_diff: CV LL 0.602629 (19 left)
+[all_features] drop margin_diff: CV LL 0.602444 (18 left)
+[all_features] drop xprod_away: CV LL 0.602263 (17 left)
+[all_features] drop prior_clv_diff: CV LL 0.602180 (16 left)
+[all_features] drop rest_diff: CV LL 0.602142 (15 left)
+[all_features] logreg {'C': 0.003}: 0.633399
+[all_features] logreg {'C': 0.01}: 0.614557
+[all_features] logreg {'C': 0.03}: 0.604563
+[all_features] logreg {'C': 0.05}: 0.602142
+[all_features] logreg {'C': 0.1}: 0.600497
+[all_features] logreg {'C': 0.3}: 0.600208
+[all_features] logreg {'C': 1.0}: 0.601106
+[all_features] logreg {'C': 3.0}: 0.602112
+[all_features] lightgbm {'n_estimators': 60, 'learning_rate': 0.03, 'num_leaves': 3, 'min_child_samples': 40, 'reg_lambda': 10.0}: 0.632842
+[all_features] lightgbm {'n_estimators': 120, 'learning_rate': 0.03, 'num_leaves': 3, 'min_child_samples': 40, 'reg_lambda': 10.0}: 0.625325
+[all_features] lightgbm {'n_estimators': 80, 'learning_rate': 0.05, 'num_leaves': 5, 'min_child_samples': 30, 'reg_lambda': 10.0}: 0.626984
+[all_features] lightgbm {'n_estimators': 120, 'learning_rate': 0.03, 'num_leaves': 7, 'min_child_samples': 40, 'reg_lambda': 30.0}: 0.629115
+[all_features] lightgbm {'n_estimators': 160, 'learning_rate': 0.03, 'num_leaves': 5, 'min_child_samples': 50, 'reg_lambda': 50.0}: 0.630577
+[all_features] xgboost {'n_estimators': 60, 'learning_rate': 0.03, 'max_depth': 1, 'min_child_weight': 5, 'reg_lambda': 10.0}: 0.639469
+[all_features] xgboost {'n_estimators': 120, 'learning_rate': 0.03, 'max_depth': 1, 'min_child_weight': 5, 'reg_lambda': 10.0}: 0.633136
+[all_features] xgboost {'n_estimators': 80, 'learning_rate': 0.05, 'max_depth': 2, 'min_child_weight': 10, 'reg_lambda': 30.0}: 0.628804
+[all_features] xgboost {'n_estimators': 120, 'learning_rate': 0.03, 'max_depth': 2, 'min_child_weight': 20, 'reg_lambda': 30.0}: 0.644426
+[all_features] xgboost {'n_estimators': 160, 'learning_rate': 0.03, 'max_depth': 3, 'min_child_weight': 20, 'reg_lambda': 100.0}: 0.648457
+[all_features] frozen: 15 features; top two ['logreg', 'lightgbm']; vote=0.9, model weight=1.0; calibration=platt
+
+== Train-only candidate: no_players ==
+[no_players] backward selection: 44 features, CV LL 0.649625
+[no_players] drop orb_away: CV LL 0.644491 (43 left)
+[no_players] drop ftr_home: CV LL 0.640972 (42 left)
+[no_players] drop inj_away: CV LL 0.638030 (41 left)
+[no_players] drop tov_away: CV LL 0.635094 (40 left)
+[no_players] drop inj_questionable_diff: CV LL 0.633120 (39 left)
+[no_players] drop pace_diff: CV LL 0.631373 (38 left)
+[no_players] drop box_pace_diff: CV LL 0.627520 (37 left)
+[no_players] drop inj_diff: CV LL 0.625438 (36 left)
+[no_players] drop inj_scoring_diff: CV LL 0.623525 (35 left)
+[no_players] drop inj_home: CV LL 0.621223 (34 left)
+[no_players] drop box_q_margin_std_diff: CV LL 0.620179 (33 left)
+[no_players] drop box_q_score_std_diff: CV LL 0.618792 (32 left)
+[no_players] drop elo_diff: CV LL 0.617761 (31 left)
+[no_players] drop off_eFG_away: CV LL 0.616865 (30 left)
+[no_players] drop xprod_home: CV LL 0.615915 (29 left)
+[no_players] drop box_off_diff: CV LL 0.614940 (28 left)
+[no_players] drop b2b_away: CV LL 0.613934 (27 left)
+[no_players] drop prior_updates_diff: CV LL 0.613266 (26 left)
+[no_players] drop off_eFG_home: CV LL 0.612954 (25 left)
+[no_players] drop box_net_diff: CV LL 0.612659 (24 left)
+[no_players] drop box_def_proxy_diff: CV LL 0.612377 (23 left)
+[no_players] drop box_net_ewma_diff: CV LL 0.612080 (22 left)
+[no_players] drop box_def_diff: CV LL 0.611776 (21 left)
+[no_players] drop orb_home: CV LL 0.611254 (20 left)
+[no_players] drop prior_clv_diff: CV LL 0.610773 (19 left)
+[no_players] drop xprod_away: CV LL 0.610475 (18 left)
+[no_players] drop box_ts_ewma_diff: CV LL 0.610185 (17 left)
+[no_players] drop box_ts_diff: CV LL 0.609879 (16 left)
+[no_players] drop rest_diff: CV LL 0.609608 (15 left)
+[no_players] drop box_three_rate_diff: CV LL 0.609280 (14 left)
+[no_players] drop winpct_diff: CV LL 0.609110 (13 left)
+[no_players] drop margin_diff: CV LL 0.608907 (12 left)
+[no_players] drop box_q4_margin_diff: CV LL 0.608650 (11 left)
+[no_players] logreg {'C': 0.003}: 0.636891
+[no_players] logreg {'C': 0.01}: 0.619972
+[no_players] logreg {'C': 0.03}: 0.610985
+[no_players] logreg {'C': 0.05}: 0.608650
+[no_players] logreg {'C': 0.1}: 0.607185
+[no_players] logreg {'C': 0.3}: 0.607951
+[no_players] logreg {'C': 1.0}: 0.610314
+[no_players] logreg {'C': 3.0}: 0.612076
+[no_players] lightgbm {'n_estimators': 60, 'learning_rate': 0.03, 'num_leaves': 3, 'min_child_samples': 40, 'reg_lambda': 10.0}: 0.630995
+[no_players] lightgbm {'n_estimators': 120, 'learning_rate': 0.03, 'num_leaves': 3, 'min_child_samples': 40, 'reg_lambda': 10.0}: 0.624976
+[no_players] lightgbm {'n_estimators': 80, 'learning_rate': 0.05, 'num_leaves': 5, 'min_child_samples': 30, 'reg_lambda': 10.0}: 0.632364
+[no_players] lightgbm {'n_estimators': 120, 'learning_rate': 0.03, 'num_leaves': 7, 'min_child_samples': 40, 'reg_lambda': 30.0}: 0.626351
+[no_players] lightgbm {'n_estimators': 160, 'learning_rate': 0.03, 'num_leaves': 5, 'min_child_samples': 50, 'reg_lambda': 50.0}: 0.634525
+[no_players] xgboost {'n_estimators': 60, 'learning_rate': 0.03, 'max_depth': 1, 'min_child_weight': 5, 'reg_lambda': 10.0}: 0.637868
+[no_players] xgboost {'n_estimators': 120, 'learning_rate': 0.03, 'max_depth': 1, 'min_child_weight': 5, 'reg_lambda': 10.0}: 0.630037
+[no_players] xgboost {'n_estimators': 80, 'learning_rate': 0.05, 'max_depth': 2, 'min_child_weight': 10, 'reg_lambda': 30.0}: 0.628796
+[no_players] xgboost {'n_estimators': 120, 'learning_rate': 0.03, 'max_depth': 2, 'min_child_weight': 20, 'reg_lambda': 30.0}: 0.642278
+[no_players] xgboost {'n_estimators': 160, 'learning_rate': 0.03, 'max_depth': 3, 'min_child_weight': 20, 'reg_lambda': 100.0}: 0.645955
+[no_players] frozen: 11 features; top two ['logreg', 'lightgbm']; vote=0.9, model weight=1.0; calibration=platt
+
+== Train-only candidate: no_clv ==
+[no_clv] backward selection: 50 features, CV LL 0.652072
+[no_clv] drop orb_away: CV LL 0.646564 (49 left)
+[no_clv] drop ftr_home: CV LL 0.642291 (48 left)
+[no_clv] drop player_depth_dropoff_diff: CV LL 0.638184 (47 left)
+[no_clv] drop inj_away: CV LL 0.635230 (46 left)
+[no_clv] drop tov_away: CV LL 0.633231 (45 left)
+[no_clv] drop player_adv_turnover_diff: CV LL 0.631307 (44 left)
+[no_clv] drop player_adv_usage_hhi_diff: CV LL 0.629464 (43 left)
+[no_clv] drop inj_diff: CV LL 0.627918 (42 left)
+[no_clv] drop inj_scoring_diff: CV LL 0.626140 (41 left)
+[no_clv] drop inj_home: CV LL 0.624201 (40 left)
+[no_clv] drop pace_diff: CV LL 0.622671 (39 left)
+[no_clv] drop box_pace_diff: CV LL 0.619424 (38 left)
+[no_clv] drop player_team_rating_diff: CV LL 0.617508 (37 left)
+[no_clv] drop player_adv_ts_diff: CV LL 0.615816 (36 left)
+[no_clv] drop b2b_away: CV LL 0.614890 (35 left)
+[no_clv] drop box_q_score_std_diff: CV LL 0.614008 (34 left)
+[no_clv] drop box_q_margin_std_diff: CV LL 0.612981 (33 left)
+[no_clv] drop player_adv_pie_diff: CV LL 0.612151 (32 left)
+[no_clv] drop elo_diff: CV LL 0.611459 (31 left)
+[no_clv] drop off_eFG_away: CV LL 0.610747 (30 left)
+[no_clv] drop box_off_diff: CV LL 0.610054 (29 left)
+[no_clv] drop xprod_home: CV LL 0.609487 (28 left)
+[no_clv] drop inj_questionable_diff: CV LL 0.608777 (27 left)
+[no_clv] drop player_top8_share_diff: CV LL 0.608083 (26 left)
+[no_clv] drop box_three_rate_diff: CV LL 0.607581 (25 left)
+[no_clv] drop box_ast_to_diff: CV LL 0.606869 (24 left)
+[no_clv] drop orb_home: CV LL 0.606557 (23 left)
+[no_clv] drop box_off_proxy_diff: CV LL 0.606172 (22 left)
+[no_clv] drop box_def_diff: CV LL 0.605846 (21 left)
+[no_clv] drop box_def_proxy_diff: CV LL 0.605456 (20 left)
+[no_clv] drop xprod_away: CV LL 0.605201 (19 left)
+[no_clv] drop box_net_diff: CV LL 0.604983 (18 left)
+[no_clv] drop box_ts_ewma_diff: CV LL 0.604765 (17 left)
+[no_clv] drop player_plus_minus_ewma_diff: CV LL 0.604566 (16 left)
+[no_clv] drop player_pts_margin_ewma_diff: CV LL 0.604328 (15 left)
+[no_clv] drop player_adv_net_diff: CV LL 0.604065 (14 left)
+[no_clv] drop box_net_ewma_diff: CV LL 0.603381 (13 left)
+[no_clv] drop margin_diff: CV LL 0.603192 (12 left)
+[no_clv] logreg {'C': 0.003}: 0.642462
+[no_clv] logreg {'C': 0.01}: 0.618875
+[no_clv] logreg {'C': 0.03}: 0.605921
+[no_clv] logreg {'C': 0.05}: 0.603192
+[no_clv] logreg {'C': 0.1}: 0.601820
+[no_clv] logreg {'C': 0.3}: 0.602247
+[no_clv] logreg {'C': 1.0}: 0.603323
+[no_clv] logreg {'C': 3.0}: 0.604122
+[no_clv] lightgbm {'n_estimators': 60, 'learning_rate': 0.03, 'num_leaves': 3, 'min_child_samples': 40, 'reg_lambda': 10.0}: 0.632540
+[no_clv] lightgbm {'n_estimators': 120, 'learning_rate': 0.03, 'num_leaves': 3, 'min_child_samples': 40, 'reg_lambda': 10.0}: 0.623770
+[no_clv] lightgbm {'n_estimators': 80, 'learning_rate': 0.05, 'num_leaves': 5, 'min_child_samples': 30, 'reg_lambda': 10.0}: 0.625206
+[no_clv] lightgbm {'n_estimators': 120, 'learning_rate': 0.03, 'num_leaves': 7, 'min_child_samples': 40, 'reg_lambda': 30.0}: 0.626016
+[no_clv] lightgbm {'n_estimators': 160, 'learning_rate': 0.03, 'num_leaves': 5, 'min_child_samples': 50, 'reg_lambda': 50.0}: 0.629262
+[no_clv] xgboost {'n_estimators': 60, 'learning_rate': 0.03, 'max_depth': 1, 'min_child_weight': 5, 'reg_lambda': 10.0}: 0.639280
+[no_clv] xgboost {'n_estimators': 120, 'learning_rate': 0.03, 'max_depth': 1, 'min_child_weight': 5, 'reg_lambda': 10.0}: 0.632115
+[no_clv] xgboost {'n_estimators': 80, 'learning_rate': 0.05, 'max_depth': 2, 'min_child_weight': 10, 'reg_lambda': 30.0}: 0.626926
+[no_clv] xgboost {'n_estimators': 120, 'learning_rate': 0.03, 'max_depth': 2, 'min_child_weight': 20, 'reg_lambda': 30.0}: 0.643942
+[no_clv] xgboost {'n_estimators': 160, 'learning_rate': 0.03, 'max_depth': 3, 'min_child_weight': 20, 'reg_lambda': 100.0}: 0.648141
+[no_clv] frozen: 12 features; top two ['logreg', 'lightgbm']; vote=0.9, model weight=0.75; calibration=platt
+
+== Train-only candidate: no_boxscores ==
+[no_boxscores] backward selection: 42 features, CV LL 0.644399
+[no_boxscores] drop orb_away: CV LL 0.638586 (41 left)
+[no_boxscores] drop ftr_home: CV LL 0.634595 (40 left)
+[no_boxscores] drop player_depth_dropoff_diff: CV LL 0.631268 (39 left)
+[no_boxscores] drop inj_away: CV LL 0.628413 (38 left)
+[no_boxscores] drop pace_diff: CV LL 0.625981 (37 left)
+[no_boxscores] drop player_team_rating_diff: CV LL 0.623680 (36 left)
+[no_boxscores] drop inj_diff: CV LL 0.621648 (35 left)
+[no_boxscores] drop inj_scoring_diff: CV LL 0.619522 (34 left)
+[no_boxscores] drop inj_home: CV LL 0.616897 (33 left)
+[no_boxscores] drop tov_away: CV LL 0.614996 (32 left)
+[no_boxscores] drop player_adv_ts_diff: CV LL 0.613438 (31 left)
+[no_boxscores] drop prior_steam_diff: CV LL 0.612261 (30 left)
+[no_boxscores] drop b2b_away: CV LL 0.611239 (29 left)
+[no_boxscores] drop player_adv_turnover_diff: CV LL 0.610350 (28 left)
+[no_boxscores] drop elo_diff: CV LL 0.609369 (27 left)
+[no_boxscores] drop inj_questionable_diff: CV LL 0.608602 (26 left)
+[no_boxscores] drop xprod_home: CV LL 0.607563 (25 left)
+[no_boxscores] drop player_top8_share_diff: CV LL 0.606882 (24 left)
+[no_boxscores] drop orb_home: CV LL 0.606265 (23 left)
+[no_boxscores] drop player_adv_pie_diff: CV LL 0.605727 (22 left)
+[no_boxscores] drop off_eFG_away: CV LL 0.605263 (21 left)
+[no_boxscores] drop ftr_away: CV LL 0.604846 (20 left)
+[no_boxscores] drop player_plus_minus_ewma_diff: CV LL 0.604473 (19 left)
+[no_boxscores] drop player_pts_margin_ewma_diff: CV LL 0.604048 (18 left)
+[no_boxscores] drop player_adv_net_diff: CV LL 0.603703 (17 left)
+[no_boxscores] drop prior_updates_diff: CV LL 0.603209 (16 left)
+[no_boxscores] drop margin_diff: CV LL 0.602973 (15 left)
+[no_boxscores] drop winpct_diff: CV LL 0.602629 (14 left)
+[no_boxscores] drop xprod_away: CV LL 0.602466 (13 left)
+[no_boxscores] drop player_adv_usage_hhi_diff: CV LL 0.602378 (12 left)
+[no_boxscores] drop open_home: CV LL 0.602347 (11 left)
+[no_boxscores] logreg {'C': 0.003}: 0.634673
+[no_boxscores] logreg {'C': 0.01}: 0.613771
+[no_boxscores] logreg {'C': 0.03}: 0.604187
+[no_boxscores] logreg {'C': 0.05}: 0.602347
+[no_boxscores] logreg {'C': 0.1}: 0.601439
+[no_boxscores] logreg {'C': 0.3}: 0.601858
+[no_boxscores] logreg {'C': 1.0}: 0.603255
+[no_boxscores] logreg {'C': 3.0}: 0.604567
+[no_boxscores] lightgbm {'n_estimators': 60, 'learning_rate': 0.03, 'num_leaves': 3, 'min_child_samples': 40, 'reg_lambda': 10.0}: 0.629483
+[no_boxscores] lightgbm {'n_estimators': 120, 'learning_rate': 0.03, 'num_leaves': 3, 'min_child_samples': 40, 'reg_lambda': 10.0}: 0.616908
+[no_boxscores] lightgbm {'n_estimators': 80, 'learning_rate': 0.05, 'num_leaves': 5, 'min_child_samples': 30, 'reg_lambda': 10.0}: 0.617581
+[no_boxscores] lightgbm {'n_estimators': 120, 'learning_rate': 0.03, 'num_leaves': 7, 'min_child_samples': 40, 'reg_lambda': 30.0}: 0.624785
+[no_boxscores] lightgbm {'n_estimators': 160, 'learning_rate': 0.03, 'num_leaves': 5, 'min_child_samples': 50, 'reg_lambda': 50.0}: 0.628842
+[no_boxscores] xgboost {'n_estimators': 60, 'learning_rate': 0.03, 'max_depth': 1, 'min_child_weight': 5, 'reg_lambda': 10.0}: 0.637785
+[no_boxscores] xgboost {'n_estimators': 120, 'learning_rate': 0.03, 'max_depth': 1, 'min_child_weight': 5, 'reg_lambda': 10.0}: 0.626908
+[no_boxscores] xgboost {'n_estimators': 80, 'learning_rate': 0.05, 'max_depth': 2, 'min_child_weight': 10, 'reg_lambda': 30.0}: 0.624896
+[no_boxscores] xgboost {'n_estimators': 120, 'learning_rate': 0.03, 'max_depth': 2, 'min_child_weight': 20, 'reg_lambda': 30.0}: 0.637662
+[no_boxscores] xgboost {'n_estimators': 160, 'learning_rate': 0.03, 'max_depth': 3, 'min_child_weight': 20, 'reg_lambda': 100.0}: 0.644191
+[no_boxscores] frozen: 11 features; top two ['logreg', 'lightgbm']; vote=0.9, model weight=1.0; calibration=platt
+
+== Train-only candidate: no_injuries ==
+[no_injuries] backward selection: 51 features, CV LL 0.643364
+[no_injuries] drop orb_away: CV LL 0.637850 (50 left)
+[no_injuries] drop ftr_home: CV LL 0.632991 (49 left)
+[no_injuries] drop player_depth_dropoff_diff: CV LL 0.629119 (48 left)
+[no_injuries] drop tov_away: CV LL 0.626875 (47 left)
+[no_injuries] drop player_adv_turnover_diff: CV LL 0.625045 (46 left)
+[no_injuries] drop pace_diff: CV LL 0.623366 (45 left)
+[no_injuries] drop box_pace_diff: CV LL 0.619931 (44 left)
+[no_injuries] drop player_team_rating_diff: CV LL 0.617684 (43 left)
+[no_injuries] drop player_adv_ts_diff: CV LL 0.616337 (42 left)
+[no_injuries] drop prior_steam_diff: CV LL 0.615331 (41 left)
+[no_injuries] drop off_eFG_away: CV LL 0.614368 (40 left)
+[no_injuries] drop box_off_diff: CV LL 0.613408 (39 left)
+[no_injuries] drop elo_diff: CV LL 0.612503 (38 left)
+[no_injuries] drop b2b_away: CV LL 0.611648 (37 left)
+[no_injuries] drop box_q_margin_std_diff: CV LL 0.610756 (36 left)
+[no_injuries] drop box_q_score_std_diff: CV LL 0.609500 (35 left)
+[no_injuries] drop xprod_home: CV LL 0.608459 (34 left)
+[no_injuries] drop player_adv_pie_diff: CV LL 0.607829 (33 left)
+[no_injuries] drop orb_home: CV LL 0.607316 (32 left)
+[no_injuries] drop box_off_proxy_diff: CV LL 0.606860 (31 left)
+[no_injuries] drop rest_diff: CV LL 0.606378 (30 left)
+[no_injuries] drop box_def_diff: CV LL 0.605808 (29 left)
+[no_injuries] drop box_def_proxy_diff: CV LL 0.605400 (28 left)
+[no_injuries] drop box_three_rate_diff: CV LL 0.605122 (27 left)
+[no_injuries] drop box_ast_to_diff: CV LL 0.604627 (26 left)
+[no_injuries] drop box_net_diff: CV LL 0.604358 (25 left)
+[no_injuries] drop margin_diff: CV LL 0.604185 (24 left)
+[no_injuries] drop player_top8_share_diff: CV LL 0.604024 (23 left)
+[no_injuries] drop player_plus_minus_ewma_diff: CV LL 0.603871 (22 left)
+[no_injuries] drop player_adv_net_diff: CV LL 0.603651 (21 left)
+[no_injuries] drop player_pts_margin_ewma_diff: CV LL 0.603355 (20 left)
+[no_injuries] drop box_net_ewma_diff: CV LL 0.602790 (19 left)
+[no_injuries] drop box_ts_ewma_diff: CV LL 0.602502 (18 left)
+[no_injuries] drop xprod_away: CV LL 0.602306 (17 left)
+[no_injuries] drop player_adv_usage_hhi_diff: CV LL 0.602256 (16 left)
+[no_injuries] drop prior_clv_diff: CV LL 0.602142 (15 left)
+[no_injuries] logreg {'C': 0.003}: 0.633399
+[no_injuries] logreg {'C': 0.01}: 0.614557
+[no_injuries] logreg {'C': 0.03}: 0.604563
+[no_injuries] logreg {'C': 0.05}: 0.602142
+[no_injuries] logreg {'C': 0.1}: 0.600497
+[no_injuries] logreg {'C': 0.3}: 0.600208
+[no_injuries] logreg {'C': 1.0}: 0.601106
+[no_injuries] logreg {'C': 3.0}: 0.602112
+[no_injuries] lightgbm {'n_estimators': 60, 'learning_rate': 0.03, 'num_leaves': 3, 'min_child_samples': 40, 'reg_lambda': 10.0}: 0.632842
+[no_injuries] lightgbm {'n_estimators': 120, 'learning_rate': 0.03, 'num_leaves': 3, 'min_child_samples': 40, 'reg_lambda': 10.0}: 0.625325
+[no_injuries] lightgbm {'n_estimators': 80, 'learning_rate': 0.05, 'num_leaves': 5, 'min_child_samples': 30, 'reg_lambda': 10.0}: 0.626984
+[no_injuries] lightgbm {'n_estimators': 120, 'learning_rate': 0.03, 'num_leaves': 7, 'min_child_samples': 40, 'reg_lambda': 30.0}: 0.629115
+[no_injuries] lightgbm {'n_estimators': 160, 'learning_rate': 0.03, 'num_leaves': 5, 'min_child_samples': 50, 'reg_lambda': 50.0}: 0.630577
+[no_injuries] xgboost {'n_estimators': 60, 'learning_rate': 0.03, 'max_depth': 1, 'min_child_weight': 5, 'reg_lambda': 10.0}: 0.639469
+[no_injuries] xgboost {'n_estimators': 120, 'learning_rate': 0.03, 'max_depth': 1, 'min_child_weight': 5, 'reg_lambda': 10.0}: 0.633136
+[no_injuries] xgboost {'n_estimators': 80, 'learning_rate': 0.05, 'max_depth': 2, 'min_child_weight': 10, 'reg_lambda': 30.0}: 0.628804
+[no_injuries] xgboost {'n_estimators': 120, 'learning_rate': 0.03, 'max_depth': 2, 'min_child_weight': 20, 'reg_lambda': 30.0}: 0.644426
+[no_injuries] xgboost {'n_estimators': 160, 'learning_rate': 0.03, 'max_depth': 3, 'min_child_weight': 20, 'reg_lambda': 100.0}: 0.648457
+[no_injuries] frozen: 15 features; top two ['logreg', 'lightgbm']; vote=0.9, model weight=1.0; calibration=platt
+
+== SELECTION FROZEN; first March predictions now permitted. Primary: all_features ==
+
+v3 accuracy: 65.502183%
+v3 flat ROI: -4.520478%
+February-frozen best gate: lean, eps=0.05; March ROI=+9.68%, 144 bets
+Descriptive March-best gate (hindsight): lean, eps=0.05; ROI=+9.68%, 144 bets
+Exact output paths:
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/README_v3.md
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/V3_BACKTEST_REPORT.md
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/baseline_execution.log
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/baseline_v2.py
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/cv_results_all_features.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/cv_results_no_boxscores.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/cv_results_no_clv.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/cv_results_no_injuries.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/cv_results_no_players.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/environment_verification.log
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/evaluation_v3.py
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/experiment_plan.json
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/feature_audit.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/feature_manifest.json
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/features_build.log
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/features_test.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/features_train.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/features_v3.py
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/frozen_protocol.json
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/metrics.json
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/model_all_features.joblib
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/model_no_boxscores.joblib
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/model_no_clv.joblib
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/model_no_injuries.joblib
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/model_no_players.joblib
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/model_v3.py
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/odds_diagnostics.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/predictions_all_features.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/predictions_no_boxscores.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/predictions_no_clv.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/predictions_no_injuries.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/predictions_no_players.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/preflight_verification.log
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/run_v3.log
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/run_v3.py
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/schema_discovery.log
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/schema_discovery.py
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/selection_all_features.json
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/selection_no_boxscores.json
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/selection_no_clv.json
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/selection_no_injuries.json
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/selection_no_players.json
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/tdd_green.log
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/tdd_red.log
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/test_pipeline_v3.py
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/v2_reproduced_predictions.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/v2_reproduction.json
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/v3_predictions.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/validation_all_features.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/validation_gates_all_features.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/validation_gates_no_boxscores.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/validation_gates_no_clv.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/validation_gates_no_injuries.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/validation_gates_no_players.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/validation_no_boxscores.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/validation_no_clv.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/validation_no_injuries.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/validation_no_players.csv
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/v3_SCHEMA.md
+/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/output_manifest.json
+END_TO_END_EXIT: 0
+exit: 0

@@ -1,0 +1,183 @@
+FFFFFFFF                                                                 [100%]
+=================================== FAILURES ===================================
+_________ test_rolling_features_ignore_all_same_day_and_future_results _________
+
+    def test_rolling_features_ignore_all_same_day_and_future_results():
+>       f = module("features_v3")
+            ^^^^^^^^^^^^^^^^^^^^^
+
+backtest/v3/test_pipeline_v3.py:16: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'features_v3'
+
+    def module(name):
+        qualified = f"backtest.v3.{name}"
+>       assert importlib.util.find_spec(qualified) is not None, f"{name} is not implemented"
+E       AssertionError: features_v3 is not implemented
+E       assert None is not None
+E        +  where None = <function find_spec at 0x107a60670>('backtest.v3.features_v3')
+E        +    where <function find_spec at 0x107a60670> = <module 'importlib.util' (frozen)>.find_spec
+E        +      where <module 'importlib.util' (frozen)> = importlib.util
+
+backtest/v3/test_pipeline_v3.py:11: AssertionError
+_______________ test_current_odds_features_use_only_open_marker ________________
+
+    def test_current_odds_features_use_only_open_marker():
+>       f = module("features_v3")
+            ^^^^^^^^^^^^^^^^^^^^^
+
+backtest/v3/test_pipeline_v3.py:46: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'features_v3'
+
+    def module(name):
+        qualified = f"backtest.v3.{name}"
+>       assert importlib.util.find_spec(qualified) is not None, f"{name} is not implemented"
+E       AssertionError: features_v3 is not implemented
+E       assert None is not None
+E        +  where None = <function find_spec at 0x107a60670>('backtest.v3.features_v3')
+E        +    where <function find_spec at 0x107a60670> = <module 'importlib.util' (frozen)>.find_spec
+E        +      where <module 'importlib.util' (frozen)> = importlib.util
+
+backtest/v3/test_pipeline_v3.py:11: AssertionError
+_____________ test_time_folds_never_split_a_date_or_cross_february _____________
+
+    def test_time_folds_never_split_a_date_or_cross_february():
+>       m = module("model_v3")
+            ^^^^^^^^^^^^^^^^^^
+
+backtest/v3/test_pipeline_v3.py:70: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'model_v3'
+
+    def module(name):
+        qualified = f"backtest.v3.{name}"
+>       assert importlib.util.find_spec(qualified) is not None, f"{name} is not implemented"
+E       AssertionError: model_v3 is not implemented
+E       assert None is not None
+E        +  where None = <function find_spec at 0x107a60670>('backtest.v3.model_v3')
+E        +    where <function find_spec at 0x107a60670> = <module 'importlib.util' (frozen)>.find_spec
+E        +      where <module 'importlib.util' (frozen)> = importlib.util
+
+backtest/v3/test_pipeline_v3.py:11: AssertionError
+______ test_injury_snapshot_is_strictly_before_tip_including_one_pm_games ______
+
+    def test_injury_snapshot_is_strictly_before_tip_including_one_pm_games():
+>       f = module("features_v3")
+            ^^^^^^^^^^^^^^^^^^^^^
+
+backtest/v3/test_pipeline_v3.py:87: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'features_v3'
+
+    def module(name):
+        qualified = f"backtest.v3.{name}"
+>       assert importlib.util.find_spec(qualified) is not None, f"{name} is not implemented"
+E       AssertionError: features_v3 is not implemented
+E       assert None is not None
+E        +  where None = <function find_spec at 0x107a60670>('backtest.v3.features_v3')
+E        +    where <function find_spec at 0x107a60670> = <module 'importlib.util' (frozen)>.find_spec
+E        +      where <module 'importlib.util' (frozen)> = importlib.util
+
+backtest/v3/test_pipeline_v3.py:11: AssertionError
+______ test_lean_and_winner_gates_are_distinct_and_zero_edge_does_not_bet ______
+
+    def test_lean_and_winner_gates_are_distinct_and_zero_edge_does_not_bet():
+>       e = module("evaluation_v3")
+            ^^^^^^^^^^^^^^^^^^^^^^^
+
+backtest/v3/test_pipeline_v3.py:106: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'evaluation_v3'
+
+    def module(name):
+        qualified = f"backtest.v3.{name}"
+>       assert importlib.util.find_spec(qualified) is not None, f"{name} is not implemented"
+E       AssertionError: evaluation_v3 is not implemented
+E       assert None is not None
+E        +  where None = <function find_spec at 0x107a60670>('backtest.v3.evaluation_v3')
+E        +    where <function find_spec at 0x107a60670> = <module 'importlib.util' (frozen)>.find_spec
+E        +      where <module 'importlib.util' (frozen)> = importlib.util
+
+backtest/v3/test_pipeline_v3.py:11: AssertionError
+_ test_quarter_kelly_uses_same_day_starting_bankroll_and_zero_for_negative_ev __
+
+    def test_quarter_kelly_uses_same_day_starting_bankroll_and_zero_for_negative_ev():
+>       e = module("evaluation_v3")
+            ^^^^^^^^^^^^^^^^^^^^^^^
+
+backtest/v3/test_pipeline_v3.py:127: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'evaluation_v3'
+
+    def module(name):
+        qualified = f"backtest.v3.{name}"
+>       assert importlib.util.find_spec(qualified) is not None, f"{name} is not implemented"
+E       AssertionError: evaluation_v3 is not implemented
+E       assert None is not None
+E        +  where None = <function find_spec at 0x107a60670>('backtest.v3.evaluation_v3')
+E        +    where <function find_spec at 0x107a60670> = <module 'importlib.util' (frozen)>.find_spec
+E        +      where <module 'importlib.util' (frozen)> = importlib.util
+
+backtest/v3/test_pipeline_v3.py:11: AssertionError
+___________ test_bootstrap_is_seeded_and_preserves_constant_returns ____________
+
+    def test_bootstrap_is_seeded_and_preserves_constant_returns():
+>       e = module("evaluation_v3")
+            ^^^^^^^^^^^^^^^^^^^^^^^
+
+backtest/v3/test_pipeline_v3.py:143: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'evaluation_v3'
+
+    def module(name):
+        qualified = f"backtest.v3.{name}"
+>       assert importlib.util.find_spec(qualified) is not None, f"{name} is not implemented"
+E       AssertionError: evaluation_v3 is not implemented
+E       assert None is not None
+E        +  where None = <function find_spec at 0x107a60670>('backtest.v3.evaluation_v3')
+E        +    where <function find_spec at 0x107a60670> = <module 'importlib.util' (frozen)>.find_spec
+E        +      where <module 'importlib.util' (frozen)> = importlib.util
+
+backtest/v3/test_pipeline_v3.py:11: AssertionError
+_______ test_schema_discovery_covers_every_column_without_writing_inputs _______
+
+tmp_path = PosixPath('/private/var/folders/6g/rw_8wjqd04s8lsky980mz6q80000gn/T/pytest-of-x/pytest-0/test_schema_discovery_covers_e0')
+
+    def test_schema_discovery_covers_every_column_without_writing_inputs(tmp_path):
+>       s = module("schema_discovery")
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+backtest/v3/test_pipeline_v3.py:159: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+name = 'schema_discovery'
+
+    def module(name):
+        qualified = f"backtest.v3.{name}"
+>       assert importlib.util.find_spec(qualified) is not None, f"{name} is not implemented"
+E       AssertionError: schema_discovery is not implemented
+E       assert None is not None
+E        +  where None = <function find_spec at 0x107a60670>('backtest.v3.schema_discovery')
+E        +    where <function find_spec at 0x107a60670> = <module 'importlib.util' (frozen)>.find_spec
+E        +      where <module 'importlib.util' (frozen)> = importlib.util
+
+backtest/v3/test_pipeline_v3.py:11: AssertionError
+=========================== short test summary info ============================
+FAILED backtest/v3/test_pipeline_v3.py::test_rolling_features_ignore_all_same_day_and_future_results
+FAILED backtest/v3/test_pipeline_v3.py::test_current_odds_features_use_only_open_marker
+FAILED backtest/v3/test_pipeline_v3.py::test_time_folds_never_split_a_date_or_cross_february
+FAILED backtest/v3/test_pipeline_v3.py::test_injury_snapshot_is_strictly_before_tip_including_one_pm_games
+FAILED backtest/v3/test_pipeline_v3.py::test_lean_and_winner_gates_are_distinct_and_zero_edge_does_not_bet
+FAILED backtest/v3/test_pipeline_v3.py::test_quarter_kelly_uses_same_day_starting_bankroll_and_zero_for_negative_ev
+FAILED backtest/v3/test_pipeline_v3.py::test_bootstrap_is_seeded_and_preserves_constant_returns
+FAILED backtest/v3/test_pipeline_v3.py::test_schema_discovery_covers_every_column_without_writing_inputs
+8 failed in 0.55s
+pytest exit: 1

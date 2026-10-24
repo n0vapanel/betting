@@ -1,0 +1,9 @@
+PASS independent CSV settlement, six metrics, all ten gates, CV/calibration dates and frozen February gate: all_features
+PASS independent CSV settlement, six metrics, all ten gates, CV/calibration dates and frozen February gate: no_players
+PASS independent CSV settlement, six metrics, all ten gates, CV/calibration dates and frozen February gate: no_clv
+PASS independent CSV settlement, six metrics, all ten gates, CV/calibration dates and frozen February gate: no_boxscores
+PASS independent CSV settlement, six metrics, all ten gates, CV/calibration dates and frozen February gate: no_injuries
+PASS independent simultaneous-date quarter-Kelly: 0.8961669482708304 total_staked 5.475166196078814
+PASS all seven independently recomputed 1000-date-bootstrap confidence intervals
+PASS every listed absolute output exists
+NUMERICAL_VERIFICATION_EXIT: 0

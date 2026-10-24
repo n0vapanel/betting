@@ -1,0 +1,17 @@
+UNCHANGED SHA256 /Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/cache/v3/game_odds.csv
+UNCHANGED SHA256 /Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/cache/v3/team_boxscores.csv
+UNCHANGED SHA256 /Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/cache/v3/player_boxscores.csv
+UNCHANGED SHA256 /Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/cache/nba_teamlog_2021_22.csv
+UNCHANGED SHA256 /Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/cache/nba_playerlog_2021_22.csv
+UNCHANGED SHA256 /Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/cache/injury_reports_2021_22.csv
+UNCHANGED SHA256 /Users/x/.cache/kagglehub/datasets/cviaxmiwnptr/nba-betting-data-october-2007-to-june-2024/versions/4/nba_2008-2026.csv
+UNCHANGED SHA256 /Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/player_features_2021_22.csv
+UNCHANGED SHA256 /Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/player_features.py
+UNCHANGED SHA256 /Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/features_v3.py
+UNCHANGED SHA256 /Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v2/features.py
+UNCHANGED SHA256 /Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v2/model.py
+UNCHANGED SHA256 /Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v2/data.py
+UNCHANGED SHA256 /Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/baseline_v2.py
+PASS 14 cached sources and original reference implementations unchanged by SHA256
+PASS no recent writes to protected repository files outside the three allowed root documents and backtest/v3/
+SOURCE_INTEGRITY_EXIT: 0

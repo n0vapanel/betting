@@ -1,0 +1,72 @@
+== pip install ==
+Collecting lightgbm==4.6.0
+  Downloading lightgbm-4.6.0-py3-none-macosx_12_0_arm64.whl.metadata (17 kB)
+Collecting xgboost==3.1.1
+  Downloading xgboost-3.1.1-py3-none-macosx_12_0_arm64.whl.metadata (2.1 kB)
+Requirement already satisfied: numpy>=1.17.0 in /Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages (from lightgbm==4.6.0) (2.5.4)
+Requirement already satisfied: scipy in /Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages (from lightgbm==4.6.0) (1.18.1)
+Downloading lightgbm-4.6.0-py3-none-macosx_12_0_arm64.whl (1.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.6/1.6 MB 19.6 MB/s  0:00:00
+Downloading xgboost-3.1.1-py3-none-macosx_12_0_arm64.whl (2.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.2/2.2 MB 69.5 MB/s  0:00:00
+Installing collected packages: xgboost, lightgbm
+
+Successfully installed lightgbm-4.6.0 xgboost-3.1.1
+pip exit: 0
+== import check ==
+numpy OK 2.5.4
+pandas OK 2.3.3
+scipy OK 1.18.1
+sklearn OK 1.9.1
+lightgbm FAIL OSError("dlopen(/Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages/lightgbm/lib/lib_lightgbm.dylib, 0x0006): Library not loaded: @rpath/libomp.dylib\n  Referenced from: <D44045CD-B874-3A27-9A61-F131D99AACE4> /Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages/lightgbm/lib/lib_lightgbm.dylib\n  Reason: tried: '/opt/homebrew/opt/libomp/lib/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/opt/libomp/lib/libomp.dylib' (no such file), '/opt/local/lib/libomp/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/local/lib/libomp/libomp.dylib' (no such file), '/opt/homebrew/opt/libomp/lib/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/opt/libomp/lib/libomp.dylib' (no such file), '/opt/local/lib/libomp/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/local/lib/libomp/libomp.dylib' (no such file), '/opt/homebrew/lib/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/lib/libomp.dylib' (no such file), '/opt/homebrew/lib/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/lib/libomp.dylib' (no such file)")
+xgboost FAIL XGBoostError('\nXGBoost Library (libxgboost.dylib) could not be loaded.\nLikely causes:\n  * OpenMP runtime is not installed\n    - vcomp140.dll or libgomp-1.dll for Windows\n    - libomp.dylib for Mac OSX\n    - libgomp.so for Linux and other UNIX-like OSes\n    Mac OSX users: Run `brew install libomp` to install OpenMP runtime.\n\n  * You are running 32-bit Python on a 64-bit OS\n\nError message(s): ["dlopen(/Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages/xgboost/lib/libxgboost.dylib, 0x0006): Library not loaded: @rpath/libomp.dylib\\n  Referenced from: <B111F8D5-6AC6-3245-A6B5-94693F6992AB> /Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages/xgboost/lib/libxgboost.dylib\\n  Reason: tried: \'/opt/homebrew/opt/libomp/lib/libomp.dylib\' (no such file), \'/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/opt/libomp/lib/libomp.dylib\' (no such file), \'/opt/homebrew/opt/libomp/lib/libomp.dylib\' (no such file), \'/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/opt/libomp/lib/libomp.dylib\' (no such file), \'/opt/homebrew/lib/libomp.dylib\' (no such file), \'/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/lib/libomp.dylib\' (no such file), \'/opt/homebrew/lib/libomp.dylib\' (no such file), \'/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/lib/libomp.dylib\' (no such file)"]\n')
+pytest OK 9.1.1
+hypothesis FAIL ModuleNotFoundError("No module named 'hypothesis'")
+== pytest ==
+.......................                                                  [100%]
+23 passed in 0.96s
+pytest exit: 0
+
+== OpenMP workaround: DYLD_LIBRARY_PATH=/opt/miniconda3/pkgs/llvm-openmp-22.1.3-hc7d1edf_0/lib ==
+/opt/miniconda3/pkgs/llvm-openmp-22.1.3-hc7d1edf_0/lib/libomp.dylib: Mach-O 64-bit dynamically linked shared library arm64
+/Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages/sklearn/utils/validation.py:2830: UserWarning: X does not have valid feature names, but LGBMRegressor was fitted with feature names
+  warnings.warn(
+lightgbm 4.6.0 xgboost 3.1.1
+lgb pred [-0.04332998 -0.01908119  0.47400776]
+xgb pred [-0.00201673  0.05610424  0.8357043 ]
+fit exit: 0
+
+== preload sklearn libomp, no DYLD_LIBRARY_PATH ==
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import ctypes, importlib.util; from pathlib import Path; p=Path(importlib.util.find_spec("sklearn").origin).parent/".dylibs"/"libomp.dylib"; ctypes.CDLL(str(p), mode=ctypes.RTLD_GLOBAL); import lightgbm,xgboost; print(p, lightgbm.__version__,xgboost.__version__)
+                                                                                                                                                                                               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages/lightgbm/__init__.py", line 11, in <module>
+    from .basic import Booster, Dataset, Sequence, register_logger
+  File "/Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages/lightgbm/basic.py", line 9, in <module>
+    from .libpath import _LIB  # isort: skip
+    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages/lightgbm/libpath.py", line 49, in <module>
+    _LIB = ctypes.cdll.LoadLibrary(_find_lib_path()[0])
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ctypes/__init__.py", line 554, in LoadLibrary
+    return self._dlltype(name)
+           ~~~~~~~~~~~~~^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ctypes/__init__.py", line 433, in __init__
+    self._handle = self._load_library(name, mode, handle, winmode)
+                   ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ctypes/__init__.py", line 475, in _load_library
+    return _dlopen(name, mode)
+OSError: dlopen(/Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages/lightgbm/lib/lib_lightgbm.dylib, 0x0006): Library not loaded: @rpath/libomp.dylib
+  Referenced from: <D44045CD-B874-3A27-9A61-F131D99AACE4> /Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages/lightgbm/lib/lib_lightgbm.dylib
+  Reason: tried: '/opt/homebrew/opt/libomp/lib/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/opt/libomp/lib/libomp.dylib' (no such file), '/opt/local/lib/libomp/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/local/lib/libomp/libomp.dylib' (no such file), '/opt/homebrew/opt/libomp/lib/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/opt/libomp/lib/libomp.dylib' (no such file), '/opt/local/lib/libomp/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/local/lib/libomp/libomp.dylib' (no such file), '/opt/homebrew/lib/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/lib/libomp.dylib' (no such file), '/opt/homebrew/lib/libomp.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/lib/libomp.dylib' (no such file)
+exit: 1
+
+== sklearn bundled runtime: DYLD_LIBRARY_PATH=/Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages/sklearn/.dylibs ==
+-- lightgbm
+/Users/x/Desktop/x/Coding Projects/betting bot/.venv/lib/python3.14/site-packages/sklearn/utils/validation.py:2830: UserWarning: X does not have valid feature names, but LGBMClassifier was fitted with feature names
+  warnings.warn(
+lightgbm 4.6.0 [0.29794759 0.70205241 0.70205241]
+lightgbm exit: 0
+-- xgboost
+xgboost 3.1.1 [0.68035084 0.42491046 0.68035084]
+xgboost exit: 0

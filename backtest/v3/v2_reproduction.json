@@ -1,0 +1,65 @@
+{
+  "n_train": 843,
+  "n_test": 229,
+  "accuracy": 0.6812227074235808,
+  "flat_roi": 0.0009942253452019246,
+  "model_brier": 0.2130775324134619,
+  "market_brier": 0.20102814320653534,
+  "pnl": 0.2276776040512407,
+  "selected_features": [
+    "off_eFG_home",
+    "tov_home",
+    "elo_diff",
+    "b2b_home",
+    "inj_home",
+    "inj_diff",
+    "market_home",
+    "winpct_diff",
+    "margin_diff"
+  ],
+  "model": "LogReg C=0.05",
+  "calibration": "isotonic",
+  "method": "Refit the frozen published v2 specification; no v2 hyperparameter search is rerun.",
+  "known_limitations": [
+    "v2 chooses calibration by in-sample February calibration loss; preserved for exact reproduction only.",
+    "v2's 1PM early-tip routing can use a report at tip for a 1PM game; v3 requires strict snapshot < tip.",
+    "v2 ORB denominator uses opposing OREB instead of opposing DREB; v3 corrects this.",
+    "v2 injury minutes are double-lagged and season-to-date denominators are off by one; v3 corrects both."
+  ],
+  "sanity_gate_passed": true,
+  "input_fingerprints": {
+    "/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/cache/nba_teamlog_2021_22.csv": {
+      "bytes": 350316,
+      "sha256": "c69259a17249d125258681ff2a42322ea63a025ebb946c440c006957ea878f24"
+    },
+    "/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/cache/nba_playerlog_2021_22.csv": {
+      "bytes": 3907371,
+      "sha256": "2a892225011377437b184c7eb55f0faa4f6ebd439e92e08a2ad92e9172d5a4dd"
+    },
+    "/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/cache/injury_reports_2021_22.csv": {
+      "bytes": 2510646,
+      "sha256": "e92b6c5f7155add65ea24c7bae9837c1c71882223e6f34e7d410567fc7b1a4ef"
+    },
+    "/Users/x/.cache/kagglehub/datasets/cviaxmiwnptr/nba-betting-data-october-2007-to-june-2024/versions/4/nba_2008-2026.csv": {
+      "bytes": 2493308,
+      "sha256": "729eb2ead85c14affbb81ae9a4c611fee9790b8dd3d1d7824e1ddba14410a8c4"
+    },
+    "/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v2/features.py": {
+      "bytes": 16719,
+      "sha256": "9bfcf79aab22834effeb53f56d83d2115a0c38fb4551f810448131fd2150d156"
+    },
+    "/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v2/model.py": {
+      "bytes": 9974,
+      "sha256": "ee4dbcc53ade1573f1bca9995c8eb9396a0f5756a83a998d0c42d315c003795d"
+    },
+    "/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v2/data.py": {
+      "bytes": 11624,
+      "sha256": "d710caf592805eb49a3d0f3d6031f6170fe019a389c75b643256feaac07c7596"
+    },
+    "/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/baseline_v2.py": {
+      "bytes": 4437,
+      "sha256": "4cfd0bec0d60212c15a204a9577655c3e483098fe8920bfd64c2243d8fd35d5f"
+    }
+  },
+  "predictions_path": "/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/v2_reproduced_predictions.csv"
+}

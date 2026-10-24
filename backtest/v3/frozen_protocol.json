@@ -1,0 +1,75 @@
+{
+  "primary_name": "all_features",
+  "primary_selection": "Lowest pre-February ensemble CV log loss across all five registered configurations; ties prefer registration order.",
+  "selected_gates": {
+    "all_features": {
+      "variant": "lean",
+      "eps": 0.05,
+      "n_bets": 38,
+      "win_rate": 0.4473684210526316,
+      "roi": 0.2984173349478059,
+      "pnl": 11.339858728016626,
+      "selection_period": "2022-02-15..2022-02-28",
+      "minimum_bets": 30,
+      "fallback": false
+    },
+    "no_players": {
+      "variant": "lean",
+      "eps": 0.05,
+      "n_bets": 35,
+      "win_rate": 0.42857142857142855,
+      "roi": 0.33773222739388153,
+      "pnl": 11.820627958785854,
+      "selection_period": "2022-02-15..2022-02-28",
+      "minimum_bets": 30,
+      "fallback": false
+    },
+    "no_clv": {
+      "variant": "lean",
+      "eps": 0.05,
+      "n_bets": 31,
+      "win_rate": 0.41935483870967744,
+      "roi": 0.1883825396134394,
+      "pnl": 5.839858728016622,
+      "selection_period": "2022-02-15..2022-02-28",
+      "minimum_bets": 30,
+      "fallback": false
+    },
+    "no_boxscores": {
+      "variant": "lean",
+      "eps": 0.05,
+      "n_bets": 36,
+      "win_rate": 0.3888888888888889,
+      "roi": 0.07355006105006108,
+      "pnl": 2.647802197802199,
+      "selection_period": "2022-02-15..2022-02-28",
+      "minimum_bets": 30,
+      "fallback": false
+    },
+    "no_injuries": {
+      "variant": "lean",
+      "eps": 0.05,
+      "n_bets": 38,
+      "win_rate": 0.4473684210526316,
+      "roi": 0.2984173349478059,
+      "pnl": 11.339858728016626,
+      "selection_period": "2022-02-15..2022-02-28",
+      "minimum_bets": 30,
+      "fallback": false
+    }
+  },
+  "candidate_cv_log_losses": {
+    "all_features": 0.6004236562974128,
+    "no_players": 0.6075342920813523,
+    "no_clv": 0.6008758014277236,
+    "no_boxscores": 0.6008894411714671,
+    "no_injuries": 0.6004236562974128
+  },
+  "training_input_fingerprints": {
+    "/Users/x/Desktop/x/Coding Projects/bb-v3-model/backtest/v3/features_train.csv": {
+      "bytes": 914296,
+      "sha256": "4009a037c7542e7dd8f646e799cd26e34085bb865f13133ebd5e0b17ee6af901"
+    }
+  },
+  "frozen_at_utc": "2026-10-24T21:36:53.261456+00:00"
+}

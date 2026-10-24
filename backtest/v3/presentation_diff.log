@@ -1,0 +1,70 @@
+--- run_v3.py (before)
++++ run_v3.py (after)
+@@ -104,6 +104,12 @@
+         "Baseline probabilities, exact metrics and source fingerprints are preserved under `backtest/v3/v2_*`.\n",
+         "v2 limitations preserved for reproduction, but corrected in v3:\n",
+         *[f"- {item}" for item in baseline["known_limitations"]],
++        "\nAdditional timing audit: v2's hour<6 routing also selects the game-day 17:00 report "
++        "for six 12:00/12:30 ET training games (2021-12-12, 2021-12-18, 2021-12-25, "
++        "2022-01-09, 2022-01-17, 2022-02-26), after their scheduled tips. "
++        "This is confirmed in `backtest/v3/baseline_temporal_audit.log`. "
++        "The published baseline is reproduced, not retroactively repaired; its training-feature timing "
++        "is therefore not a fully leakage-free control. V3 uses strictly previous-day snapshots for all six.\n",
+         "\n## Data coverage and source usability\n",
+         f"- Complete training games: **{features['n_train']}**, {features['train_date_min']} through {features['train_date_max']}; "
+         f"authorized training window is 2021-10-20 through 2022-02-28. "
+@@ -133,6 +139,9 @@
+         "- `feature_audit.csv` records, for each train/test game, all rolling-history maximum source dates, "
+         "the actual selected injury snapshot and tip in Eastern time, completeness and missing-source reasons. "
+         "Every dated historical source is asserted strictly earlier than its target; injury timestamps must be strictly less than tip.",
++        "- Schedule-clock provenance: injury routing uses the first cached clock label for each game, as recorded in the audit. "
++        "The sole changed label is 2022-02-03 MIA@SAS (20:30 versus 19:00 ET); the selected 17:00 report is strictly pre-tip under both. "
++        "This ambiguity changes no predictor or selected snapshot in this benchmark.",
+         "- **Important limitation:** neither semantic opening/closing markers nor the supplied Kaggle close have original publication timestamps. "
+         "This is an opening/closing-convention historical backtest, not a point-in-time feed replay. The semantic open is presumed pregame; "
+         "that assumption cannot be proven to the second from these caches. `last_fetched` is never used as a historical availability timestamp.",
+@@ -142,7 +151,7 @@
+         "calibration choice, mixture weights, primary configuration and deployable gate are frozen before evaluating March.",
+         "\n## Cross-check: TeamRankings close versus fixed Kaggle close\n",
+         markdown_table(
+-            ["period", "matched / games", "exact both ML", "both within 10 ML", "mean |Δ home p|", "median |Δ home p|", "max |Δ home p|", "same favorite"],
++            ["period", "matched / games", "exact both ML", "both within 10 ML", "mean abs Δp", "median abs Δp", "max abs Δp", "same favorite"],
+             [
+                 [name, f"{row['n_matched']} / {row['n_games']}", percentage(row["fraction_exact_both"]),
+                  percentage(row["fraction_within_10_both"]), number(row["mean_abs_home_probability_difference"]),
+@@ -268,6 +277,12 @@
+         f"The flat-ROI bootstrap {evidence}. The deployable February-frozen gate returns "
+         f"{percentage(march_gate['roi'], True)} in March; the hindsight March-best gate returns "
+         f"{percentage(best['roi'], True)} and must not be mistaken for an out-of-sample-selected policy. "
++        f"Quarter-Kelly on the frozen gate finishes at {primary['quarter_kelly']['bankroll_multiple']:.6f}x "
++        f"starting bankroll ({percentage(primary['quarter_kelly']['net_return'], True)}), so the positive flat-gated "
++        "point estimate did not translate into profitable fractional staking. "
++        f"The registered no_players ablation reached {percentage(results['candidates']['no_players']['metrics']['accuracy'])} accuracy "
++        f"and {percentage(results['candidates']['no_players']['metrics']['flat_roi'], True)} flat ROI; it was not selected "
++        "by pre-February CV and is not promoted after seeing March. "
+         "Richer inputs do not guarantee an edge over an efficient closing line. "
+         "This is one locked historical benchmark with one disclosed missing-opening market fallback, not a live betting recommendation."
+     )
+@@ -291,6 +306,9 @@
+         "- `backtest/v3/selection_*.json`, `cv_results_*.csv`, `validation_*.csv`, `model_*.joblib`, `predictions_*.csv`: all five candidate artifacts.",
+         "- `backtest/v3/output_manifest.json`: complete absolute output paths, including implementation, logs and all generated artifacts.",
+         "- `README_v3.md`, `v3_SCHEMA.md`: formulas, protocol, schema and March 1 odds examples.",
++        "- Verification evidence: `backtest/v3/final_verification.log`, `backtest/v3/numerical_verification.log`, "
++        "`backtest/v3/feature_arithmetic_verification.log`, and `backtest/v3/baseline_temporal_audit.log`. "
++        "Independent numerical verification checks every candidate's settlement and gate table, quarter-Kelly and all seven primary bootstrap intervals.",
+     ]
+     (ROOT / "V3_BACKTEST_REPORT.md").write_text("\n".join(lines) + "\n")
+ 
+--- README_v3.md (before)
++++ README_v3.md (after)
+@@ -137,6 +137,10 @@
+ A 1PM report is not allowed for a 1PM tip; a complete previous-day report
+ is then required. Actual snapshot/tip strings are preserved per game.
+ 
++For exact provenance, routing records the first cached game-clock label. The only amended matchup in this cache is 2022-02-03 MIA@SAS (20:30 versus 19:00 ET). Its selected 17:00 snapshot precedes both; this ambiguity affects no predictor or chosen snapshot in this benchmark.
++
++The separately reproduced v2 implementation has a confirmed noon-routing issue: six 12:00/12:30 ET training games use its game-day 17:00 report. V3 instead uses strictly previous-day snapshots for all six. See `backtest/v3/baseline_temporal_audit.log`; v2's published numbers are reproduced unchanged, not presented as a perfectly leakage-free timing control.
++
+ `feature_audit.csv` records each team's previous-source maximum dates,
+ actual injury snapshot and tip, missing fields and opening-marker availability.
+ Source fingerprints and coverage counts live in `feature_manifest.json`.
