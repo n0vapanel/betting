@@ -8,7 +8,10 @@ confidence tiers, and how handlers build the engine and format results.
 
 from __future__ import annotations
 
-from telegram.ext import Application
+import asyncio
+from types import SimpleNamespace
+
+from telegram.ext import Application, CallbackQueryHandler, ConversationHandler
 
 from telegram_betting_bot_simple.bot.handlers import format_prediction, setup_handlers, split_message
 from telegram_betting_bot_simple.bot.session_manager import SessionManager
@@ -76,3 +79,21 @@ def test_split_message_respects_telegram_limit() -> None:
     assert all(len(m.encode("utf-16-le")) // 2 <= 4096 for m in messages)
     # Every line arrives once, whole and in order
     assert "\n".join(messages).split("\n") == lines
+
+def test_taps_on_expired_menus_get_an_answer() -> None:
+    config = Config(TELEGRAM_BOT_TOKEN="123456:test")
+    application = Application.builder().token(config.telegram_token).build()
+    setup_handlers(application, config)
+    handlers = application.handlers[0]
+    # The fallback must come after the conversation, so it only sees taps the conversation didn't claim
+    conv_index = next(i for i, h in enumerate(handlers) if isinstance(h, ConversationHandler))
+    fallback = next(h for h in handlers[conv_index + 1:] if isinstance(h, CallbackQueryHandler))
+
+    answers = []
+
+    class FakeQuery:
+        async def answer(self, text=None, show_alert=False):
+            answers.append((text, show_alert))
+
+    asyncio.run(fallback.callback(SimpleNamespace(callback_query=FakeQuery()), None))
+    assert answers == [("This menu has expired. Send /start to begin again.", True)]

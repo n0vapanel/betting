@@ -24,6 +24,7 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -101,6 +102,17 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(
             "Sorry, I didn't understand that command. Type /help for assistance."
         )
+
+
+async def expired_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Answer taps on buttons whose conversation ended or was lost when the bot restarted."""
+    if update.callback_query:
+        try:
+            await update.callback_query.answer(
+                "This menu has expired. Send /start to begin again.", show_alert=True
+            )
+        except BadRequest:
+            pass  # Tapped too long ago for Telegram to accept an answer
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -279,6 +291,8 @@ def setup_handlers(application: Application, config: Config) -> None:
         fallbacks=[CommandHandler("cancel", cancel), CommandHandler("help", help_command)],
     )
     application.add_handler(conv_handler)
+    # Button taps the conversation didn't claim (e.g. on a menu from before a restart)
+    application.add_handler(CallbackQueryHandler(expired_menu))
     # Standalone help and cancel commands outside of conversation
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("cancel", cancel))
