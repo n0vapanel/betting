@@ -26,6 +26,8 @@ APP="$BASE/app"
 VENV="$BASE/venv"
 ENV_FILE="$APP/.env"
 SERVICE="bettingbot"
+# Secrets may be pre-set in the environment: keep them away from apt, git and pip.
+export -n TELEGRAM_BOT_TOKEN TELEGRAM_CHANNEL_ID API_SPORTS_KEY THE_ODDS_API_KEY NEWS_API_KEY
 
 # ask VAR PROMPT PATTERN [secret]: read VAR from the terminal until it matches PATTERN.
 # A value already set in the environment is used instead of asking.
@@ -51,6 +53,8 @@ ask() {
 main() {
   [ "$(id -u)" -eq 0 ] || { echo "Run this as root (or with sudo)."; exit 1; }
   command -v systemctl >/dev/null || { echo "This needs a Linux server that uses systemd (Ubuntu, Debian, Fedora...)."; exit 1; }
+  # The bot user must be able to read what root creates here, even if root's umask is stricter
+  umask 022
 
   echo "[1/6] Installing system packages (git, Python)..."
   if command -v apt-get >/dev/null; then
@@ -72,6 +76,7 @@ main() {
   id "$BOT_USER" >/dev/null 2>&1 \
     || useradd --system --home-dir "$BASE" --no-create-home --shell /usr/sbin/nologin "$BOT_USER"
   mkdir -p "$BASE"
+  chmod 755 "$BASE"
 
   echo "[3/6] Getting the bot code ($BRANCH)..."
   if [ -d "$APP/.git" ]; then
@@ -82,8 +87,12 @@ main() {
   fi
 
   echo "[4/6] Installing Python packages (can take a minute)..."
-  [ -x "$VENV/bin/python" ] || python3 -m venv "$VENV"
-  "$VENV/bin/pip" install --quiet --disable-pip-version-check -r "$APP/requirements.txt"
+  # Install as the bot user so package install scripts never run as root. The service
+  # still can't modify its own packages: ProtectSystem=strict makes them read-only.
+  install -d -o "$BOT_USER" -g "$BOT_USER" "$VENV"
+  [ -x "$VENV/bin/python" ] || runuser -u "$BOT_USER" -- python3 -m venv "$VENV"
+  runuser -u "$BOT_USER" -- env HOME="$BASE" "$VENV/bin/pip" install --quiet --no-cache-dir \
+    --disable-pip-version-check -r "$APP/requirements.txt"
 
   echo "[5/6] Bot settings..."
   if [ -f "$ENV_FILE" ]; then

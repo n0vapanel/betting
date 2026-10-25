@@ -170,6 +170,26 @@ async def date_entered(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return SELECT_TYPE
 
 
+# Telegram rejects text messages longer than this, counted in UTF-16 code units.
+TELEGRAM_MESSAGE_LIMIT = 4096
+
+
+def split_message(lines: list[str], limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[str]:
+    """Join ``lines`` into as few messages as fit Telegram's length limit, never splitting a line."""
+    messages: list[str] = []
+    current = ""
+    for line in lines:
+        candidate = f"{current}\n{line}" if current else line
+        if current and len(candidate.encode("utf-16-le")) // 2 > limit:
+            messages.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        messages.append(current)
+    return messages
+
+
 def format_prediction(prediction: dict) -> str:
     """Render one engine prediction, e.g. ``Celtics @ Lakers → Lakers (Middle, 62%)``."""
     winner = prediction.get("winner", "")
@@ -215,13 +235,14 @@ async def prediction_type_selected(update: Update, context: ContextTypes.DEFAULT
         return ConversationHandler.END
     # Format results
     if not predictions:
-        response = "No predictions available for the selected sport and date."
+        messages = ["No predictions available for the selected sport and date."]
     else:
         lines = ["Here are your predictions:"]
         for p in predictions:
             lines.append(f"• {format_prediction(p)}")
-        response = "\n".join(lines)
-    await query.message.reply_text(response)
+        messages = split_message(lines)
+    for message in messages:
+        await query.message.reply_text(message)
     # Reset session
     session_manager.reset_session(chat_id)
     return ConversationHandler.END

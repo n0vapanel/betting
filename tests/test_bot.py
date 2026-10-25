@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from telegram.ext import Application
 
-from telegram_betting_bot_simple.bot.handlers import format_prediction, setup_handlers
+from telegram_betting_bot_simple.bot.handlers import format_prediction, setup_handlers, split_message
 from telegram_betting_bot_simple.bot.session_manager import SessionManager
 from telegram_betting_bot_simple.config import Config
 from telegram_betting_bot_simple.engine.tier_classifier import TierClassifier
@@ -64,3 +64,15 @@ def test_format_prediction() -> None:
         "probabilities": {"Lakers": 0.62, "Celtics": 0.38},
     }
     assert format_prediction(prediction) == "Celtics @ Lakers → Lakers (Middle, 62%)"
+
+def test_split_message_respects_telegram_limit() -> None:
+    assert split_message(["a", "b"]) == ["a\nb"]
+    # A busy soccer day: hundreds of fixtures won't fit in one 4096-character message
+    lines = ["Here are your predictions:"] + [
+        f"• Team {i} @ Team {i + 1} → Team {i} (Hot, 51%)" for i in range(300)
+    ]
+    messages = split_message(lines)
+    assert len(messages) > 1
+    assert all(len(m.encode("utf-16-le")) // 2 <= 4096 for m in messages)
+    # Every line arrives once, whole and in order
+    assert "\n".join(messages).split("\n") == lines
