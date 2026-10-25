@@ -18,7 +18,12 @@
 # password and stores them in /opt/bettingbot/app/.env (readable only by root
 # and the bot). Run it again any time to pull the latest code and restart; it
 # keeps your settings and only asks for ones that are missing.
-# Overrides: BRANCH=..., REPO_URL=...
+#
+# Keys put in front of the command are saved without asking, and replace saved
+# ones (a new server, or switching to a paid API key). Start the line with a
+# space so the keys stay out of the shell history:
+#    TELEGRAM_BOT_TOKEN=... TELEGRAM_CHANNEL_ID=... THE_ODDS_API_KEY=... bash setup_vps.sh
+# Also: API_SPORTS_KEY, DASHBOARD_PASSWORD, BRANCH (default main), REPO_URL.
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/n0vapanel/betting.git}"
@@ -32,6 +37,19 @@ SERVICE="bettingbot"
 DASHBOARD="bettingdash"
 # Secrets may be pre-set in the environment: keep them away from apt, git and pip.
 export -n TELEGRAM_BOT_TOKEN TELEGRAM_CHANNEL_ID API_SPORTS_KEY THE_ODDS_API_KEY NEWS_API_KEY DASHBOARD_PASSWORD
+
+# Settings that can be given on the command line, and what a valid value looks like
+declare -A PATTERNS=(
+  [TELEGRAM_BOT_TOKEN]='^[0-9]{6,12}:[A-Za-z0-9_-]{30,}$'
+  [TELEGRAM_CHANNEL_ID]='^-?[0-9]{5,20}$'
+  [THE_ODDS_API_KEY]='^[A-Za-z0-9_-]{16,64}$'
+  [API_SPORTS_KEY]='^[A-Za-z0-9_-]{16,64}$'
+  [DASHBOARD_PASSWORD]='^[A-Za-z0-9_.@%+=:-]{8,64}$'
+)
+PRESET=()
+for var in "${!PATTERNS[@]}"; do
+  if [ -n "${!var:-}" ]; then PRESET+=("$var"); fi
+done
 
 # ask VAR PROMPT PATTERN [secret]: read VAR from the terminal until it matches PATTERN.
 # A value already set in the environment is used instead of asking.
@@ -130,6 +148,14 @@ EOF
     fi
     printf 'DASHBOARD_PASSWORD=%s\nDASHBOARD_PORT=%s\n' "$DASHBOARD_PASSWORD" "${DASHBOARD_PORT:-8787}" >> "$ENV_FILE"
   fi
+  # Keys given on the command line replace the saved ones
+  local var
+  for var in ${PRESET[@]+"${PRESET[@]}"}; do
+    [[ "${!var}" =~ ${PATTERNS[$var]} ]] || { echo "  $var looks wrong."; exit 1; }
+    sed -i "/^$var=/d" "$ENV_FILE"
+    echo "$var=${!var}" >> "$ENV_FILE"
+  done
+  if [ ${#PRESET[@]} -gt 0 ]; then echo "  Saved from the command line: ${PRESET[*]}"; fi
   chown "root:$BOT_USER" "$ENV_FILE"
   chmod 640 "$ENV_FILE"
   local port
