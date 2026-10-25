@@ -245,7 +245,8 @@ async def _show(update: Update, text: str, rows: List[List[InlineKeyboardButton]
 
 async def _no_service(update: Update) -> None:
     await _show(update, "Showing games needs a The Odds API key (free at the-odds-api.com). "
-                        "Add THE_ODDS_API_KEY to the bot's .env and restart it.", [])
+                        "Run the setup script on the server again to add it, or add THE_ODDS_API_KEY "
+                        "to the bot's .env and restart it.", [])
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

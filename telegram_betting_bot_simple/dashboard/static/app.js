@@ -31,12 +31,100 @@ function toast(text) {
 async function api(path, options = {}) {
   const response = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
   if (response.status === 401) {
-    location.reload(); // the browser asks for the password again
-    throw new Error("Login required");
+    showSignIn();
+    throw Object.assign(new Error("Sign in to see games and odds"), { signIn: true });
   }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.detail || `Request failed (${response.status})`);
   return body;
+}
+
+// --- modals (in place of the browser's own pop-ups) ----------------------------------
+
+function openModal(html, { dismissible = true } = {}) {
+  closeModal();
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  if (dismissible) backdrop.dataset.dismissible = "1";
+  backdrop.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
+  document.body.appendChild(backdrop);
+  document.body.classList.add("modal-open");
+  backdrop.querySelector("input, textarea, button")?.focus();
+  return backdrop.firstElementChild;
+}
+
+function closeModal() {
+  document.querySelector(".modal-backdrop")?.remove();
+  document.body.classList.remove("modal-open");
+}
+
+function showSignIn() {
+  if ($("#sign-in")) return; // already showing
+  openModal(`
+    <form id="sign-in">
+      <div class="brand"><span class="logo">◆</span>SportsBet <b>AI</b></div>
+      <h2>Sign in</h2>
+      <p class="muted">Enter the dashboard password from your server setup.</p>
+      <input type="password" name="password" placeholder="Dashboard password" autocomplete="current-password" required>
+      <div class="form-error" role="alert"></div>
+      <button class="primary wide" type="submit">Sign in</button>
+    </form>`, { dismissible: false });
+}
+
+async function signIn(form) {
+  const button = form.querySelector("button");
+  const error = form.querySelector(".form-error");
+  button.disabled = true;
+  error.textContent = "";
+  try {
+    const response = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: form.elements.password.value }),
+    });
+    if (response.status === 401) throw new Error("Wrong password, try again.");
+    if (!response.ok) throw new Error(`Couldn't sign in (${response.status}). Try again.`);
+    closeModal();
+    loadLeagues();
+    priceSlip();
+  } catch (err) {
+    error.textContent = err instanceof TypeError ? "Couldn't reach the dashboard. Check your connection." : err.message;
+    form.elements.password.select();
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// Copy text: the clipboard API only works on https pages, so fall back to the older copy
+// command, and if that fails too show the text in a modal to copy by hand
+async function copyText(text, what) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`${what} copied`);
+    return;
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.className = "offscreen";
+    document.body.appendChild(area);
+    area.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      copied = false;
+    }
+    area.remove();
+    if (copied) {
+      toast(`${what} copied`);
+      return;
+    }
+  }
+  openModal(`
+    <h2>${esc(what)}</h2>
+    <p class="muted">Select the text and copy it (Ctrl+C, or ⌘C on a Mac).</p>
+    <textarea readonly rows="8">${esc(text)}</textarea>
+    <div class="modal-actions"><button class="primary" data-close>Done</button></div>`).querySelector("textarea").select();
 }
 
 // --- state (picks and settings survive a reload in this browser) ----------------
@@ -102,8 +190,8 @@ async function loadLeagues() {
   try {
     state.leagues = await api("/api/leagues");
   } catch (error) {
-    $("#games").innerHTML = `<div class="error-box">${esc(error.message)}</div>`;
-    $("#league-title").textContent = "Couldn't load leagues";
+    $("#games").innerHTML = error.signIn ? "" : `<div class="error-box">${esc(error.message)}</div>`;
+    $("#league-title").textContent = error.signIn ? "" : "Couldn't load leagues";
     return;
   }
   const all = state.leagues.flatMap((group) => group.leagues);
@@ -141,7 +229,7 @@ async function loadGames(refresh = false) {
     renderQuota(data.quota);
     if (refresh) toast(data.odds_as_of === before ? "Odds are fresh (less than 5 minutes old)" : `Odds updated ${data.odds_as_of}`);
   } catch (error) {
-    $("#games").innerHTML = `<div class="error-box">${esc(error.message)}</div>`;
+    if (!error.signIn) $("#games").innerHTML = `<div class="error-box">${esc(error.message)}</div>`;
   }
 }
 
@@ -233,7 +321,8 @@ async function toggleDetails(id) {
     try {
       state.details[id] = await api(`/api/game?league=${encodeURIComponent(state.league)}&id=${encodeURIComponent(id)}`);
     } catch (error) {
-      state.details[id] = { error: error.message };
+      if (error.signIn) state.open.delete(id);
+      else state.details[id] = { error: error.message };
     }
     renderGames();
   }
@@ -384,7 +473,7 @@ function priceSlip() {
       }
       state.slip = result;
     } catch (error) {
-      state.slip = { error: error.message };
+      state.slip = error.signIn ? null : { error: error.message };
     }
     renderSlip();
   }, 150);
@@ -518,12 +607,31 @@ document.addEventListener("click", (event) => {
     priceSlip();
   } else if (target.id === "copy-slip") {
     const text = slipText();
-    if (text) navigator.clipboard?.writeText(text).then(() => toast("Slip copied"), () => toast("Couldn't copy"));
+    if (text) copyText(text, "Bet slip");
   } else if (target.id === "refresh") {
     if (state.league) loadGames(true);
   } else if (target.id === "slip-fab") {
     document.body.classList.toggle("slip-open");
+  } else if (target.id === "sign-out") {
+    fetch("/api/logout", { method: "POST" }).finally(() => location.reload());
+  } else if (target.dataset.close != null) {
+    closeModal();
   }
+});
+
+document.addEventListener("submit", (event) => {
+  if (event.target.id !== "sign-in") return;
+  event.preventDefault();
+  signIn(event.target);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && $('.modal-backdrop[data-dismissible="1"]')) closeModal();
+});
+
+// Clicking outside a modal closes it, except the sign-in form
+document.addEventListener("mousedown", (event) => {
+  if (event.target.matches('.modal-backdrop[data-dismissible="1"]')) closeModal();
 });
 
 document.addEventListener("input", (event) => {

@@ -16,8 +16,9 @@
 #
 # The first run asks for your bot token, chat ID, Odds API key and a dashboard
 # password and stores them in /opt/bettingbot/app/.env (readable only by root
-# and the bot). Run it again any
-# time to pull the latest code and restart. Overrides: BRANCH=..., REPO_URL=...
+# and the bot). Run it again any time to pull the latest code and restart; it
+# keeps your settings and only asks for ones that are missing.
+# Overrides: BRANCH=..., REPO_URL=...
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/n0vapanel/betting.git}"
@@ -103,18 +104,21 @@ main() {
   else
     ask TELEGRAM_BOT_TOKEN "Telegram bot token (hidden while you paste)" '^[0-9]{6,12}:[A-Za-z0-9_-]{30,}$' secret
     ask TELEGRAM_CHANNEL_ID "Chat ID for bot notifications" '^-?[0-9]{5,20}$'
-    echo "  Games and odds come from The Odds API (free key at the-odds-api.com)."
-    echo "  Press Enter to skip for now and add it to $ENV_FILE later."
-    ask THE_ODDS_API_KEY "The Odds API key" '^[A-Za-z0-9_-]*$'
     ( umask 077
       cat > "$ENV_FILE" <<EOF
 TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
 TELEGRAM_CHANNEL_ID=$TELEGRAM_CHANNEL_ID
-THE_ODDS_API_KEY=$THE_ODDS_API_KEY
 # Timezone for game start times (IANA name, e.g. America/Chicago or Europe/London)
 TIMEZONE=America/New_York
 EOF
     )
+  fi
+  # The bot and dashboard can't show games without it, so it's asked for again if an earlier run left it out
+  if ! grep -qE '^THE_ODDS_API_KEY=[A-Za-z0-9_-]+' "$ENV_FILE"; then
+    echo "  Games and odds come from The Odds API (free key at the-odds-api.com)."
+    ask THE_ODDS_API_KEY "The Odds API key" '^[A-Za-z0-9_-]{16,64}$'
+    sed -i '/^THE_ODDS_API_KEY=/d' "$ENV_FILE"
+    echo "THE_ODDS_API_KEY=$THE_ODDS_API_KEY" >> "$ENV_FILE"
   fi
   # The dashboard's settings (added to older installs too)
   local generated=""
@@ -163,7 +167,7 @@ EOF
 
 Done.
   Telegram: open your bot and send /start.
-  Dashboard: http://${address:-YOUR-SERVER-IP}:$port  (any username; the dashboard password)
+  Dashboard: http://${address:-YOUR-SERVER-IP}:$port  (sign in with the dashboard password)
 EOF
   if [ -n "$generated" ]; then
     echo "  Your dashboard password is: $generated  (it's also in $ENV_FILE)"
