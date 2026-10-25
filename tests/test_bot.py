@@ -12,7 +12,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from telegram.ext import Application, CallbackQueryHandler
+from telegram import User
+from telegram.ext import Application, CallbackQueryHandler, ExtBot, PicklePersistence
 
 from telegram_betting_bot_simple.bot import handlers
 from telegram_betting_bot_simple.bot.handlers import (
@@ -28,6 +29,7 @@ from telegram_betting_bot_simple.config import Config
 from telegram_betting_bot_simple.dashboard.service import DashboardService
 from telegram_betting_bot_simple.data.leagues import MAX_LEAGUES, pick_leagues
 from telegram_betting_bot_simple.engine.tier_classifier import TierClassifier
+from telegram_betting_bot_simple.main import build_application
 
 def test_session_manager_reuse() -> None:
     mgr = SessionManager()
@@ -111,6 +113,36 @@ def test_setup_handlers_shares_the_dashboard_service() -> None:
     no_key = Application.builder().token(config.telegram_token).build()
     setup_handlers(no_key, Config(TELEGRAM_BOT_TOKEN="123456:test"))
     assert no_key.bot_data["service"] is None
+
+def test_a_restart_on_the_server_keeps_the_games_service(tmp_path, monkeypatch) -> None:
+    # The server saves users' state between restarts. A state file from an earlier version also
+    # holds bot_data, which used to replace the live games service on startup ("needs a key")
+    async def get_me(self, *args, **kwargs):  # no network
+        return User(id=123456, first_name="Test bot", is_bot=True)
+
+    async def save_old_state():
+        # How the earlier version ran: every kind of data saved, including bot_data
+        old = Application.builder().token("123456:test").persistence(
+            PicklePersistence(str(tmp_path / "bot_state.pickle"))).build()
+        await old.initialize()
+        old.user_data[42]["mode"] = "multi"
+        old.mark_data_for_update_persistence(user_ids=42)
+        await old.shutdown()
+
+    async def restart(application):
+        await application.initialize()
+        try:
+            return application.bot_data["service"], application.user_data[42].get("mode")
+        finally:
+            await application.shutdown()
+
+    monkeypatch.setattr(ExtBot, "get_me", get_me)
+    asyncio.run(save_old_state())
+    config = Config(TELEGRAM_BOT_TOKEN="123456:test", THE_ODDS_API_KEY="odds", STATE_DIRECTORY=str(tmp_path))
+    for _ in range(2):  # the old state file, then the one this version saves
+        service, mode = asyncio.run(restart(build_application(config)))
+        assert isinstance(service, DashboardService)
+        assert mode == "multi"  # each user's mode and slip still come back
 
 def test_multi_flow_builds_a_slip_priced_at_one_bookmaker(service) -> None:
     application = Application.builder().token("123456:test").build()
