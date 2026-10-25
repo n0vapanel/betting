@@ -202,6 +202,49 @@ class EspnClient:
                     }
         return None
 
+    def game_result(self, league: str, event_id: str) -> Dict[str, Any]:
+        """How a game stands: {"state": "final", "home": pts, "away": pts}, {"state": "void"} if it
+        was postponed or cancelled, or {"state": "pending"} while it hasn't finished."""
+        competition = (self.summary(league, event_id).get("header", {}).get("competitions") or [{}])[0]
+        status = (competition.get("status") or {}).get("type") or {}
+        name = status.get("name", "")
+        if "POSTPONED" in name or "CANCELED" in name or "CANCELLED" in name or "FORFEIT" in name:
+            return {"state": "void", "status": name}
+        if not status.get("completed"):
+            return {"state": "pending", "status": name}
+        sides = {c.get("homeAway"): c for c in competition.get("competitors", [])}
+        try:
+            return {"state": "final", "home": int(sides["home"]["score"]), "away": int(sides["away"]["score"])}
+        except (KeyError, TypeError, ValueError):
+            return {"state": "pending", "status": name}
+
+    def box_score(self, league: str, event_id: str) -> Dict[str, Dict[str, Any]]:
+        """Each player's stat line in a basketball game, keyed by ESPN athlete id."""
+        lines: Dict[str, Dict[str, Any]] = {}
+        for team in self.summary(league, event_id).get("boxscore", {}).get("players", []):
+            for group in team.get("statistics", []):
+                labels = group.get("labels") or group.get("names") or []
+                for entry in group.get("athletes", []):
+                    athlete = entry.get("athlete") or {}
+                    values = dict(zip(labels, entry.get("stats") or []))
+                    played = bool(entry.get("stats")) and not entry.get("didNotPlay")
+                    line = _basketball_averages({**values, "GP": 1}) if played else {}
+                    lines[str(athlete.get("id"))] = {**line, "name": athlete.get("displayName"), "dnp": not played}
+        return lines
+
+    def closing_line(self, league: str, event_id: str) -> Optional[Dict[str, Any]]:
+        """The bookmaker line ESPN shows for a game (its last one once the game has started)."""
+        for pick in self.summary(league, event_id).get("pickcenter") or []:
+            home, away = pick.get("homeTeamOdds") or {}, pick.get("awayTeamOdds") or {}
+            return {
+                "provider": (pick.get("provider") or {}).get("name"),
+                "home_spread": pick.get("spread"),  # from the home team's side, e.g. +4.5
+                "total": pick.get("overUnder"),
+                "home_ml": home.get("moneyLine"),
+                "away_ml": away.get("moneyLine"),
+            }
+        return None
+
     def played_on(self, league: str, day: datetime.date) -> set:
         """ESPN ids of the teams that played on ``day`` (for back-to-back detection)."""
         try:

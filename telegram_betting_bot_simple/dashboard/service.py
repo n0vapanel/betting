@@ -19,7 +19,8 @@ from ..data.cache import TTLCache
 from ..data.espn_client import ESPN_DAY_TZ, LEAGUES as ESPN_LEAGUES, OUT_STATUSES, EspnClient
 from ..data.leagues import SPORTS, pick_leagues
 from ..data.odds_service import OddsService, summarize_markets
-from ..engine import nba_model
+from ..data.store import Store
+from ..engine import bets, calls, nba_model
 from ..engine.odds_math import decimal_to_american, format_american
 from ..engine.slip import Leg, evaluate_slip
 
@@ -30,6 +31,10 @@ AI_LEAGUES = {"basketball_nba"}
 
 class NotFound(Exception):
     pass
+
+
+class CallRejected(Exception):
+    """A call that can't be saved (game started, no prediction yet...); the message says why."""
 
 
 def _parse_time(value: str) -> datetime.datetime:
@@ -56,6 +61,7 @@ class DashboardService:
         tz: ZoneInfo,
         params: nba_model.Params = nba_model.Params(),
         workers: int = 8,
+        store: Optional[Store] = None,
     ) -> None:
         self.odds = odds
         self.espn = espn
@@ -63,6 +69,8 @@ class DashboardService:
         self.params = params
         self.cache = TTLCache()
         self.pool = ThreadPoolExecutor(max_workers=workers)
+        # People's predictions and the AI's track record; None turns those features off
+        self.store = store
 
     # --- menus -----------------------------------------------------------
 
@@ -95,7 +103,9 @@ class DashboardService:
         def load() -> Dict[str, Any]:
             context = self._league_context(league)
             games = self.odds.league_games(league)
-            cards = list(self.pool.map(lambda game: self._card(league, game, context)[0], games))
+            results = list(self.pool.map(lambda game: self._card(league, game, context), games))
+            cards = [card for card, _ in results]
+            self._log_ai_predictions(league, results)
             return {
                 "league": league,
                 "title": next((s["title"] for s in self.odds.sports() if s.get("key") == league), league),
@@ -314,6 +324,215 @@ class DashboardService:
             return self.espn.player_seasons(league, athlete_id)
         except Exception:
             return []
+
+    # --- people's predictions ("calls") and the AI's track record ------------------
+
+    def _detail(self, league: str, event_id: str) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Dict[str, Any]]]:
+        """A game's card, the prediction behind it, and its players' projections by player id."""
+        game = next((g for g in self.odds.league_games(league) if g["id"] == event_id), None)
+        if game is None:
+            raise NotFound(f"No game {event_id} in {league}")
+        context = self._league_context(league)
+        card, info = self._card(league, game, context)
+        players: Dict[str, Dict[str, Any]] = {}
+        if league in AI_LEAGUES and info.get("prediction") and info.get("match") and context:
+            for side, rows in self._players(league, info, context).items():
+                for row in rows:
+                    if not row.get("out"):
+                        players[str(row["id"])] = {**row, "side": side}
+        return card, info, players
+
+    def judge(self, league: str, event_id: str, call: Dict[str, Any]) -> Dict[str, Any]:
+        """What the AI thinks of a call, part by part (shown live while someone makes it)."""
+        card, info, players = self._detail(league, event_id)
+        prediction = info.get("prediction")
+        if prediction is None:
+            raise CallRejected("Calls are open for NBA games for now: the AI has no prediction for this game.")
+        return calls.judge_call(prediction, call, card["home"], card["away"], players)
+
+    def save_call(self, player: str, name: str, league: str, event_id: str, call: Dict[str, Any]) -> Dict[str, Any]:
+        """Save someone's call on a game (replacing their earlier one) with the AI's view of it."""
+        if self.store is None:
+            raise CallRejected("Saving calls needs the server's state folder.")
+        card, info, players = self._detail(league, event_id)
+        if card["live"]:
+            raise CallRejected("This game has started: calls close at tip-off.")
+        prediction = info.get("prediction")
+        if prediction is None:
+            raise CallRejected("Calls are open for NBA games for now: the AI has no prediction for this game.")
+        verdict = calls.judge_call(prediction, call, card["home"], card["away"], players)
+        call_id = self.store.save_prediction({
+            "player": player, "name": name, "league": league, "event_id": event_id,
+            "espn_id": (info.get("match") or {}).get("event_id"),
+            "home": card["home"], "away": card["away"], "start": card["start"], "call": call, "ai": verdict,
+        })
+        return {"id": call_id, "ai": verdict}
+
+    def my_calls(self, player: str) -> List[Dict[str, Any]]:
+        if self.store is None:
+            return []
+        self.grade_due()
+        return self.store.predictions(player=player, limit=200)
+
+    def delete_call(self, player: str, call_id: int) -> bool:
+        return bool(self.store and self.store.delete_prediction(player, call_id))
+
+    def leaderboard(self) -> List[Dict[str, Any]]:
+        if self.store is None:
+            return []
+        self.grade_due()
+        return self.store.leaderboard()
+
+    def _log_ai_predictions(self, league: str, results: List[Tuple[Dict[str, Any], Dict[str, Any]]]) -> None:
+        """Keep the AI's latest pre-game prediction for every game, for its track record."""
+        if self.store is None or league not in AI_LEAGUES:
+            return
+        for card, info in results:
+            prediction = info.get("prediction")
+            if card["live"] or prediction is None:
+                continue
+            market = prediction.sources.get("market", {})
+            try:
+                self.store.log_ai_prediction({
+                    "league": league, "event_id": card["id"], "espn_id": (info.get("match") or {}).get("event_id"),
+                    "home": card["home"], "away": card["away"], "start": card["start"],
+                    "payload": {
+                        "model": MODEL_VERSION,
+                        "home_win": prediction.home_win_prob,
+                        "margin": prediction.margin,
+                        "total": prediction.total,
+                        "market_home_win": market.get("home_win_prob"),
+                        "market_margin": market.get("margin"),
+                        "market_total": market.get("total"),
+                        "espn_home_win": info.get("espn_home_win"),
+                    },
+                })
+            except Exception:
+                logging.exception("Couldn't log the AI prediction for %s", card["id"])
+
+    def _final(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """A finished game's score from ESPN (state final, void or pending)."""
+        espn_id = row.get("espn_id")
+        if not espn_id and row["league"] in ESPN_LEAGUES:
+            match = self.espn.find_game(row["league"], row["home"], row["away"], row["start"])
+            espn_id = match["event_id"] if match else None
+        if not espn_id:
+            return {"state": "pending"}
+        return {**self.espn.game_result(row["league"], espn_id), "espn_id": espn_id}
+
+    def grade_due(self) -> int:
+        """Score calls and AI predictions on games that have finished; returns how many were graded.
+
+        Runs in whichever process gets to it first (a short lease stops the
+        bot and the dashboard grading the same games at once).
+        """
+        if self.store is None or not self.store.try_lease("grading", 120):
+            return 0
+        now = datetime.datetime.now(datetime.timezone.utc)
+        # NBA games last about 2h15m: nothing that started more recently can be over
+        cutoff = (now - datetime.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        give_up = (now - datetime.timedelta(days=4)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        graded = 0
+        for row in self.store.predictions(status="pending", started_before=cutoff):
+            try:
+                final = self._final(row)
+                if final["state"] == "pending":
+                    if row["start"] < give_up:
+                        self.store.grade_prediction(row["id"], "void", {"reason": "no result"}, None, None)
+                    continue
+                if final["state"] == "void":
+                    self.store.grade_prediction(row["id"], "void", final, None, None)
+                    continue
+                box = self.espn.box_score(row["league"], final["espn_id"]) if row["call"].get("props") else None
+                result = calls.grade_call(row["call"], row["ai"], final, box)
+                self.store.grade_prediction(row["id"], "graded", result, result["points"], result["ai_points"])
+                graded += 1
+            except Exception:
+                logging.exception("Couldn't grade call %s", row["id"])
+        for row in self.store.ai_predictions(status="pending", started_before=cutoff):
+            try:
+                final = self._final(row)
+                if final["state"] == "pending":
+                    if row["start"] < give_up:
+                        self.store.grade_ai_prediction(row["league"], row["event_id"], "void", {"reason": "no result"})
+                    continue
+                if final["state"] == "final":
+                    try:
+                        final["closing"] = self.espn.closing_line(row["league"], final["espn_id"])
+                    except Exception:
+                        final["closing"] = None
+                self.store.grade_ai_prediction(
+                    row["league"], row["event_id"], "graded" if final["state"] == "final" else "void", final
+                )
+                graded += 1
+            except Exception:
+                logging.exception("Couldn't grade the AI prediction for %s", row["event_id"])
+        return graded
+
+    def track_record(self, league: str = "basketball_nba") -> Dict[str, Any]:
+        """How the AI's pre-game predictions did: accuracy, Brier score next to the market's,
+        record against the closing spread and total, and calibration."""
+        if self.store is None:
+            return {"games": 0}
+        self.grade_due()
+        rows = self.store.ai_predictions(league=league, status="graded")
+        return calls.track_record(rows)
+
+    # --- AI-built bets: safe, risky, crazy --------------------------------------
+
+    def ai_bets(self, league: str, source: str = "all", player: Optional[str] = None) -> Dict[str, Any]:
+        """Bets at three risk levels from the league's upcoming games, or only from someone's calls."""
+        board = self.games(league)
+        allowed = self._legs_from_calls(league, player, board) if source == "mine" and player else None
+        candidates = []
+        for card in board["games"]:
+            if card["live"]:
+                continue
+            for market, sides in card["markets"].items():
+                for side, offer in sides.items():
+                    if offer["ai"] is None or (allowed is not None and (card["id"], market, side) not in allowed):
+                        continue
+                    prices = self._book_prices(league, card["id"], market, side, offer["point"])
+                    if prices:
+                        candidates.append(bets.Candidate(
+                            event_id=card["id"], game=f"{card['away']} @ {card['home']}", market=market, side=side,
+                            point=offer["point"], label=offer["label"], probability=offer["ai"], fair=offer["fair"],
+                            prices=prices,
+                        ))
+        if league in AI_LEAGUES:
+            note = ("Built from the AI's probabilities and the best price at one bookmaker per bet. "
+                    "Most multis lose money over time: the bookmaker's edge grows with every leg.")
+        else:
+            note = ("No AI model for this league yet, so these use the bookmakers' own chances: "
+                    "expect slightly negative value on all of them.")
+        if allowed is not None and not allowed:
+            note = "You have no open calls in this league yet: make some in Games, then come back."
+        return {"league": league, "source": source, "note": note, "tiers": bets.build_all(candidates)}
+
+    def _legs_from_calls(self, league: str, player: str, board: Dict[str, Any]) -> set:
+        """The bets someone's open calls imply: their winner, and from their score the side of the
+        bookmakers' spread and total they're on."""
+        if self.store is None:
+            return set()
+        cards = {card["id"]: card for card in board["games"]}
+        legs = set()
+        for row in self.store.predictions(player=player, status="pending"):
+            card = cards.get(row["event_id"])
+            if row["league"] != league or card is None:
+                continue
+            call = row["call"]
+            if call.get("winner"):
+                legs.add((card["id"], "h2h", call["winner"]))
+            if call.get("home_score") is not None:
+                margin = call["home_score"] - call["away_score"]
+                total = call["home_score"] + call["away_score"]
+                spread = card["markets"].get("spreads", {}).get("home")
+                if spread and spread["point"] is not None and margin + spread["point"] != 0:
+                    legs.add((card["id"], "spreads", "home" if margin + spread["point"] > 0 else "away"))
+                line = (card["markets"].get("totals", {}).get("over") or {}).get("point")
+                if line is not None and total != line:
+                    legs.add((card["id"], "totals", "over" if total > line else "under"))
+        return legs
 
     # --- bet slip ------------------------------------------------------------
 

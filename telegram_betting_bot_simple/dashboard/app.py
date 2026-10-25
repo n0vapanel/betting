@@ -19,9 +19,9 @@ from typing import Any, Dict, List, Literal, Optional
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from .service import DashboardService, NotFound
+from .service import CallRejected, DashboardService, NotFound
 
 STATIC = Path(__file__).parent / "static"
 LEAGUE_KEY = r"^[a-z0-9_]{2,64}$"
@@ -45,6 +45,49 @@ class SlipRequest(BaseModel):
 
 class Login(BaseModel):
     password: str = Field(max_length=256)
+
+
+class PropCall(BaseModel):
+    player_id: str = Field(pattern=r"^[0-9]{1,12}$")
+    stat: Literal["pts", "reb", "ast", "fg3m", "stl", "blk", "tov", "pra"]
+    line: float = Field(ge=0, le=150)
+    side: Literal["over", "under"]
+
+
+class Call(BaseModel):
+    """Someone's prediction for a game: a winner with a confidence, a score and/or player lines."""
+
+    winner: Optional[Literal["home", "away"]] = None
+    confidence: float = Field(0.6, ge=0.5, le=1.0)
+    home_score: Optional[int] = Field(None, ge=40, le=250)
+    away_score: Optional[int] = Field(None, ge=40, le=250)
+    props: List[PropCall] = Field(default_factory=list, max_length=8)
+
+    @model_validator(mode="after")
+    def consistent(self) -> "Call":
+        if (self.home_score is None) != (self.away_score is None):
+            raise ValueError("Give both teams' scores, or neither")
+        if self.home_score is not None:
+            if self.home_score == self.away_score:
+                raise ValueError("NBA games can't end in a tie")
+            winner = "home" if self.home_score > self.away_score else "away"
+            if self.winner and self.winner != winner:
+                raise ValueError("Your score has the other team winning")
+            self.winner = winner
+        if not self.winner and not self.props:
+            raise ValueError("Pick a winner, a score or a player line")
+        return self
+
+
+class JudgeRequest(BaseModel):
+    league: str = Field(pattern=LEAGUE_KEY)
+    id: str = Field(max_length=64)
+    call: Call
+
+
+class CallRequest(JudgeRequest):
+    player: str = Field(pattern=r"^[A-Za-z0-9-]{8,64}$")  # a random id this browser keeps
+    name: str = Field(pattern=r"^[\w .'-]{1,24}$")
 
 
 # The browser re-checks the page and its files on every load (a quick 304 when unchanged),
@@ -148,6 +191,57 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
             return svc.price_slip([p.model_dump() for p in body.picks], body.mode, body.stake, body.stakes)
         except RuntimeError as exc:
             raise HTTPException(502, str(exc)) from None
+
+    def calls_errors(action: Any) -> Any:
+        try:
+            return action()
+        except NotFound as exc:
+            raise HTTPException(404, str(exc)) from None
+        except CallRejected as exc:
+            raise HTTPException(400, str(exc)) from None
+        except RuntimeError as exc:
+            raise HTTPException(502, str(exc)) from None
+
+    @app.post("/api/judge", dependencies=signed_in)
+    def judge(body: JudgeRequest, svc: DashboardService = Depends(get_service)) -> Dict[str, Any]:
+        """The AI's view of a call while it's being made (nothing is saved)."""
+        return calls_errors(lambda: svc.judge(body.league, body.id, body.call.model_dump()))
+
+    @app.post("/api/calls", dependencies=signed_in)
+    def save_call(body: CallRequest, svc: DashboardService = Depends(get_service)) -> Dict[str, Any]:
+        return calls_errors(lambda: svc.save_call(
+            f"web:{body.player}", body.name.strip(), body.league, body.id, body.call.model_dump()
+        ))
+
+    @app.get("/api/calls", dependencies=signed_in)
+    def my_calls(player: str = Query(pattern=r"^[A-Za-z0-9-]{8,64}$"),
+                 svc: DashboardService = Depends(get_service)) -> List[Dict[str, Any]]:
+        return calls_errors(lambda: svc.my_calls(f"web:{player}"))
+
+    @app.delete("/api/calls/{call_id}", dependencies=signed_in)
+    def delete_call(call_id: int, player: str = Query(pattern=r"^[A-Za-z0-9-]{8,64}$"),
+                    svc: DashboardService = Depends(get_service)) -> Dict[str, bool]:
+        if not svc.delete_call(f"web:{player}", call_id):
+            raise HTTPException(404, "No pending call with that id")
+        return {"ok": True}
+
+    @app.get("/api/ai-bets", dependencies=signed_in)
+    def ai_bets(
+        league: str = Query(pattern=LEAGUE_KEY),
+        source: Literal["all", "mine"] = "all",
+        player: Optional[str] = Query(None, pattern=r"^[A-Za-z0-9-]{8,64}$"),
+        svc: DashboardService = Depends(get_service),
+    ) -> Dict[str, Any]:
+        return calls_errors(lambda: svc.ai_bets(league, source, f"web:{player}" if player else None))
+
+    @app.get("/api/leaderboard", dependencies=signed_in)
+    def leaderboard(svc: DashboardService = Depends(get_service)) -> List[Dict[str, Any]]:
+        return calls_errors(svc.leaderboard)
+
+    @app.get("/api/track-record", dependencies=signed_in)
+    def track_record(league: str = Query("basketball_nba", pattern=LEAGUE_KEY),
+                     svc: DashboardService = Depends(get_service)) -> Dict[str, Any]:
+        return calls_errors(lambda: svc.track_record(league))
 
     # Page, stylesheet and script only; no data is served from here
     app.mount("/static", Static(directory=STATIC), name="static")

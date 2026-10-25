@@ -87,3 +87,37 @@ def test_without_an_odds_key_the_api_says_how_to_fix_it() -> None:
     client.post("/api/login", json={"password": "s3cret"})
     response = client.get("/api/leagues")
     assert response.status_code == 503 and "THE_ODDS_API_KEY" in response.json()["detail"]
+
+def test_calls_api_judges_saves_and_validates(client, service, tmp_path) -> None:
+    from telegram_betting_bot_simple.data.store import Store
+    service.store = Store(str(tmp_path / "betting.db"))
+    game = {"league": "basketball_nba", "id": "g1"}
+    judged = client.post("/api/judge", json={**game, "call": {"winner": "away", "confidence": 0.7}}).json()
+    assert judged["winner"]["team"] == "Los Angeles Clippers" and "disagrees" in judged["verdict"]
+
+    bad = [
+        {"home_score": 110, "away_score": 110},  # a tie
+        {"winner": "away", "home_score": 115, "away_score": 100},  # the score has the home team winning
+        {"home_score": 115},  # only one score
+        {"confidence": 0.8},  # nothing predicted
+        {"winner": "home", "confidence": 0.3},  # below 50%: pick the other team instead
+    ]
+    for call in bad:
+        assert client.post("/api/judge", json={**game, "call": call}).status_code == 422, call
+
+    me = {"player": "abcdef123456", "name": "Aidan"}
+    saved = client.post("/api/calls", json={**game, **me, "call": {"home_score": 118, "away_score": 104}})
+    assert saved.status_code == 200 and saved.json()["ai"]["winner"]["side"] == "home"
+    mine = client.get("/api/calls", params={"player": me["player"]}).json()
+    assert len(mine) == 1 and mine[0]["call"]["winner"] == "home"  # the winner follows from the score
+    assert client.post("/api/calls", json={**game, **me, "name": "<script>", "call": {"winner": "home"}}).status_code == 422
+    assert client.delete(f"/api/calls/{mine[0]['id']}", params={"player": "someone-else"}).status_code == 404
+    assert client.delete(f"/api/calls/{mine[0]['id']}", params={"player": me["player"]}).json() == {"ok": True}
+
+def test_ai_bets_leaderboard_and_record_endpoints(client) -> None:
+    bets = client.get("/api/ai-bets", params={"league": "basketball_nba"}).json()
+    assert set(bets["tiers"]) == {"safe", "risky", "crazy"}
+    assert bets["tiers"]["safe"]["bets"][0]["legs"][0]["label"] == "New York Knicks to win"
+    assert client.get("/api/ai-bets", params={"league": "basketball_nba", "source": "yolo"}).status_code == 422
+    assert client.get("/api/leaderboard").json() == []
+    assert client.get("/api/track-record").json()["games"] == 0

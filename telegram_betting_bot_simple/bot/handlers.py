@@ -5,7 +5,10 @@ Flow: /start → Single or Multi → sport → league → games → a game's car
 injuries and projected top players) with one button per pick. In Single
 mode a pick shows that bet's payout; in Multi mode picks go on a slip
 (marked ✓) whose combined odds come from the best single bookmaker.
-Each screen edits the same message.
+On NBA games 🔮 lets anyone make a call (winner and how sure they are),
+scored after the game next to the AI's score; /start also leads to the
+AI's Safe/Risky/Crazy bets, your calls and the leaderboard. Each screen
+edits the same message.
 
 Buttons carry what they need (league, game id prefix, pick), so menus
 keep working after a restart, and prices are always re-read from the
@@ -250,15 +253,21 @@ async def _no_service(update: Update) -> None:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Ask for Single or Multi."""
+    """The home screen: browse games (Single or Multi), AI bets, your calls and the leaderboard."""
     rows = [[InlineKeyboardButton("🎯 Single game", callback_data="mode:single"),
-             InlineKeyboardButton("🧩 Multi (parlay)", callback_data="mode:multi")]]
+             InlineKeyboardButton("🧩 Multi (parlay)", callback_data="mode:multi")],
+            [InlineKeyboardButton("🎲 AI bets: Safe · Risky · Crazy", callback_data="bets")],
+            [InlineKeyboardButton("🔮 My calls", callback_data="mycalls"),
+             InlineKeyboardButton("🏆 Leaderboard", callback_data="board")]]
     if _picks(context):
         rows.append([InlineKeyboardButton(f"🧾 Bet slip ({len(_picks(context))})", callback_data="slip")])
     await _show(update, (
-        "<b>SportsBet AI</b>\nHow do you want to play?\n\n"
+        "<b>SportsBet AI</b>\nWhat do you want to do?\n\n"
         "🎯 <b>Single</b>: one game at a time, with the AI's prediction and each pick's payout.\n"
-        "🧩 <b>Multi</b>: combine picks from different games into one parlay."
+        "🧩 <b>Multi</b>: combine picks from different games into one parlay.\n"
+        "🎲 <b>AI bets</b>: bets the AI builds at three risk levels.\n"
+        "🔮 <b>Calls</b>: open an NBA game and make your own call; after the game you and the AI are "
+        "both scored, so you can see who reads the game better."
     ), rows)
 
 
@@ -393,6 +402,8 @@ async def show_game(update: Update, context: ContextTypes.DEFAULT_TYPE, league: 
                                             callback_data=pick_data(league, card["id"], market, side)))
         if row:
             rows.append(row)
+    if card.get("prediction") and not card["live"]:
+        rows.append([InlineKeyboardButton("🔮 Make your call", callback_data=f"call:{league}:{card['id'][:GAME_ID_CHARS]}")])
     rows.append(back)
     await _show(update, game_card_text(card, board.get("odds_as_of")), rows)
 
@@ -495,15 +506,220 @@ async def clear_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await show_slip(update, context)
 
 
+# --- calls: predict a winner and get scored against the AI -------------------------
+
+CONFIDENCES = (55, 60, 70, 80, 90, 100)
+
+
+def _points(probability: float) -> float:
+    """FiveThirtyEight forecasting-game points for the chance given to the team that won."""
+    return 25 - 100 * (1 - probability) ** 2
+
+
+def _player(update: Update) -> tuple:
+    user = update.effective_user
+    name = (user.first_name or user.username or "Player")[:24] if user else "Player"
+    return f"tg:{user.id if user else 0}", name
+
+
+async def _find_card(service: Any, league: str, game_id: str) -> Optional[Dict[str, Any]]:
+    board = await asyncio.to_thread(service.games, league)
+    return next((g for g in board["games"] if g["id"].startswith(game_id)), None)
+
+
+async def call_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Pick the winner of a game."""
+    query = update.callback_query
+    await query.answer()
+    _, league, game_id = query.data.split(":", 2)
+    service = context.application.bot_data.get("service")
+    if service is None:
+        await _no_service(update)
+        return
+    card = await _find_card(service, league, game_id)
+    back = [InlineKeyboardButton("« Game", callback_data=f"g:{league}:{game_id}")]
+    if not card or not card.get("prediction") or card["live"]:
+        await _show(update, "Calls on this game are closed (it has started, or the AI has no prediction).", [back])
+        return
+    p = card["prediction"]
+    esc = html.escape
+    text = (f"🔮 <b>Your call: {esc(card['away'])} @ {esc(card['home'])}</b>\n{esc(card['when'])}\n\n"
+            f"The AI gives {esc(short_name(card['home'], league))} {pct(p['home_win'])} and "
+            f"{esc(short_name(card['away'], league))} {pct(1 - p['home_win'])}.\n\nWho wins?")
+    rows = [[InlineKeyboardButton(short_name(card["away"], league), callback_data=f"cw:{league}:{game_id}:a"),
+             InlineKeyboardButton(short_name(card["home"], league), callback_data=f"cw:{league}:{game_id}:h")],
+            back]
+    await _show(update, text, rows)
+
+
+async def call_winner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """How sure are you? Each button shows the points it wins or loses."""
+    query = update.callback_query
+    await query.answer()
+    _, league, game_id, side = query.data.split(":", 3)
+    service = context.application.bot_data.get("service")
+    card = await _find_card(service, league, game_id) if service else None
+    back = [InlineKeyboardButton("« Game", callback_data=f"g:{league}:{game_id}")]
+    if not card or not card.get("prediction") or card["live"]:
+        await _show(update, "Calls on this game are closed.", [back])
+        return
+    team = card["home"] if side == "h" else card["away"]
+    ai = card["prediction"]["home_win"] if side == "h" else 1 - card["prediction"]["home_win"]
+    esc = html.escape
+    lines = [f"🔮 <b>{esc(team)} to win</b>", f"The AI gives them {pct(ai)}.", "", "How sure are you?", ""]
+    lines += [f"{c}%: {_points(c / 100):+.1f} if right, {_points(1 - c / 100):+.1f} if wrong" for c in CONFIDENCES]
+    rows = [[InlineKeyboardButton(f"{c}%", callback_data=f"cc:{league}:{game_id}:{side}:{c}") for c in CONFIDENCES[:3]],
+            [InlineKeyboardButton(f"{c}%", callback_data=f"cc:{league}:{game_id}:{side}:{c}") for c in CONFIDENCES[3:]],
+            back]
+    await _show(update, "\n".join(lines), rows)
+
+
+async def call_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Save the call and show the AI's view of it."""
+    query = update.callback_query
+    _, league, game_id, side, confidence = query.data.split(":", 4)
+    service = context.application.bot_data.get("service")
+    card = await _find_card(service, league, game_id) if service else None
+    back = [InlineKeyboardButton("« Games", callback_data=f"league:{league}"),
+            InlineKeyboardButton("🔮 My calls", callback_data="mycalls")]
+    if not card:
+        await query.answer()
+        await _show(update, "That game isn't offered any more.", [back])
+        return
+    player, name = _player(update)
+    call = {"winner": "home" if side == "h" else "away", "confidence": int(confidence) / 100}
+    try:
+        saved = await asyncio.to_thread(service.save_call, player, name, league, card["id"], call)
+    except Exception as exc:
+        await query.answer()
+        await _show(update, f"Couldn't save your call: {html.escape(str(exc))}", [back])
+        return
+    await query.answer("Call saved ✓")
+    team = card["home"] if side == "h" else card["away"]
+    c = call["confidence"]
+    esc = html.escape
+    text = (f"✅ <b>Call saved: {esc(team)} at {confidence}%</b>\n{esc(card['away'])} @ {esc(card['home'])}\n\n"
+            f"{esc(saved['ai'].get('verdict', ''))}\n\n"
+            f"If {esc(short_name(team, league))} win: {_points(c):+.1f} points. If they lose: {_points(1 - c):+.1f}.\n"
+            "It's scored after the game, next to the AI's score on the same game. "
+            "Tap the game's 🔮 again before tip-off to change it.")
+    await _show(update, text, [back])
+
+
+async def my_calls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query:
+        await query.answer()
+    service = context.application.bot_data.get("service")
+    back = [InlineKeyboardButton("🏆 Leaderboard", callback_data="board"), InlineKeyboardButton("« Home", callback_data="home")]
+    if service is None:
+        await _no_service(update)
+        return
+    player, _ = _player(update)
+    rows = await asyncio.to_thread(service.my_calls, player)
+    if not rows:
+        await _show(update, "🔮 No calls yet. Open an NBA game and tap <b>🔮 Make your call</b>.", [back])
+        return
+    esc = html.escape
+    graded = [r for r in rows if r["status"] == "graded"]
+    you = sum(r["user_points"] for r in graded)
+    ai = sum(r["ai_points"] for r in graded)
+    lines = ["🔮 <b>My calls</b>", f"Graded: {len(graded)} · you {you:+.1f} pts · the AI {ai:+.1f} pts on the same games", ""]
+    for r in rows[:12]:
+        call = r["call"]
+        team = r["home"] if call.get("winner") == "home" else r["away"]
+        what = f"{short_name(team, r['league'])} {pct(call.get('confidence'))}" if call.get("winner") else "player lines"
+        if r["status"] == "graded":
+            res = r["result"]
+            status = f"{res['away']}–{res['home']} · you {r['user_points']:+.1f}, AI {r['ai_points']:+.1f}"
+        elif r["status"] == "void":
+            status = "void"
+        else:
+            status = "⏳ pending"
+        lines.append(f"{esc(short_name(r['away'], r['league']))} @ {esc(short_name(r['home'], r['league']))}: "
+                     f"{esc(what)} — {esc(status)}")
+    await _show(update, "\n".join(lines), [back])
+
+
+async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query:
+        await query.answer()
+    service = context.application.bot_data.get("service")
+    back = [InlineKeyboardButton("🔮 My calls", callback_data="mycalls"), InlineKeyboardButton("« Home", callback_data="home")]
+    if service is None:
+        await _no_service(update)
+        return
+    rows = await asyncio.to_thread(service.leaderboard)
+    if not rows:
+        await _show(update, "🏆 No graded calls yet: calls are scored after each game.", [back])
+        return
+    esc = html.escape
+    lines = ["🏆 <b>Leaderboard</b> (points; the AI's points on the same games)", ""]
+    for i, r in enumerate(rows[:15], 1):
+        lines.append(f"{i}. {esc(r['name'])}: <b>{r['points']:+.1f}</b> (AI {r['ai_points']:+.1f}) · {r['calls']} calls, "
+                     f"beat the AI {r['beat_ai']}")
+    await _show(update, "\n".join(lines), [back])
+
+
+# --- AI bets: safe, risky, crazy ----------------------------------------------------------
+
+TIER_ICONS = {"safe": "🛡", "risky": "⚖️", "crazy": "🚀"}
+
+
+def bets_text(data: Dict[str, Any], tier: Optional[str], league_title: str) -> str:
+    esc = html.escape
+    tiers = data["tiers"]
+    lines = [f"🎲 <b>AI bets · {esc(league_title)}</b>", esc(data.get("note", "")), ""]
+    for key in ([tier] if tier else ("safe", "risky", "crazy")):
+        info = tiers[key]
+        lines.append(f"{TIER_ICONS[key]} <b>{esc(info['title'])}</b>: {esc(info['rule'])}")
+        bets_list = info["bets"] if tier else info["bets"][:1]
+        if not bets_list:
+            lines += [f"   {esc(info.get('empty') or 'Nothing fits right now.')}", ""]
+            continue
+        for bet in bets_list:
+            kind = "Single" if len(bet["legs"]) == 1 else f"{len(bet['legs'])}-leg multi"
+            lines.append(f"<b>{kind}</b> at {esc(bet['book'] or '')}: {bet['odds']['american']}")
+            lines += [f"   • {esc(leg['label'])} {leg['odds']['american']} (AI {pct(leg['probability'])})" for leg in bet["legs"]]
+            lines.append(f"   AI chance {pct(bet['probability'])} · $10 returns {money(10 * bet['odds']['decimal'])} · "
+                         f"value {bet['ev'] * 100:+.1f}%")
+        lines.append("")
+    return "\n".join(lines)
+
+
+async def show_bets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    tier = query.data.split(":", 1)[1] if ":" in query.data else None
+    service = context.application.bot_data.get("service")
+    if service is None:
+        await _no_service(update)
+        return
+    league = context.user_data.get("league") or "basketball_nba"
+    try:
+        data = await asyncio.to_thread(service.ai_bets, league)
+        title = next((s["title"] for s in await asyncio.to_thread(service.odds.sports) if s.get("key") == league), league)
+    except Exception:
+        await _show(update, "Couldn't build bets right now. Try again in a minute.",
+                    [[InlineKeyboardButton("« Home", callback_data="home")]])
+        return
+    rows = [[InlineKeyboardButton(f"{TIER_ICONS[key]} {data['tiers'][key]['title']}", callback_data=f"bets:{key}")
+             for key in ("safe", "risky", "crazy")],
+            [InlineKeyboardButton("« Home", callback_data="home")]]
+    await _show(update, bets_text(data, tier, title), rows)
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Provide a list of available commands and brief instructions."""
     help_text = (
         "Available commands:\n"
-        "/start – choose Single or Multi and browse games\n"
+        "/start – browse games, AI bets, your calls and the leaderboard\n"
         "/slip – show your multi bet slip\n"
         "/help – display this help message\n\n"
         "Pick a sport and league, then open a game to see the AI's predicted score, win, spread and "
-        "total chances, injuries and projected top players. In Multi mode, tap picks to build a parlay."
+        "total chances, injuries and projected top players. In Multi mode, tap picks to build a parlay. "
+        "On NBA games, tap 🔮 to make your own call: after the game you and the AI are both scored."
     )
     if update.message:
         await update.message.reply_text(help_text)
@@ -546,6 +762,12 @@ def setup_handlers(application: Application, config: Config) -> None:
     application.add_handler(CallbackQueryHandler(show_slip, pattern=r"^slip$"))
     application.add_handler(CallbackQueryHandler(stake_selected, pattern=r"^stake:\d+$"))
     application.add_handler(CallbackQueryHandler(clear_slip, pattern=r"^clear$"))
+    application.add_handler(CallbackQueryHandler(call_start, pattern=r"^call:[a-z0-9_]+:\w+$"))
+    application.add_handler(CallbackQueryHandler(call_winner, pattern=r"^cw:[a-z0-9_]+:\w+:[ah]$"))
+    application.add_handler(CallbackQueryHandler(call_confirm, pattern=r"^cc:[a-z0-9_]+:\w+:[ah]:(55|60|70|80|90|100)$"))
+    application.add_handler(CallbackQueryHandler(my_calls, pattern=r"^mycalls$"))
+    application.add_handler(CallbackQueryHandler(leaderboard, pattern=r"^board$"))
+    application.add_handler(CallbackQueryHandler(show_bets, pattern=r"^bets(:(safe|risky|crazy))?$"))
     # Any other button comes from an older version of the menu
     application.add_handler(CallbackQueryHandler(expired_menu))
     application.add_handler(CommandHandler("help", help_command))

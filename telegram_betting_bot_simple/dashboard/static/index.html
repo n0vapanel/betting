@@ -4,17 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SportsBet AI</title>
-  <link rel="stylesheet" href="/static/styles.css?v=2">
+  <link rel="stylesheet" href="/static/styles.css?v=3">
 </head>
 <body>
   <header class="topbar">
     <div class="brand"><span class="logo">◆</span>SportsBet <b>AI</b><span class="beta">beta</span></div>
+    <nav class="views" id="views" aria-label="Sections">
+      <button data-view="games">Games</button>
+      <button data-view="bets">AI Bets</button>
+      <button data-view="calls">My Calls</button>
+      <button data-view="leaders">Leaderboard</button>
+      <button data-view="record">AI Record</button>
+    </nav>
     <div class="controls">
-      <div class="seg" id="mode-seg" title="Single picks or one multi (parlay)">
-        <button data-mode="single">Single</button><button data-mode="multi">Multi</button>
-      </div>
       <div class="seg" id="format-seg" title="Odds format">
-        <button data-format="american">American</button><button data-format="decimal">Decimal</button>
+        <button data-format="american">US</button><button data-format="decimal">Dec</button>
       </div>
       <span class="pill" id="quota" title="Requests left this month on The Odds API">Odds API: –</span>
       <button class="link" id="sign-out">Sign out</button>
@@ -23,37 +27,19 @@
 
   <div class="layout">
     <nav class="sidebar" id="sidebar" aria-label="Sports and leagues"></nav>
-
-    <main class="main">
-      <div class="league-head">
-        <div>
-          <h1 id="league-title">Loading…</h1>
-          <div class="sub" id="league-sub"></div>
-        </div>
-        <button class="ghost" id="refresh" title="Fetch new odds (at most every 5 minutes)">↻ Refresh odds</button>
-      </div>
-      <div id="games" class="games"></div>
+    <main class="main" id="main">
+      <section id="view-games" class="view"></section>
+      <section id="view-bets" class="view"></section>
+      <section id="view-calls" class="view"></section>
+      <section id="view-leaders" class="view"></section>
+      <section id="view-record" class="view"></section>
       <footer class="disclaimer">
-        For information and entertainment only. No bets are placed here: picks are priced from bookmakers'
-        published odds, and AI predictions are estimates, not guarantees: our model hasn't been shown to beat
-        the betting market. Gambling involves risk; only bet what you can afford to lose. 21+ (18+ where
-        permitted). Data: The Odds API, ESPN.
+        For information and entertainment only. Nothing is bet here: the AI's numbers are estimates, not
+        guarantees, and no model has been shown to beat the betting market reliably. Gambling involves risk;
+        only bet what you can afford to lose. 21+ (18+ where permitted). Data: The Odds API, ESPN.
       </footer>
     </main>
-
-    <aside class="slip" id="slip" aria-label="Bet slip">
-      <div class="slip-head">
-        <h2>Bet slip<span class="count" id="slip-count">0</span></h2>
-        <button class="link" id="slip-clear">Clear all</button>
-      </div>
-      <div class="seg" id="slip-mode">
-        <button data-mode="single">Singles</button><button data-mode="multi">Multi</button>
-      </div>
-      <div id="slip-body"></div>
-    </aside>
   </div>
-
-  <button class="slip-fab" id="slip-fab">Bet slip · <span id="fab-count">0</span></button>
-  <script src="/static/app.js?v=2" defer></script>
+  <script src="/static/app.js?v=3" defer></script>
 </body>
 </html>
