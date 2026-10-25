@@ -53,3 +53,17 @@ def test_expected_value() -> None:
 def test_payout_rounds_half_up_to_cents() -> None:
     assert payout(1, 10.005) == 10.01
     assert payout(25, 1.9091) == 47.73
+
+
+def test_shin_and_power_take_more_margin_off_long_shots() -> None:
+    prices = [american_to_decimal(-400), american_to_decimal(320)]
+    plain = remove_vig(prices)
+    for method in ("shin", "power"):
+        fair = remove_vig(prices, method)
+        assert sum(fair) == pytest.approx(1.0)
+        assert fair[0] > plain[0] and fair[1] < plain[1]  # the favourite keeps more of its chance
+    # A balanced market is left at 50/50 by every method
+    assert remove_vig([1.91, 1.91], "shin") == pytest.approx([0.5, 0.5])
+    # Three-way markets work too, and an arbitrage-free market without margin is left alone
+    assert sum(remove_vig([1.6, 5.0, 4.33], "shin")) == pytest.approx(1.0)
+    assert remove_vig([2.0, 2.0], "power") == pytest.approx([0.5, 0.5])

@@ -180,16 +180,24 @@ def predict_game(
     market: Dict[str, Dict[str, Dict[str, Any]]],
     espn_home_win: Optional[float],
     params: Params = Params(),
+    level: Optional[float] = None,
 ) -> Optional[GamePrediction]:
-    """Blend our team model, the market and ESPN's predictor into one prediction."""
+    """Blend our team model, the market and ESPN's predictor into one prediction.
+
+    ``league_avg`` is the average team score in our standings data, the
+    baseline each team's strengths are measured from; ``level`` (when known)
+    is the average team score today's market totals imply, so the model's
+    scoring level matches the current game rather than a blend of seasons.
+    """
     sources: Dict[str, Dict[str, float]] = {}
     factors: List[str] = []
     margins: List[tuple] = []
 
     model_total = None
     if home.rating and away.rating and league_avg:
-        home_pts = league_avg + (home.rating.points_for - league_avg) + (away.rating.points_against - league_avg)
-        away_pts = league_avg + (away.rating.points_for - league_avg) + (home.rating.points_against - league_avg)
+        base = level or league_avg
+        home_pts = base + (home.rating.points_for - league_avg) + (away.rating.points_against - league_avg)
+        away_pts = base + (away.rating.points_for - league_avg) + (home.rating.points_against - league_avg)
         home_pts += params.home_court / 2
         away_pts -= params.home_court / 2
         factors.append(f"Home court: {home.name} +{params.home_court:.1f}")

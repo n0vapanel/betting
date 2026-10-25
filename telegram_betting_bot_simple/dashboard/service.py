@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import statistics
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -148,14 +149,51 @@ class DashboardService:
                 nba_model.league_average(current), sum(games) / len(games) if games else 0,
                 nba_model.league_average(previous), self.params.team_prior_games,
             )
-            return {"current": current, "previous": previous, "avg": league_avg,
-                    "label": nba_model.season_label(today)}
+            context = {"current": current, "previous": previous, "avg": league_avg,
+                       "label": nba_model.season_label(today)}
+            context["level"] = self._scoring_level(league, context)
+            return context
 
         try:
             return self.cache.get(("context", league), 1800, load)
         except Exception as exc:
             logging.warning("No ESPN standings for %s: %s", league, exc)
             return None
+
+    def _scoring_level(self, league: str, context: Dict[str, Any]) -> Optional[float]:
+        """The average team score today's market totals imply, net of who is playing whom.
+
+        Our standings blend this season with last, so their scoring level lags
+        the league's (early in 2026-27 it ran ~4 points a game low against the
+        market, making every total lean under). The market's totals set the
+        level; our ratings still say which matchups score more or less.
+        """
+        avg = context.get("avg")
+        if not avg:
+            return None
+        offsets = []
+        try:
+            games = self.odds.league_games(league)
+        except Exception:
+            return None
+        for game in games:
+            line = (summarize_markets(game).get("totals", {}).get("over") or {}).get("point")
+            match = self.espn.find_game(league, game["home"], game["away"], game["commence_time"]) if line else None
+            if not match:
+                continue
+            ratings = [
+                nba_model.team_rating(context["current"].get(match[f"{side}_id"]),
+                                      context["previous"].get(match[f"{side}_id"]), self.params)
+                for side in ("home", "away")
+            ]
+            if not all(ratings):
+                continue
+            matchup = sum(r.points_for - avg + r.points_against - avg for r in ratings)
+            offsets.append(line - (2 * avg + matchup))
+        if len(offsets) < 3:
+            return None
+        # The median keeps one odd line (a star ruled out late) from moving every game
+        return avg + statistics.median(offsets) / 2
 
     def _card(self, league: str, game: Dict[str, Any], context: Optional[Dict[str, Any]]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         summary = summarize_markets(game)
@@ -234,7 +272,8 @@ class DashboardService:
             teams[side] = nba_model.TeamInputs(name, rating, impact, missing, back_to_back)
         info["teams"] = teams
         info["prediction"] = nba_model.predict_game(
-            teams["home"], teams["away"], (context or {}).get("avg"), summary, info.get("espn_home_win"), self.params
+            teams["home"], teams["away"], (context or {}).get("avg"), summary, info.get("espn_home_win"), self.params,
+            level=(context or {}).get("level"),
         )
         return info
 
@@ -270,7 +309,20 @@ class DashboardService:
             "pick_prob": max(home_win, 1 - home_win),
             "sources": {name: {k: round(v, 3) for k, v in values.items()} for name, values in prediction.sources.items()},
             "factors": prediction.factors,
+            "method": self._method_note(),
         }
+
+    def _method_note(self) -> str:
+        p = self.params
+        model = 1 - p.market_weight - p.espn_weight
+        return (
+            f"Model {MODEL_VERSION} blends the bookmakers' consensus ({p.market_weight:.0%}), ESPN's matchup predictor "
+            f"({p.espn_weight:.0%}) and our team model ({model:.0%}: points scored and allowed this season and last, "
+            f"home court, back-to-backs, injured players' scoring), with the scoring level set by today's market "
+            f"totals. Win, cover and over/under chances assume the final margin and total vary around the "
+            f"prediction by about {p.margin_sd:g} and {p.total_sd:g} points. The closing betting market is the best "
+            f"public NBA predictor; where the AI disagrees with it, treat that as an opinion, not an edge."
+        )
 
     def _book_view(self, book: Dict[str, Any]) -> Dict[str, Any]:
         markets = {}
@@ -309,7 +361,9 @@ class DashboardService:
                 })
             rating = teams[side].rating
             team_points = prediction.home_score if side == "home" else prediction.away_score
-            normal_total = rating.points_for + rating.points_against if rating else None
+            # The team's usual game total, at today's scoring level
+            shift = 2 * ((context.get("level") or context["avg"] or 0) - (context["avg"] or 0))
+            normal_total = rating.points_for + rating.points_against + shift if rating else None
             pace = prediction.total / normal_total if normal_total else 1.0
             projections = nba_model.project_players(players, team_points, pace, self.params, margin=prediction.margin)
             out[side] = [
