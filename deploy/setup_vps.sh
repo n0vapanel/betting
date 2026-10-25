@@ -206,6 +206,9 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+# The one writable folder (/var/lib/$BOT_USER), shared by the bot and the dashboard: saved odds,
+# quota log and bot state. systemd passes its path in STATE_DIRECTORY
+StateDirectory=$BOT_USER
 
 [Install]
 WantedBy=multi-user.target

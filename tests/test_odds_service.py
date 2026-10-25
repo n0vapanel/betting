@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from telegram_betting_bot_simple.data import odds_service
 from telegram_betting_bot_simple.data.cache import TTLCache
 from telegram_betting_bot_simple.data.odds_service import OddsService, normalize_event, summarize_markets
+from telegram_betting_bot_simple.data.store import Store
 
 def _book(key, h2h, spread_home, spread_prices, total, total_prices):
     return {
@@ -90,6 +92,50 @@ def test_service_reads_quota_and_keeps_key_out_of_errors(monkeypatch: pytest.Mon
     with pytest.raises(RuntimeError) as excinfo:
         service.league_games("basketball_nba")
     assert "401" in str(excinfo.value) and "SECRET123" not in str(excinfo.value)
+
+def _fake_api(monkeypatch: pytest.MonkeyPatch, calls: list, remaining: int = 400) -> None:
+    def fake_get(url, params=None, timeout=None):
+        calls.append(url)
+        events = [EVENT] if "/odds" in url else []
+        return SimpleNamespace(
+            ok=True, status_code=200, json=lambda: events,
+            headers={"x-requests-remaining": str(remaining), "x-requests-used": "100", "x-requests-last": "3"},
+        )
+
+    monkeypatch.setattr(odds_service.requests, "get", fake_get)
+
+def test_bot_and_dashboard_share_one_fetch_through_the_store(tmp_path, monkeypatch) -> None:
+    calls = []
+    _fake_api(monkeypatch, calls)
+    path = str(tmp_path / "betting.db")
+    dashboard = OddsService("k", store=Store(path))
+    other_process = Store(path)
+    other_process.holder = "bot-process"
+    bot = OddsService("k", store=other_process)
+    assert dashboard.league_games("basketball_nba")[0]["id"] == "e1"
+    assert bot.league_games("basketball_nba")[0]["id"] == "e1"
+    assert len(calls) == 1  # the bot reused the dashboard's fetch
+    assert bot.quota == {"remaining": 400, "used": 100}
+    assert bot.odds_loaded_at("basketball_nba") == dashboard.odds_loaded_at("basketball_nba")
+
+def test_low_quota_serves_saved_odds_instead_of_fetching(tmp_path, monkeypatch) -> None:
+    calls = []
+    _fake_api(monkeypatch, calls, remaining=40)
+    store = Store(str(tmp_path / "betting.db"))
+    store.save_odds_snapshot("basketball_nba", [normalize_event(EVENT)], time.time() - 10 * 3600)  # stale
+    store.record_usage("/sports/basketball_nba/odds", 3, 40, 460)
+    service = OddsService("k", store=store, reserve=50)
+    assert service.league_games("basketball_nba")[0]["id"] == "e1"
+    assert service.league_games("basketball_nba", refresh=True)[0]["id"] == "e1"
+    assert calls == []  # below the 50-request reserve: saved odds, no fetch
+
+def test_only_one_process_holds_a_refresh_lease(tmp_path) -> None:
+    path = str(tmp_path / "betting.db")
+    first, second = Store(path), Store(path)
+    second.holder = "other-process"
+    assert first.try_lease("odds:basketball_nba", 60)
+    assert not second.try_lease("odds:basketball_nba", 60)
+    assert first.try_lease("odds:basketball_nba", 60)  # the holder can renew
 
 def test_ttl_cache_serves_stale_value_when_refresh_fails() -> None:
     cache = TTLCache()

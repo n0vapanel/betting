@@ -20,6 +20,11 @@ class Config(BaseSettings):
     # Minutes to keep a league's odds before fetching again (each fetch costs 3 quota units)
     odds_cache_minutes: float = Field(120, validation_alias="ODDS_CACHE_MINUTES")
     odds_regions: str = Field("us", validation_alias="ODDS_REGIONS")
+    # Below this many Odds API requests left this month, serve saved odds instead of fetching
+    odds_reserve: int = Field(50, validation_alias="ODDS_RESERVE")
+    # Writable folder for the odds store and bot state shared by the bot and dashboard;
+    # systemd sets STATE_DIRECTORY for services with StateDirectory=
+    state_dir: Optional[str] = Field(None, validation_alias="STATE_DIRECTORY")
     # .env also holds settings for other tools (e.g. TELEGRAM_CHANNEL_ID for brain/notify.py)
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

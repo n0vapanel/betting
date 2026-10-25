@@ -98,6 +98,7 @@ class DashboardService:
             cards = list(self.pool.map(lambda game: self._card(league, game, context)[0], games))
             return {
                 "league": league,
+                "title": next((s["title"] for s in self.odds.sports() if s.get("key") == league), league),
                 "ai": league in AI_LEAGUES,
                 "games": cards,
                 "updated": datetime.datetime.now(self.tz).strftime("%-I:%M %p %Z"),
