@@ -1,13 +1,17 @@
 """NBA game and player predictions (model v1).
 
 Game model: each team's points scored and allowed per game (this season,
-shrunk toward last season while the sample is small) give an expected
-score, adjusted for home court, back-to-backs and injured players. That
-estimate is blended with the betting market's consensus (spread, total,
-margin-free moneyline) and ESPN's matchup predictor, because the market
-is hard to beat on its own; the blend weights live in ``Params``. Margins
-and totals are treated as normally distributed around the prediction to
-get win, cover and over/under probabilities.
+shrunk toward last season's, itself regressed 38% to the mean, while the
+sample is small) give an expected score, adjusted for home court,
+back-to-backs and injured players. That estimate is blended with the
+betting market's consensus (spread, total, margin-free moneyline) and
+ESPN's matchup predictor. On 2011-22 NBA closing lines a results-only team
+model added nothing on top of the market, so the market carries 90% of the
+blend whenever there is a line; the team model leads only without one.
+Margins and totals are treated as normally distributed around the
+prediction, with spreads that grow with the expected total (fitted on the
+same data), to get win, cover and over/under probabilities; whole-number
+lines can push.
 
 Player model: projected minutes (season averages blended with last
 season, injured teammates' minutes shared across the rotation) times
@@ -18,9 +22,10 @@ predicted score.
 from __future__ import annotations
 
 import datetime
+import math
 from dataclasses import dataclass, field
 from statistics import NormalDist
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 _NORMAL = NormalDist()
 STATS = ("pts", "reb", "ast", "fg3m", "stl", "blk", "tov")
@@ -31,17 +36,25 @@ class Params:
     home_court: float = 2.0  # points; ~2.05 implied by 2022-25 closing lines (was ~3.5 historically)
     back_to_back: float = 1.25  # points lost on the second night of a back-to-back
     team_prior_games: float = 10.0  # this season's games that weigh as much as last season
+    # Share of last season's strength (above or below average) that carries over: betting
+    # markets imply 62% for the NBA (Lopez, Matthews & Baumer 2018)
+    season_carryover: float = 0.62
     player_prior_games: float = 8.0
     # Margin lost per point an absent player scores (scaled by minutes / 36): a 31-point star is
     # worth ~4 points, in line with market moves for stars (1.5-5.5 points by depth)
     injury_impact: float = 0.15
-    margin_sd: float = 12.5  # spread of final margins around the prediction (12-13 in recent eras)
-    total_sd: float = 18.0  # spread of final totals around the prediction
-    # Shares of the predicted margin: the closing market beats public NBA models, and blends
-    # that improved on it still weighted the market 0.60-0.74; the rest is our team model
-    market_weight: float = 0.65
-    espn_weight: float = 0.10
-    market_total_weight: float = 0.6  # share of the market in the predicted total
+    # Spread of results around the closing line, fitted on ~13,900 NBA games (2011-22): it grows with
+    # the expected total. Final margins: 0.86 x sqrt(total) (13.0 at 230); totals: 1.24 x sqrt(total).
+    # Win chance from a margin uses 0.80 x sqrt(total) (12.1 at 230): results bunch near the spread.
+    margin_sd_factor: float = 0.86
+    win_sd_factor: float = 0.80
+    total_sd_factor: float = 1.24
+    # Shares of the predicted margin and total. A results-only team model (Elo, least squares or one
+    # like ours) added nothing over the closing line in 2017-22 tests (our old 65/10/25 blend raised
+    # log loss from 0.5978 to 0.6007), so the market dominates when there is a line
+    market_weight: float = 0.90
+    espn_weight: float = 0.05
+    market_total_weight: float = 0.90
     team_minutes: float = 240.0
     max_minutes: float = 38.0
     # Starters sit late in lopsided games: they lose this share of their minutes per point
@@ -74,12 +87,27 @@ class TeamRating:
     games: float  # this season
 
 
-def team_rating(current: Optional[Dict[str, Any]], previous: Optional[Dict[str, Any]], params: Params) -> Optional[TeamRating]:
+def team_rating(current: Optional[Dict[str, Any]], previous: Optional[Dict[str, Any]], params: Params,
+                averages: Optional[Tuple[Optional[float], Optional[float], float]] = None) -> Optional[TeamRating]:
+    """A team's points scored and allowed per game: this season, shrunk toward last season.
+
+    With ``averages`` (this season's league average, last season's, and the
+    blended average the model works from) each season counts as distance from
+    its own league average, and last season's distance is regressed by
+    ``season_carryover``, since teams change between seasons.
+    """
     games = (current or {}).get("games") or 0
     values = {}
     for key in ("points_for", "points_against"):
         now = (current or {}).get(key) if games else None
         before = (previous or {}).get(key)
+        if averages and averages[2] is not None:
+            current_avg, previous_avg, league_avg = averages
+            now = now - current_avg + league_avg if now is not None and current_avg else None
+            if before is not None and previous_avg:
+                before = league_avg + params.season_carryover * (before - previous_avg)
+            else:
+                before = None
         values[key] = blend(now, games, before, params.team_prior_games)
     if values["points_for"] is None or values["points_against"] is None:
         return None
@@ -132,31 +160,52 @@ class GamePrediction:
     home_win_prob: float
     sources: Dict[str, Dict[str, float]] = field(default_factory=dict)
     factors: List[str] = field(default_factory=list)
-    margin_sd: float = 12.5
-    total_sd: float = 18.0
+    margin_sd: float = 13.0
+    total_sd: float = 18.8
+
+    def _above(self, mean: float, sd: float, line: float) -> float:
+        """P(result > line) for a whole-number result: a whole-number line pushes when hit exactly."""
+        return 1 - _NORMAL.cdf((math.floor(line) + 0.5 - mean) / sd)
+
+    def _below(self, mean: float, sd: float, line: float) -> float:
+        return _NORMAL.cdf((math.ceil(line) - 0.5 - mean) / sd)
 
     def cover_prob(self, home_point: float) -> float:
-        """Chance the home team covers a spread of ``home_point`` (e.g. -3.5)."""
-        return _NORMAL.cdf((self.margin + home_point) / self.margin_sd)
+        """Chance the home team covers a spread of ``home_point`` (e.g. -3.5); pushes don't count."""
+        return self._above(self.margin, self.margin_sd, -home_point)
 
     def over_prob(self, line: float) -> float:
-        return 1 - _NORMAL.cdf((line - self.total) / self.total_sd)
+        return self._above(self.total, self.total_sd, line)
 
     def probability(self, market: str, side: str, point: Optional[float] = None) -> Optional[float]:
-        """Model chance of one bet winning: market h2h/spreads/totals, side home/away/over/under."""
+        """Model chance of one bet winning (a push is not a win): market h2h/spreads/totals,
+        side home/away/over/under."""
         if market == "h2h":
             return {"home": self.home_win_prob, "away": 1 - self.home_win_prob}.get(side)
         if market == "spreads" and point is not None:
             if side == "home":
                 return self.cover_prob(point)
-            if side == "away":
-                return 1 - self.cover_prob(-point)
+            if side == "away":  # the away team at +point covers when home wins by less than point
+                return self._below(self.margin, self.margin_sd, point)
         if market == "totals" and point is not None:
             if side == "over":
                 return self.over_prob(point)
             if side == "under":
-                return 1 - self.over_prob(point)
+                return self._below(self.total, self.total_sd, point)
         return None
+
+    def push_probability(self, market: str, side: str, point: Optional[float]) -> float:
+        """Chance a spread or total bet is a push (only whole-number lines can be)."""
+        if point is None or market not in ("spreads", "totals") or point != math.floor(point):
+            return 0.0
+        if market == "spreads":
+            at = -point if side == "home" else point  # the final margin (home minus away) that pushes
+            if at == 0:
+                return 0.0  # NBA games can't end tied
+            mean, sd = self.margin, self.margin_sd
+        else:
+            at, mean, sd = point, self.total, self.total_sd
+        return _NORMAL.cdf((at + 0.5 - mean) / sd) - _NORMAL.cdf((at - 0.5 - mean) / sd)
 
 
 @dataclass
@@ -168,9 +217,15 @@ class TeamInputs:
     back_to_back: bool = False
 
 
-def _prob_to_margin(probability: float, params: Params) -> float:
+def spreads_for(total: float, params: Params) -> Tuple[float, float, float]:
+    """(margin SD, win-chance SD, total SD) for a game with this expected total."""
+    root = math.sqrt(max(total, 150.0))
+    return params.margin_sd_factor * root, params.win_sd_factor * root, params.total_sd_factor * root
+
+
+def _prob_to_margin(probability: float, win_sd: float) -> float:
     probability = min(max(probability, 0.01), 0.99)
-    return params.margin_sd * _NORMAL.inv_cdf(probability)
+    return win_sd * _NORMAL.inv_cdf(probability)
 
 
 def predict_game(
@@ -191,9 +246,8 @@ def predict_game(
     """
     sources: Dict[str, Dict[str, float]] = {}
     factors: List[str] = []
-    margins: List[tuple] = []
 
-    model_total = None
+    model_margin = model_total = None
     if home.rating and away.rating and league_avg:
         base = level or league_avg
         home_pts = base + (home.rating.points_for - league_avg) + (away.rating.points_against - league_avg)
@@ -217,55 +271,62 @@ def predict_game(
                 factors.append(f"{team.name} missing {', '.join(team.injured)}: -{team.injury_impact:.1f}")
         model_margin = home_pts - away_pts
         model_total = home_pts + away_pts
-        sources["model"] = {
-            "home_points": home_pts,
-            "away_points": away_pts,
-            "margin": model_margin,
-            "total": model_total,
-            "home_win_prob": _NORMAL.cdf(model_margin / params.margin_sd),
-        }
-        margins.append((model_margin, 1 - params.market_weight - params.espn_weight))
+        sources["model"] = {"home_points": home_pts, "away_points": away_pts, "margin": model_margin,
+                            "total": model_total}
 
-    market_margin = None
     spread = market.get("spreads", {}).get("home")
     moneyline = market.get("h2h", {}).get("home")
-    if spread and spread.get("point") is not None:
-        market_margin = -spread["point"]
-    elif moneyline and moneyline.get("fair"):
-        market_margin = _prob_to_margin(moneyline["fair"], params)
     market_total = (market.get("totals", {}).get("over") or {}).get("point")
-    if market_margin is not None:
-        sources["market"] = {"margin": market_margin, "home_win_prob": _NORMAL.cdf(market_margin / params.margin_sd)}
-        if moneyline and moneyline.get("fair"):
-            sources["market"]["home_win_prob"] = moneyline["fair"]
-        if market_total:
-            sources["market"]["total"] = market_total
-        margins.append((market_margin, params.market_weight))
-    if espn_home_win is not None:
-        sources["espn"] = {"home_win_prob": espn_home_win, "margin": _prob_to_margin(espn_home_win, params)}
-        margins.append((sources["espn"]["margin"], params.espn_weight))
-
-    if not margins:
-        return None
-    weight = sum(w for _, w in margins)
-    margin = sum(m * w for m, w in margins) / weight
+    # The total first: the spread of results (and so every probability) grows with it
     if market_total and model_total:
         total = params.market_total_weight * market_total + (1 - params.market_total_weight) * model_total
     else:
         total = market_total or model_total
     if total is None:
         # No total from anyone: a typical NBA game total keeps the score display sensible
-        total = 2 * (league_avg or 115.0)
+        total = 2 * (level or league_avg or 115.0)
+    margin_sd, win_sd, total_sd = spreads_for(total, params)
+
+    margins: List[Tuple[float, float]] = []
+    if model_margin is not None:
+        sources["model"]["home_win_prob"] = _NORMAL.cdf(model_margin / win_sd)
+        margins.append((model_margin, 1 - params.market_weight - params.espn_weight))
+    market_margin = None
+    if spread and spread.get("point") is not None:
+        market_margin = -spread["point"]
+    elif moneyline and moneyline.get("fair"):
+        market_margin = _prob_to_margin(moneyline["fair"], win_sd)
+    if market_margin is not None:
+        sources["market"] = {"margin": market_margin, "home_win_prob": _NORMAL.cdf(market_margin / win_sd)}
+        if moneyline and moneyline.get("fair"):
+            sources["market"]["home_win_prob"] = moneyline["fair"]
+        if market_total:
+            sources["market"]["total"] = market_total
+        margins.append((market_margin, params.market_weight))
+    if espn_home_win is not None:
+        sources["espn"] = {"home_win_prob": espn_home_win, "margin": _prob_to_margin(espn_home_win, win_sd)}
+        margins.append((sources["espn"]["margin"], params.espn_weight))
+
+    if not margins:
+        return None
+    weight = sum(w for _, w in margins)
+    margin = sum(m * w for m, w in margins) / weight
+    home_win = _NORMAL.cdf(margin / win_sd)
+    if moneyline and moneyline.get("fair") and market_margin is not None:
+        # The moneyline's own margin-free chance is the market's best win estimate; the other sources
+        # only move it by however far they move the margin
+        fair = min(max(moneyline["fair"], 0.005), 0.995)
+        home_win = _NORMAL.cdf(_NORMAL.inv_cdf(fair) + (margin - market_margin) / win_sd)
     return GamePrediction(
         home_score=(total + margin) / 2,
         away_score=(total - margin) / 2,
         margin=margin,
         total=total,
-        home_win_prob=_NORMAL.cdf(margin / params.margin_sd),
+        home_win_prob=home_win,
         sources=sources,
         factors=factors,
-        margin_sd=params.margin_sd,
-        total_sd=params.total_sd,
+        margin_sd=margin_sd,
+        total_sd=total_sd,
     )
 
 

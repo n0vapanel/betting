@@ -20,7 +20,13 @@ const shortName = (name, league = state.league) => {
 };
 const STATS = { pts: "Points", reb: "Rebounds", ast: "Assists", fg3m: "Threes", stl: "Steals", blk: "Blocks", tov: "Turnovers", pra: "Pts+Reb+Ast" };
 // FiveThirtyEight's forecasting-game points for the chance given to the team that won
-const winnerPoints = (p) => 25 - 100 * (1 - p) ** 2;
+const forecastPoints = (p, weight = 1) => Math.round(10 * weight * (25 - 100 * (1 - Math.round(p * 100) / 100) ** 2)) / 10;
+const winnerPoints = (p) => forecastPoints(p);
+const PROP_WEIGHT = 0.4;
+const CAUTION_GAP = 0.08; // the AI this far from the bookmakers gets a "check the news" warning
+const agreement = (p) => (p >= 0.6 ? "AI agrees" : p >= 0.4 ? "Coin flip for the AI" : "AI disagrees");
+const compareConfidence = (yours, ai) => (ai < 0.5 ? "against the AI" : Math.abs(yours - ai) <= 0.05 ? "same as the AI"
+  : yours > ai ? "bolder than the AI" : "more cautious than the AI");
 
 function toast(text) {
   const el = document.createElement("div");
@@ -331,9 +337,13 @@ function leanChip(game, market) {
   const label = market === "h2h" ? `${shortName(side === "home" ? game.home : game.away)} win`
     : market === "spreads" ? `${shortName(side === "home" ? game.home : game.away)} ${pointText(market, side, offer.point)}`
     : `${side === "over" ? "Over" : "Under"} ${offer.point}`;
-  const value = !game.live && offer.ev != null && offer.ev > 0.05;
+  const edge = offer.fair != null ? offer.ai - offer.fair : 0;
+  const caution = !game.live && state.data.ai && edge >= CAUTION_GAP;
+  const value = !game.live && !caution && offer.ev != null && offer.ev > 0.03 && edge >= 0.03;
   const name = { h2h: "Winner", spreads: "Spread", totals: "Total" }[market];
-  return `<span class="lean${value ? " value" : ""}" title="Best price ${esc(priceText({ american: offer.american, price: offer.price }))} at ${esc(offer.book)}${value ? " · the AI rates this 5%+ above the price (an opinion, not a guarantee)" : ""}">
+  const note = caution ? " · ⚠ the AI is far from the bookmakers here: check the injury news before trusting it"
+    : value ? " · the AI rates this above the price (an opinion, not a guarantee)" : "";
+  return `<span class="lean${value ? " value" : ""}${caution ? " caution" : ""}" title="Best price ${esc(priceText({ american: offer.american, price: offer.price }))} at ${esc(offer.book)} · bookmakers ${pct(offer.fair)}${note}">
     <span class="lean-k">${name}</span> ${esc(label)} <b>${pct(offer.ai)}</b></span>`;
 }
 
@@ -353,8 +363,10 @@ function renderCard(game) {
         <span class="tpct${favourite ? " fav" : ""}">${pct(chance)}</span>
       </div>`;
   };
+  const marketHome = p?.sources?.market?.home_win_prob;
+  const caution = p && marketHome != null && Math.abs(p.home_win - marketHome) >= CAUTION_GAP;
   const chip = p
-    ? `<span class="chip ai">${game.live ? "Pre-game AI" : "AI pick"}: ${esc(shortName(p.pick))} ${pct(p.pick_prob)}</span>`
+    ? `${caution ? '<span class="chip caution" title="The AI is far from the bookmakers on this game: check the injury news">⚠ far from market</span> ' : ""}<span class="chip ai">${game.live ? "Pre-game AI" : "AI pick"}: ${esc(shortName(p.pick))} ${pct(p.pick_prob)}</span>`
     : chances ? `<span class="chip">Market favourite: ${esc(shortName(chances.home >= chances.away ? game.home : game.away))}</span>` : "";
   const draw = chances?.draw != null ? `<div class="muted small draw">Draw ${pct(chances.draw)}</div>` : "";
   const [winSide, loseSide] = p && p.margin < 0 ? ["away", "home"] : ["home", "away"];
@@ -541,7 +553,7 @@ function callForm() {
       </div>
       <div class="field">
         <label for="confidence">How sure are you? <b id="conf-label">${pct(call.confidence)}</b></label>
-        <input type="range" id="confidence" min="50" max="100" step="5" value="${Math.round(call.confidence * 100)}">
+        <input type="range" id="confidence" min="50" max="100" step="1" value="${Math.round(call.confidence * 100)}">
         <div class="hint" id="winner-hint"></div>
       </div>
 
@@ -552,10 +564,11 @@ function callForm() {
           <span>${esc(shortName(game.home))}</span><input type="number" id="home-score" min="40" max="250" placeholder="${Math.round(p.home_score)}" value="${call.home_score ?? ""}">
         </div>
         <div class="hint" id="score-hint"></div>
+        <div class="hint">Scored as 15 minus your margin miss, plus 20 minus your total miss, plus 10 if both scores are within 2.</div>
       </div>
 
       <div class="field">
-        <label>Player calls <span class="muted">(optional, up to 8)</span></label>
+        <label>Player calls <span class="muted">(optional, up to 8; each counts 40% of a winner call)</span></label>
         <div id="props"></div>
         <button type="button" class="link" id="add-prop">+ Add a player call</button>
       </div>
@@ -585,7 +598,10 @@ function renderProps() {
         <select data-k="stat">${Object.entries(STATS).map(([k, v]) => `<option value="${k}"${k === prop.stat ? " selected" : ""}>${v}</option>`).join("")}</select>
         <input type="number" data-k="line" min="0" max="150" step="0.5" value="${prop.line}">
         <div class="seg"><button type="button" data-side="over" class="${prop.side === "over" ? "on" : ""}">Over</button><button type="button" data-side="under" class="${prop.side === "under" ? "on" : ""}">Under</button></div>
-        <span class="prop-ai">${ai ? `AI <b>${pct(ai.ai_prob)}</b> <span class="muted">(avg ${ai.ai_mean.toFixed(1)})</span>` : ""}</span>
+        <select data-k="confidence" title="How sure are you?">${[55, 60, 65, 70, 75, 80, 90, 100].map((c) =>
+          `<option value="${c / 100}"${Math.round((prop.confidence ?? 0.6) * 100) === c ? " selected" : ""}>${c}%</option>`).join("")}</select>
+        <span class="prop-ai">${ai ? `<span class="${ai.ai_prob >= 0.6 ? "good" : ai.ai_prob < 0.4 ? "bad" : ""}">AI <b>${pct(ai.ai_prob)}</b></span> <span class="muted">avg ${ai.ai_mean.toFixed(1)}</span>` : ""}
+          <span class="muted small">${signed(forecastPoints(prop.confidence ?? 0.6, PROP_WEIGHT))} / ${signed(forecastPoints(1 - (prop.confidence ?? 0.6), PROP_WEIGHT))}</span></span>
         <button type="button" class="x" data-remove-prop="${i}" title="Remove">×</button>
       </div>`;
   }).join("");
@@ -601,7 +617,7 @@ function addProp() {
   // The next player down the list who has no call yet (players come busiest first)
   const used = new Set(draft.call.props.map((prop) => String(prop.player_id)));
   const next = draft.players.find((pl) => !used.has(String(pl.id))) || draft.players[0];
-  draft.call.props.push({ player_id: String(next.id), stat: "pts", line: Math.max(0.5, Math.round(next.pts) - 0.5), side: "over" });
+  draft.call.props.push({ player_id: String(next.id), stat: "pts", line: Math.max(0.5, Math.round(next.pts) - 0.5), side: "over", confidence: 0.6 });
   renderProps();
   judgeDraft();
 }
@@ -656,9 +672,14 @@ function updateHints() {
   const aiWinner = call.winner === "home" ? p.home_win : 1 - p.home_win;
   const team = shortName(call.winner === "home" ? game.home : game.away);
   $("#conf-label").textContent = pct(call.confidence);
-  $("#winner-hint").innerHTML = `The AI gives ${esc(team)} <b>${pct(aiWinner)}</b>.
+  const marketHome = p.sources?.market?.home_win_prob;
+  const market = marketHome != null ? (call.winner === "home" ? marketHome : 1 - marketHome) : null;
+  const caution = marketHome != null && Math.abs(p.home_win - marketHome) >= CAUTION_GAP;
+  $("#winner-hint").innerHTML = `<b class="${aiWinner >= 0.6 ? "good" : aiWinner < 0.4 ? "bad" : ""}">${agreement(aiWinner)}</b>:
+    it gives ${esc(team)} <b>${pct(aiWinner)}</b>${market != null ? ` (bookmakers ${pct(market)})` : ""}; you're ${compareConfidence(call.confidence, aiWinner)}.
     Points: <span class="good">${signed(winnerPoints(call.confidence))}</span> if ${esc(team)} win,
-    <span class="bad">${signed(winnerPoints(1 - call.confidence))}</span> if they lose.`;
+    <span class="bad">${signed(winnerPoints(1 - call.confidence))}</span> if they lose.
+    ${caution ? '<br><span class="warn">⚠ The AI is far from the bookmakers on this game: check the injury news.</span>' : ""}`;
   const score = verdict?.score;
   $("#score-hint").innerHTML = score && call.home_score != null
     ? `${esc(shortName(score.winner_side === "home" ? game.home : game.away))} by ${Math.abs(score.margin)}+ : AI <b>${pct(score.wins_by_at_least)}</b> ·
@@ -707,8 +728,8 @@ async function refreshCalls() {
 // --- AI bets: safe, risky, crazy ----------------------------------------------------------
 
 const TIERS = [
-  { key: "safe", title: "Safe", icon: "🛡️", blurb: "Likely to hit, small payout." },
-  { key: "risky", title: "Risky", icon: "⚖️", blurb: "A real chance, a real payout." },
+  { key: "safe", title: "Safe", icon: "🛡️", blurb: "More likely, small payout." },
+  { key: "risky", title: "Risky", icon: "⚖️", blurb: "Balanced: a real chance and a real payout." },
   { key: "crazy", title: "Crazy", icon: "🚀", blurb: "Long shot, big payout." },
 ];
 
@@ -744,8 +765,10 @@ function tierColumn(tier, data) {
   const bets = data?.bets || [];
   return `
     <div class="tier tier-${tier.key}">
-      <div class="tier-head"><h2>${tier.icon} ${tier.title}</h2><div class="muted small">${esc(data?.rule || tier.blurb)}</div></div>
-      ${bets.length ? bets.map((bet, i) => betCard(bet, tier.key, i)).join("") : `<div class="empty-slip">${esc(data?.empty || "No bet fits this level right now.")}</div>`}
+      <div class="tier-head"><h2>${tier.icon} ${tier.title}</h2>
+        <div class="small">${esc(data?.rule || tier.blurb)}</div>
+        ${data?.detail ? `<div class="muted small">${esc(data.detail)}</div>` : ""}</div>
+      ${bets.length ? bets.map((bet, i) => betCard(bet, tier.key, i)).join("") : `<div class="empty-slip">${esc(data?.empty || "Nothing fits this level right now: the AI lays off.")}</div>`}
     </div>`;
 }
 
@@ -753,18 +776,22 @@ function betCard(bet, tier, index) {
   const legs = bet.legs.map((leg) => `
     <div class="bet-leg">
       <div class="leg-top"><span class="leg-label">${esc(leg.label)}</span><span class="leg-price">${esc(priceText(leg.odds))}</span></div>
-      <div class="leg-game">${esc(leg.game)} · AI ${pct(leg.probability)}${leg.fair != null ? ` · market ${pct(leg.fair)}` : ""}</div>
+      <div class="leg-game">${esc(leg.game)} · AI ${pct(leg.probability)}${leg.fair != null ? ` · bookmakers ${pct(leg.fair)}` : ""}
+        ${leg.check_news ? '<span class="warn"> · ⚠ check the injury news</span>' : ""}</div>
     </div>`).join("");
+  const badgeClass = bet.badge === "Value" ? "win" : bet.badge === "Close to fair" ? "pending" : "";
   return `
     <div class="bet">
-      <div class="bet-title">${bet.legs.length === 1 ? "Single" : `${bet.legs.length}-leg multi`}${bet.book ? ` <span class="muted small">at ${esc(bet.book)}</span>` : ""}</div>
+      <div class="bet-title"><span>${bet.legs.length === 1 ? "Single" : `${bet.legs.length}-leg multi`}${bet.book ? ` <span class="muted small">at ${esc(bet.book)}</span>` : ""}</span>
+        <span class="badge ${badgeClass}">${esc(bet.badge)}</span></div>
       ${legs}
       <div class="bet-sum">
         <div class="sum-row"><span>Odds</span><b>${esc(priceText(bet.odds))}</b></div>
         <div class="sum-row"><span>$10 returns</span><b>${money(10 * bet.odds.decimal)}</b></div>
-        <div class="sum-row"><span>AI chance it hits</span><b>${pct(bet.probability)}</b></div>
-        ${bet.fair_probability != null ? `<div class="sum-row muted"><span>Bookmakers' chance</span><span>${pct(bet.fair_probability)}</span></div>` : ""}
-        <div class="sum-row"><span class="muted">Expected value</span><span class="${bet.ev > 0 ? "good" : "bad"}">${signed(bet.ev * 100)}%</span></div>
+        <div class="sum-row"><span>Chance it wins</span><b>AI ${pct(bet.probability)}${bet.fair_probability != null ? ` · bookmakers ${pct(bet.fair_probability)}` : ""}</b></div>
+        <div class="sum-row muted"><span>Fair odds</span><span>AI ${esc(bet.fair_odds.ai)}${bet.fair_odds.market ? ` · bookmakers ${esc(bet.fair_odds.market)}` : ""}</span></div>
+        <div class="sum-row"><span class="muted">Expected result per $10</span><span class="${bet.ev > 0 ? "good" : "bad"}">${bet.ev >= 0 ? "+" : "−"}${money(Math.abs(bet.ev) * 10)}</span></div>
+        ${bet.book_edge != null ? `<div class="sum-row muted"><span>Bookmaker's edge on this bet</span><span>${(bet.book_edge * 100).toFixed(1)}%</span></div>` : ""}
       </div>
       ${bet.why ? `<div class="why">${esc(bet.why)}</div>` : ""}
       <button class="ghost small wide" data-copy-bet="${tier}:${index}">Copy</button>
@@ -791,16 +818,23 @@ async function loadCalls() {
   const graded = state.calls.filter((c) => c.status === "graded");
   const points = graded.reduce((sum, c) => sum + c.user_points, 0);
   const aiPoints = graded.reduce((sum, c) => sum + c.ai_points, 0);
-  const beat = graded.filter((c) => c.user_points > c.ai_points).length;
+  const vsAi = points - aiPoints;
+  const winnerParts = graded.map((c) => c.result.parts.find((part) => part.part === "winner" && part.market_points != null)).filter(Boolean);
+  const vsMarket = winnerParts.reduce((sum, part) => sum + part.points - part.market_points, 0);
+  const headline = !graded.length ? "Your calls are scored after each game, next to the AI's score on the same games."
+    : vsAi >= 0 ? `You beat the AI by ${vsAi.toFixed(1)} points on the ${graded.length} game${graded.length > 1 ? "s" : ""} you called.`
+    : `The AI is ahead of you by ${(-vsAi).toFixed(1)} points on the ${graded.length} game${graded.length > 1 ? "s" : ""} you called.`;
   view.innerHTML = `
     <div class="league-head"><div><h1>My calls</h1>
-      <div class="sub">${state.me.name ? `As ${esc(state.me.name)} · ` : ""}Calls are scored after each game, and the AI is scored on the same games.</div></div></div>
+      <div class="sub">${state.me.name ? `As ${esc(state.me.name)} · ` : ""}${esc(headline)}</div></div></div>
     <div class="stats">
-      <div class="stat"><div class="stat-v">${state.calls.length}</div><div class="stat-k">calls</div></div>
-      <div class="stat"><div class="stat-v ${points >= aiPoints ? "good" : ""}">${signed(points)}</div><div class="stat-k">your points</div></div>
-      <div class="stat"><div class="stat-v">${signed(aiPoints)}</div><div class="stat-k">AI's points, same games</div></div>
-      <div class="stat"><div class="stat-v">${beat}/${graded.length}</div><div class="stat-k">games you beat the AI</div></div>
+      <div class="stat"><div class="stat-v">${graded.length}/${state.calls.length}</div><div class="stat-k">calls scored</div></div>
+      <div class="stat"><div class="stat-v">${signed(points)}</div><div class="stat-k">your points</div></div>
+      <div class="stat"><div class="stat-v ${vsAi >= 0 ? "good" : "bad"}">${signed(vsAi)}</div><div class="stat-k">vs the AI (same games)</div></div>
+      <div class="stat"><div class="stat-v ${vsMarket >= 0 ? "good" : "bad"}">${signed(vsMarket)}</div><div class="stat-k">vs the bookmakers (winner calls)</div></div>
     </div>
+    <p class="note">Winner calls: 25 − 100 × (1 − p)², p = the chance you gave the team that won. 50% always scores 0; a
+      calibrated 70% call averages only about +4 a game, and a wrong 90% call costs −56. Bolder calls cost more when they miss.</p>
     ${state.calls.length ? state.calls.map(callCard).join("") : `<div class="empty-slip">No calls yet. Open <b>Games</b> and press <b>🔮 Make your call</b> on an NBA game.</div>`}`;
 }
 
@@ -811,21 +845,22 @@ function callCard(row) {
   const lines = [];
   if (call.winner) {
     const team = call.winner === "home" ? row.home : row.away;
-    lines.push(`Winner: <b>${esc(team)}</b> at ${pct(call.confidence)} · AI ${pct(ai.winner?.ai_prob)}`);
+    lines.push(`Winner: <b>${esc(team)}</b> at ${pct(call.confidence)} · AI ${pct(ai.winner?.ai_prob)}${ai.winner?.market_prob != null ? ` · bookmakers ${pct(ai.winner.market_prob)}` : ""}`);
   }
   if (call.home_score != null) {
     lines.push(`Score: ${esc(shortName(row.away, row.league))} ${call.away_score}–${call.home_score} ${esc(shortName(row.home, row.league))} · AI ${Math.round(ai.away_score)}–${Math.round(ai.home_score)}`);
   }
   for (const prop of ai.props || []) {
-    lines.push(`${esc(prop.player)} ${prop.side} ${prop.line} ${STATS[prop.stat]?.toLowerCase() || prop.stat} · AI ${pct(prop.ai_prob)}`);
+    lines.push(`${esc(prop.player)} ${prop.side} ${prop.line} ${STATS[prop.stat]?.toLowerCase() || prop.stat} at ${pct(prop.confidence)} · AI ${pct(prop.ai_prob)}`);
   }
   let status = '<span class="badge pending">Pending</span>';
   let result = "";
   if (row.status === "graded") {
     const r = row.result;
-    status = `<span class="badge ${row.user_points >= row.ai_points ? "win" : "loss"}">${row.user_points >= row.ai_points ? "Beat the AI" : "AI won"}</span>`;
+    const diff = row.user_points - row.ai_points;
+    status = `<span class="badge ${diff >= 0 ? "win" : "loss"}">${diff > 0 ? "Beat the AI" : diff === 0 ? "Tied the AI" : "AI won"} ${signed(diff)}</span>`;
     result = `<div class="result">Final: ${esc(shortName(row.away, row.league))} ${r.away}–${r.home} ${esc(shortName(row.home, row.league))} ·
-      you <b class="${row.user_points >= 0 ? "good" : "bad"}">${signed(row.user_points)}</b> · AI <b>${signed(row.ai_points)}</b>
+      you <b class="${row.user_points >= 0 ? "good" : "bad"}">${signed(row.user_points)}</b> · AI <b>${signed(row.ai_points)}</b>${r.market_points != null ? ` · bookmakers ${signed(r.market_points)} <span class="muted">(winner)</span>` : ""}
       ${r.parts.map((part) => `<span class="part">${part.part === "prop" ? esc(part.player || "") : part.part}${part.void ? " void" : `: ${signed(part.points)}`}</span>`).join("")}</div>`;
   } else if (row.status === "void") {
     status = '<span class="badge">Void</span>';
@@ -854,11 +889,13 @@ async function loadLeaders() {
   if (state.view !== "leaders") return;
   view.innerHTML = `
     <div class="league-head"><div><h1>Leaderboard</h1>
-      <div class="sub">Points from graded calls. "AI" is what the AI scored on the same games, so you can see who beats it.</div></div></div>
+      <div class="sub">Points from scored calls. "vs AI" is your points minus the AI's on the same games: copying the AI scores 0,
+        so anything above 0 means you read those games better. "vs bookmakers" compares winner calls with the betting market, the hardest opponent.</div></div></div>
     ${rows.length ? `<div class="table-wrap"><table>
-      <thead><tr><th>#</th><th>Name</th><th>Calls</th><th>Points</th><th>AI on same games</th><th>Beat the AI</th></tr></thead>
+      <thead><tr><th>#</th><th>Name</th><th>Calls</th><th>Points</th><th>vs AI</th><th>vs bookmakers</th><th>Beat the AI</th></tr></thead>
       <tbody>${rows.map((r, i) => `<tr${r.player === `web:${state.me.id}` ? ' class="me"' : ""}>
-        <td>${i + 1}</td><td>${esc(r.name)}</td><td>${r.calls}</td><td><b>${signed(r.points)}</b></td><td>${signed(r.ai_points)}</td><td>${r.beat_ai}/${r.calls}</td></tr>`).join("")}
+        <td>${i + 1}</td><td>${esc(r.name)}</td><td>${r.calls}</td><td><b>${signed(r.points)}</b></td>
+        <td class="${r.vs_ai >= 0 ? "good" : "bad"}">${signed(r.vs_ai)}</td><td>${r.market_calls ? signed(r.vs_market) : "–"}</td><td>${r.beat_ai}/${r.calls}</td></tr>`).join("")}
       </tbody></table></div>` : '<div class="empty-slip">No graded calls yet. Calls are scored after each game finishes.</div>'}`;
 }
 
@@ -884,6 +921,8 @@ async function loadRecord() {
       <div class="stat"><div class="stat-v">${pct(r.winner_accuracy)}</div><div class="stat-k">winners right</div></div>
       <div class="stat"><div class="stat-v">${r.brier.toFixed(3)}</div><div class="stat-k">AI Brier score (lower is better)</div></div>
       <div class="stat"><div class="stat-v">${r.market_brier != null ? r.market_brier.toFixed(3) : "–"}</div><div class="stat-k">bookmakers' Brier score</div></div>
+      <div class="stat"><div class="stat-v">${r.baseline_brier.toFixed(3)}</div><div class="stat-k">"always the home team" Brier</div></div>
+      <div class="stat"><div class="stat-v">${r.log_loss.toFixed(3)}</div><div class="stat-k">AI log loss (lower is better)</div></div>
       <div class="stat"><div class="stat-v">${rec(r.ats)}${rate(r.ats)}</div><div class="stat-k">vs the closing spread</div></div>
       <div class="stat"><div class="stat-v">${rec(r.totals)}${rate(r.totals)}</div><div class="stat-k">vs the closing total</div></div>
       <div class="stat"><div class="stat-v">${r.margin_error.toFixed(1)}</div><div class="stat-k">avg margin miss (pts)</div></div>
@@ -895,6 +934,7 @@ async function loadRecord() {
       <tbody>${r.calibration.map((b) => `<tr><td>${b.range}</td><td>${b.games}</td><td>${pct(b.predicted)}</td><td>${pct(b.actual)}</td>
         <td class="calib">${b.games ? `<span class="bar"><span class="fill fav" style="width:${Math.round(b.actual * 100)}%"></span></span>` : ""}</td></tr>`).join("")}</tbody>
     </table></div>
+    ${tierRecord(r.tiers)}
     <h3 class="section">Latest games</h3>
     <div class="table-wrap"><table>
       <thead><tr><th>Game</th><th>AI</th><th>Final</th><th></th></tr></thead>
@@ -902,9 +942,28 @@ async function loadRecord() {
         <td>${esc(shortName(g.home_win >= 0.5 ? g.home : g.away, "basketball_nba"))} ${pct(Math.max(g.home_win, 1 - g.home_win))}</td>
         <td>${g.final_away}–${g.final_home}</td><td>${g.hit ? '<span class="good">✓</span>' : '<span class="bad">✗</span>'}</td></tr>`).join("")}</tbody>
     </table></div>`}
-    <p class="note">Brier score is the average squared miss of the win probability: always saying 50% scores 0.250, and the
-      betting market usually sits near 0.20 in the NBA. The record against the closing spread and total is the real test:
-      about 52.4% is needed to break even at standard prices.</p>`;
+    ${!r.games ? tierRecord(r.tiers) : ""}
+    <p class="note">What good looks like: nobody gets near 100%. The closing betting market picks about 68% of NBA winners
+      (65.7-69.8% by season) with a Brier score near 0.20; a sound model lands at 66-69% and 0.20-0.21. Brier score is the
+      average squared miss of the win chance: always saying 50% scores 0.250. Against the closing spread, 50-53% is
+      realistic and 52.4% is needed to break even at standard prices.</p>`;
+}
+
+// How the AI's own daily bets did, per risk level: is Safe really safe?
+function tierRecord(tiers) {
+  if (!tiers) return "";
+  const rows = tiers.map((t) => `<tr><td>${esc(t.title)}</td><td>${t.tickets}</td><td>${t.won}</td>
+    <td>${pct(t.predicted)}</td><td>${pct(t.actual)}</td>
+    <td class="${t.roi == null ? "" : t.roi >= 0 ? "good" : "bad"}">${t.roi == null ? "–" : `${signed(t.roi * 100)}%`}</td></tr>`).join("");
+  return `
+    <h3 class="section">AI bets record: the top Safe, Risky and Crazy bet each day</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Level</th><th>Bets graded</th><th>Won</th><th>AI said</th><th>Happened</th><th>Return</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <p class="note">Each level's top bet is saved before its first game starts and graded at the price shown. A level
+      earns trust only if "Happened" keeps up with "AI said" over many bets; expect returns a little below zero,
+      the bookmakers' cut.</p>`;
 }
 
 // --- events ----------------------------------------------------------------------------
@@ -1006,6 +1065,7 @@ document.addEventListener("change", (event) => {
   const prop = draft.call.props[Number(row.dataset.prop)];
   const key = input.dataset.k;
   if (key === "line") prop.line = Math.max(0, Math.round(Number(input.value) * 2) / 2);
+  else if (key === "confidence") prop.confidence = Number(input.value);
   else prop[key] = input.value;
   if (key === "player_id" || key === "stat") prop.line = suggestLine(prop);
   renderProps();

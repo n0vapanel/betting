@@ -8,6 +8,7 @@ from statistics import NormalDist
 import pytest
 
 from telegram_betting_bot_simple.engine.nba_model import (
+    GamePrediction,
     Params,
     TeamInputs,
     TeamRating,
@@ -17,6 +18,7 @@ from telegram_betting_bot_simple.engine.nba_model import (
     predict_game,
     project_players,
     season_label,
+    spreads_for,
     team_rating,
 )
 
@@ -44,7 +46,10 @@ def test_market_only_prediction_follows_the_spread_and_total() -> None:
     assert prediction.margin == pytest.approx(6.5)
     assert prediction.total == pytest.approx(224.5)
     assert prediction.home_score - prediction.away_score == pytest.approx(6.5)
-    assert prediction.home_win_prob == pytest.approx(NormalDist().cdf(6.5 / Params().margin_sd))
+    margin_sd, win_sd, total_sd = spreads_for(224.5, Params())
+    assert (round(margin_sd, 1), round(win_sd, 1), round(total_sd, 1)) == (12.9, 12.0, 18.6)
+    # The win chance is the moneyline's own margin-free chance when nothing else moves the margin
+    assert prediction.home_win_prob == pytest.approx(0.70)
     # Covering exactly the market spread is a coin flip
     assert prediction.probability("spreads", "home", -6.5) == pytest.approx(0.5)
     assert prediction.probability("spreads", "away", 6.5) == pytest.approx(0.5)
@@ -59,10 +64,15 @@ def test_blended_prediction_uses_model_market_and_espn() -> None:
     model = prediction.sources["model"]
     # 118 vs 114 allowed, home court, away team loses 3 (injury) + 1.25 (back-to-back)
     assert model["margin"] == pytest.approx((118 - 115 + 114 + 1) - (112 - 115 + 108 - 1) + 4.25, abs=1e-9)
-    espn_margin = params.margin_sd * NormalDist().inv_cdf(0.75)
-    expected = (model["margin"] * 0.25 + 6.5 * 0.65 + espn_margin * 0.10)
+    total = 0.9 * 224.5 + 0.1 * model["total"]
+    assert prediction.total == pytest.approx(total)
+    espn_margin = spreads_for(total, params)[1] * NormalDist().inv_cdf(0.75)
+    # The market carries 90% when there is a line: a results-only model added nothing over it
+    expected = model["margin"] * 0.05 + 6.5 * 0.90 + espn_margin * 0.05
     assert prediction.margin == pytest.approx(expected)
-    assert prediction.total == pytest.approx(0.6 * 224.5 + 0.4 * model["total"])
+    # ...and the win chance is the moneyline's 70%, moved by how far the other sources move the margin
+    win_sd = spreads_for(total, params)[1]
+    assert prediction.home_win_prob == pytest.approx(NormalDist().cdf(NormalDist().inv_cdf(0.70) + (expected - 6.5) / win_sd))
     assert any("back-to-back" in factor for factor in prediction.factors)
     assert any("Star" in factor for factor in prediction.factors)
 
@@ -116,3 +126,29 @@ def test_crowded_roster_squeezes_the_bench_not_the_stars() -> None:
     assert minutes["p0"] == pytest.approx(36 * 0.85)
     assert minutes["p12"] > 0  # garbage time for the end of the bench
     assert sum(minutes.values()) == pytest.approx(240.0, abs=0.5)
+
+def test_last_season_is_regressed_to_the_mean() -> None:
+    # Last season +8 points above a 112 average: only 62% of that carries over
+    previous = {"games": 82, "points_for": 120.0, "points_against": 112.0}
+    rating = team_rating({"games": 0}, previous, Params(), averages=(None, 112.0, 115.0))
+    assert rating.points_for == pytest.approx(115.0 + 0.62 * 8.0)
+    assert rating.points_against == pytest.approx(115.0)
+    # This season counts relative to its own average, blended in by games played
+    rating = team_rating({"games": 10, "points_for": 118.0, "points_against": 110.0}, previous, Params(),
+                         averages=(116.0, 112.0, 115.0))
+    assert rating.points_for == pytest.approx(((118 - 116 + 115) * 10 + (115 + 0.62 * 8) * 10) / 20)
+
+def test_whole_number_lines_can_push() -> None:
+    game = GamePrediction(home_score=115, away_score=109, margin=6.0, total=224.0, home_win_prob=0.69,
+                          margin_sd=13.0, total_sd=18.6)
+    win, lose = game.probability("spreads", "home", -6.0), game.probability("spreads", "away", 6.0)
+    push = game.push_probability("spreads", "home", -6.0)
+    assert push == game.push_probability("spreads", "away", 6.0) == pytest.approx(0.0307, abs=0.001)
+    assert win + lose + push == pytest.approx(1.0)
+    assert win == pytest.approx(lose)  # the line sits on the prediction
+    over, under = game.probability("totals", "over", 224.0), game.probability("totals", "under", 224.0)
+    assert over + under + game.push_probability("totals", "over", 224.0) == pytest.approx(1.0)
+    # Half-point lines can't push, and the two sides add up to 1
+    assert game.push_probability("spreads", "home", -6.5) == 0
+    assert game.probability("spreads", "home", -6.5) + game.probability("spreads", "away", 6.5) == pytest.approx(1.0)
+    assert game.push_probability("spreads", "home", 0.0) == 0  # a pick'em can't end tied

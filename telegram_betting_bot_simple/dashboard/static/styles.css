@@ -153,7 +153,7 @@ td.calib { width: 40%; }
 .tier-head { margin-bottom: 10px; }
 .tier-head h2 { font-size: 17px; }
 .bet { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 10px; }
-.bet-title { font-weight: 700; margin-bottom: 6px; }
+.bet-title { font-weight: 700; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .bet-leg { border-top: 1px solid var(--line); padding: 6px 0; }
 .leg-top { display: flex; justify-content: space-between; gap: 8px; }
 .leg-label { font-weight: 600; }
@@ -245,4 +245,14 @@ body.modal-open { overflow: hidden; }
   .prop-row .prop-ai { grid-column: 2 / 3; }
   .modal { padding: 18px; }
   .foot-actions { margin-left: 0; width: 100%; justify-content: space-between; }
+}
+
+/* Caution: the AI is unusually far from the bookmakers */
+.chip.caution { color: var(--warn); border-color: rgba(251, 191, 36, 0.55); background: rgba(251, 191, 36, 0.08); font-weight: 600; }
+.lean.caution { border-color: rgba(251, 191, 36, 0.6); }
+.lean.caution b { color: var(--warn); }
+.warn { color: var(--warn); }
+.prop-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr) 70px auto 70px minmax(96px, auto) 20px; }
+@media (max-width: 760px) {
+  .prop-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 64px; }
 }

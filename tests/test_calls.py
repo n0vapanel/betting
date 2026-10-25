@@ -18,16 +18,27 @@ def prediction(margin=4.0, total=226.0) -> GamePrediction:
 
 
 def test_winner_points_follow_fivethirtyeights_game() -> None:
-    assert calls.winner_points(0.75) == pytest.approx(18.75)  # 75% on the winner
-    assert calls.winner_points(0.25) == pytest.approx(-31.25)  # 75% on the loser
+    assert calls.winner_points(0.75) == 18.8  # 75% on the winner: 18.75, rounded half up
+    assert calls.winner_points(0.25) == -31.3  # 75% on the loser
     assert calls.winner_points(0.5) == 0
     assert calls.winner_points(1.0) == 25 and calls.winner_points(0.0) == -75
+    assert calls.winner_points(0.704) == calls.winner_points(0.70)  # probabilities count in whole percents
+    assert calls.forecast_points(0.6, calls.PROP_WEIGHT) == 3.6  # a player line at 40% weight
 
 
-def test_closeness_points_fall_off_linearly() -> None:
-    assert calls.closeness_points(0.5, 1, 12) == 10
-    assert calls.closeness_points(-6.5, 1, 12) == pytest.approx(5.0)
-    assert calls.closeness_points(15, 1, 12) == 0
+def test_score_points_reward_close_margins_and_totals() -> None:
+    assert calls.score_points(6, 220, 113, 107) == 15 + 20 + 10  # exact: both scores within 2, bullseye
+    assert calls.score_points(10, 230, 113, 107) == 11 + 10  # margin off by 4, total by 10
+    assert calls.score_points(-5, 260, 113, 107) == 4 + 0  # wrong winner by 11, total way off
+
+
+def test_agreement_bands() -> None:
+    assert calls.agreement(0.6) == "AI agrees" and calls.agreement(0.59) == "Coin flip for the AI"
+    assert calls.agreement(0.39) == "AI disagrees"
+    assert calls.compare_confidence(0.72, 0.70) == "Same as the AI"
+    assert calls.compare_confidence(0.90, 0.70) == "Bolder than the AI"
+    assert calls.compare_confidence(0.55, 0.70) == "More cautious than the AI"
+    assert calls.compare_confidence(0.80, 0.30) == "Against the AI"
 
 
 def test_stat_probabilities() -> None:
@@ -44,32 +55,49 @@ def test_stat_probabilities() -> None:
 
 def test_the_ai_judges_each_part_of_a_call() -> None:
     p = prediction(margin=4.0)  # home favoured
+    p.sources = {"market": {"home_win_prob": 0.75, "margin": 8.0, "total": 224.0}}
     players = {"7": {"name": "Star Guard", "pts": 27.0, "reb": 5.0, "ast": 6.0}}
     view = calls.judge_call(p, {"winner": "away", "confidence": 0.7, "home_score": 108, "away_score": 112,
                                 "props": [{"player_id": "7", "stat": "pts", "line": 29.5, "side": "over"}]},
                             "Home Team", "Away Team", players)
     assert view["winner"]["ai_prob"] == pytest.approx(1 - p.home_win_prob)
-    assert "disagrees" in view["verdict"]
+    assert view["winner"]["market_prob"] == pytest.approx(0.25)
+    assert view["winner"]["label"] == "AI disagrees" and view["winner"]["compare"] == "Against the AI"
+    # The AI (62%) is 13 points off the bookmakers (75%): flagged
+    assert view["caution"] and "Caution" in view["verdict"]
     # Away by 4 or more when the AI has home by 4: well under half
     assert view["score"]["wins_by_at_least"] < 0.3
     assert view["props"][0]["ai_mean"] == 27.0 and view["props"][0]["ai_prob"] < 0.5
+    assert view["props"][0]["confidence"] == 0.6  # the default
 
 
-def test_grading_scores_the_person_and_the_ai_on_the_same_parts() -> None:
+def test_grading_scores_the_person_the_ai_and_the_market() -> None:
     p = prediction(margin=4.0, total=226.0)
+    p.sources = {"market": {"home_win_prob": 0.6, "margin": 3.0, "total": 225.0}}
     call = {"winner": "home", "confidence": 0.8, "home_score": 115, "away_score": 108,
-            "props": [{"player_id": "7", "stat": "pts", "line": 24.5, "side": "over"},
+            "props": [{"player_id": "7", "stat": "pts", "line": 24.5, "side": "over", "confidence": 0.9},
                       {"player_id": "8", "stat": "reb", "line": 8.5, "side": "over"}]}
     ai = calls.judge_call(p, call, "Home", "Away", {"7": {"name": "A", "pts": 26.0}, "8": {"name": "B", "reb": 6.0}})
     box = {"7": {"pts": 30, "dnp": False}, "8": {"dnp": True}}
-    graded = calls.grade_call(call, ai, {"home": 116, "away": 110}, box)
+    # The AI's last number before tip-off (66%) is what it's scored on, not the one saved with the call
+    tip_off = {"home_win": 0.66, "margin": 5.0, "total": 224.0, "market_home_win": 0.62}
+    graded = calls.grade_call(call, ai, {"home": 116, "away": 110}, box, tip_off)
     winner, score, prop, void = graded["parts"]
-    assert winner["hit"] and winner["points"] == pytest.approx(calls.winner_points(0.8))
-    assert winner["ai_points"] == pytest.approx(calls.winner_points(p.home_win_prob))
+    assert winner["hit"] and winner["points"] == calls.winner_points(0.8)
+    assert winner["ai_points"] == calls.winner_points(0.66) and winner["market_points"] == calls.winner_points(0.62)
     assert score["margin_off"] == 1 and score["total_off"] == -3
-    assert prop["hit"] and prop["points"] == 10 and prop["ai_points"] == 10  # the AI also rated the over likely
+    assert score["points"] == calls.score_points(7, 223, 116, 110) == 14 + 17 + 10  # 115-108 vs 116-110: bullseye
+    assert score["ai_points"] == calls.score_points(5.0, 224.0, 116, 110)
+    assert prop["hit"] and prop["points"] == calls.forecast_points(0.9, calls.PROP_WEIGHT)
+    assert prop["ai_points"] == calls.forecast_points(prop_ai(ai), calls.PROP_WEIGHT)
     assert void["void"] and void["points"] == 0
-    assert graded["points"] == pytest.approx(sum(part["points"] for part in graded["parts"]), abs=0.01)
+    assert graded["points"] == pytest.approx(sum(part["points"] for part in graded["parts"]), abs=0.05)
+    assert graded["vs_ai"] == pytest.approx(graded["points"] - graded["ai_points"], abs=0.05)
+    assert graded["market_points"] == winner["market_points"]
+
+
+def prop_ai(ai):
+    return ai["props"][0]["ai_prob"]
 
 
 def test_track_record_measures_accuracy_brier_and_record_against_the_close() -> None:
@@ -131,11 +159,30 @@ def test_calls_are_saved_judged_graded_and_ranked(service, store) -> None:
     service.espn = FinishedGames()
     assert service.grade_due() == 3
     call = service.my_calls("web:abc12345")[0]
-    assert call["status"] == "graded" and call["user_points"] == pytest.approx(calls.winner_points(0.9))
+    assert call["status"] == "graded" and call["user_points"] == calls.winner_points(0.9)
     board = service.leaderboard()
     assert board[0]["name"] == "Aidan" and board[0]["calls"] == 1
+    assert board[0]["vs_ai"] == round(board[0]["points"] - board[0]["ai_points"], 1)
     record = service.track_record()
     assert record["games"] == 2 and record["winner_accuracy"] == 1.0
+    assert [t["tier"] for t in record["tiers"]] == ["safe", "risky", "crazy"]
+
+
+def test_the_ais_daily_tickets_are_logged_and_graded(service, store) -> None:
+    service.store = store
+    built = service.ai_bets("basketball_nba")
+    top = built["tiers"]["safe"]["bets"][0]
+    logged = {t["tier"]: t for t in store.ai_tickets()}
+    assert set(logged) == {key for key, tier in built["tiers"].items() if tier["bets"]}
+    assert logged["safe"]["payload"]["legs"][0]["home"] == "New York Knicks"
+    with store._connect() as db:
+        db.execute("UPDATE ai_tickets SET first_start = '2020-01-01T00:00:00Z', last_start = '2020-01-01T00:00:00Z'")
+    service.espn = FinishedGames()  # every game 110-100 to the home team
+    service.grade_due()
+    ticket = next(t for t in store.ai_tickets() if t["tier"] == "safe")
+    assert ticket["status"] == ("won" if top["legs"][0]["side"] == "home" else "lost")
+    safe = service.track_record()["tiers"][0]
+    assert safe["tickets"] == 1 and safe["predicted"] == pytest.approx(top["probability"])
 
 
 def test_calls_close_at_tip_off(service, store) -> None:

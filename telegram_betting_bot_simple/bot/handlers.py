@@ -42,6 +42,7 @@ from telegram.ext import (
 
 from ..config import Config
 from ..data.leagues import SPORTS, pick_leagues
+from ..engine import calls
 from ..services import build_service
 
 MAX_GAMES = 10
@@ -508,12 +509,12 @@ async def clear_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 # --- calls: predict a winner and get scored against the AI -------------------------
 
-CONFIDENCES = (55, 60, 70, 80, 90, 100)
+CONFIDENCES = (50, 60, 70, 80, 90, 100)
 
 
 def _points(probability: float) -> float:
     """FiveThirtyEight forecasting-game points for the chance given to the team that won."""
-    return 25 - 100 * (1 - probability) ** 2
+    return calls.forecast_points(probability)
 
 
 def _player(update: Update) -> tuple:
@@ -566,7 +567,7 @@ async def call_winner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     team = card["home"] if side == "h" else card["away"]
     ai = card["prediction"]["home_win"] if side == "h" else 1 - card["prediction"]["home_win"]
     esc = html.escape
-    lines = [f"🔮 <b>{esc(team)} to win</b>", f"The AI gives them {pct(ai)}.", "", "How sure are you?", ""]
+    lines = [f"🔮 <b>{esc(team)} to win</b>", f"{calls.agreement(ai)}: it gives them {pct(ai)}.", "", "How sure are you?", ""]
     lines += [f"{c}%: {_points(c / 100):+.1f} if right, {_points(1 - c / 100):+.1f} if wrong" for c in CONFIDENCES]
     rows = [[InlineKeyboardButton(f"{c}%", callback_data=f"cc:{league}:{game_id}:{side}:{c}") for c in CONFIDENCES[:3]],
             [InlineKeyboardButton(f"{c}%", callback_data=f"cc:{league}:{game_id}:{side}:{c}") for c in CONFIDENCES[3:]],
@@ -624,7 +625,13 @@ async def my_calls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     graded = [r for r in rows if r["status"] == "graded"]
     you = sum(r["user_points"] for r in graded)
     ai = sum(r["ai_points"] for r in graded)
-    lines = ["🔮 <b>My calls</b>", f"Graded: {len(graded)} · you {you:+.1f} pts · the AI {ai:+.1f} pts on the same games", ""]
+    if not graded:
+        headline = "Calls are scored after each game, next to the AI's score on the same games."
+    elif you >= ai:
+        headline = f"You beat the AI by {you - ai:.1f} points on the {len(graded)} game(s) you called."
+    else:
+        headline = f"The AI is ahead of you by {ai - you:.1f} points on the {len(graded)} game(s) you called."
+    lines = ["🔮 <b>My calls</b>", f"You {you:+.1f} pts · the AI {ai:+.1f} on the same games", headline, ""]
     for r in rows[:12]:
         call = r["call"]
         team = r["home"] if call.get("winner") == "home" else r["away"]
@@ -655,16 +662,22 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await _show(update, "🏆 No graded calls yet: calls are scored after each game.", [back])
         return
     esc = html.escape
-    lines = ["🏆 <b>Leaderboard</b> (points; the AI's points on the same games)", ""]
+    lines = ["🏆 <b>Leaderboard</b>", "Points, and vs AI: your points minus the AI's on the same games (copying the AI scores 0)", ""]
     for i, r in enumerate(rows[:15], 1):
-        lines.append(f"{i}. {esc(r['name'])}: <b>{r['points']:+.1f}</b> (AI {r['ai_points']:+.1f}) · {r['calls']} calls, "
-                     f"beat the AI {r['beat_ai']}")
+        lines.append(f"{i}. {esc(r['name'])}: <b>{r['points']:+.1f}</b> · vs AI {r['vs_ai']:+.1f} · {r['calls']} calls")
     await _show(update, "\n".join(lines), [back])
 
 
 # --- AI bets: safe, risky, crazy ----------------------------------------------------------
 
 TIER_ICONS = {"safe": "🛡", "risky": "⚖️", "crazy": "🚀"}
+
+
+def _leg_line(leg: Dict[str, Any]) -> str:
+    chances = f"AI {pct(leg['probability'])}"
+    if leg.get("fair") is not None:
+        chances += f", bookmakers {pct(leg['fair'])}"
+    return f"{html.escape(leg['label'])} {leg['odds']['american']} ({chances})"
 
 
 def bets_text(data: Dict[str, Any], tier: Optional[str], league_title: str) -> str:
@@ -680,10 +693,12 @@ def bets_text(data: Dict[str, Any], tier: Optional[str], league_title: str) -> s
             continue
         for bet in bets_list:
             kind = "Single" if len(bet["legs"]) == 1 else f"{len(bet['legs'])}-leg multi"
-            lines.append(f"<b>{kind}</b> at {esc(bet['book'] or '')}: {bet['odds']['american']}")
-            lines += [f"   • {esc(leg['label'])} {leg['odds']['american']} (AI {pct(leg['probability'])})" for leg in bet["legs"]]
-            lines.append(f"   AI chance {pct(bet['probability'])} · $10 returns {money(10 * bet['odds']['decimal'])} · "
-                         f"value {bet['ev'] * 100:+.1f}%")
+            lines.append(f"<b>{kind}</b> at {esc(bet['book'] or '')}: {bet['odds']['american']} · {esc(bet['badge'])}")
+            lines += [f"   • {_leg_line(leg)}" for leg in bet["legs"]]
+            market = f", bookmakers {pct(bet['fair_probability'])}" if bet.get("fair_probability") is not None else ""
+            lines.append(f"   Chance: AI {pct(bet['probability'])}{market} · $10 returns {money(10 * bet['odds']['decimal'])}"
+                         f" · expected {bet['ev'] * 10:+.2f} per $10")
+            lines.append(f"   <i>{esc(bet['why'])}</i>")
         lines.append("")
     return "\n".join(lines)
 
@@ -764,7 +779,7 @@ def setup_handlers(application: Application, config: Config) -> None:
     application.add_handler(CallbackQueryHandler(clear_slip, pattern=r"^clear$"))
     application.add_handler(CallbackQueryHandler(call_start, pattern=r"^call:[a-z0-9_]+:\w+$"))
     application.add_handler(CallbackQueryHandler(call_winner, pattern=r"^cw:[a-z0-9_]+:\w+:[ah]$"))
-    application.add_handler(CallbackQueryHandler(call_confirm, pattern=r"^cc:[a-z0-9_]+:\w+:[ah]:(55|60|70|80|90|100)$"))
+    application.add_handler(CallbackQueryHandler(call_confirm, pattern=r"^cc:[a-z0-9_]+:\w+:[ah]:(50|60|70|80|90|100)$"))
     application.add_handler(CallbackQueryHandler(my_calls, pattern=r"^mycalls$"))
     application.add_handler(CallbackQueryHandler(leaderboard, pattern=r"^board$"))
     application.add_handler(CallbackQueryHandler(show_bets, pattern=r"^bets(:(safe|risky|crazy))?$"))

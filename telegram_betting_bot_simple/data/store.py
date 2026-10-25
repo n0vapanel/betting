@@ -55,6 +55,19 @@ CREATE TABLE IF NOT EXISTS predictions (
     graded_at REAL,
     UNIQUE (player, league, event_id)
 );
+CREATE TABLE IF NOT EXISTS ai_tickets (
+    day TEXT NOT NULL,             -- the slate's date (US Eastern)
+    league TEXT NOT NULL,
+    tier TEXT NOT NULL,            -- safe, risky or crazy: the tier's top ticket that day
+    logged_at REAL NOT NULL,       -- the last update before its first game started
+    first_start TEXT NOT NULL,
+    last_start TEXT NOT NULL,
+    payload TEXT NOT NULL,         -- JSON: legs (with teams and start times), odds, chances
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending, won, lost or void
+    result TEXT,
+    graded_at REAL,
+    PRIMARY KEY (day, league, tier)
+);
 CREATE TABLE IF NOT EXISTS ai_predictions (
     league TEXT NOT NULL,
     event_id TEXT NOT NULL,
@@ -75,6 +88,8 @@ PREDICTION_FIELDS = ("id", "player", "name", "league", "event_id", "espn_id", "h
                      "created_at", "call", "ai", "status", "result", "user_points", "ai_points", "graded_at")
 AI_FIELDS = ("league", "event_id", "espn_id", "home", "away", "start", "logged_at", "payload", "status",
              "result", "graded_at")
+TICKET_FIELDS = ("day", "league", "tier", "logged_at", "first_start", "last_start", "payload", "status", "result",
+                 "graded_at")
 JSON_FIELDS = {"call", "ai", "result", "payload"}
 
 
@@ -196,17 +211,28 @@ class Store:
             )
 
     def leaderboard(self) -> List[Dict[str, Any]]:
-        """Each player's graded calls and points, and the AI's points on the same calls."""
-        with closing(self._connect()) as db:
-            rows = db.execute(
-                "SELECT player, MAX(name), COUNT(*), SUM(user_points), SUM(ai_points), "
-                "SUM(CASE WHEN user_points > ai_points THEN 1 ELSE 0 END) "
-                "FROM predictions WHERE status = 'graded' GROUP BY player ORDER BY SUM(user_points) DESC"
-            ).fetchall()
-        return [
-            {"player": r[0], "name": r[1], "calls": r[2], "points": r[3] or 0.0, "ai_points": r[4] or 0.0, "beat_ai": r[5]}
-            for r in rows
-        ]
+        """Each player's graded calls and points, "vs AI" (their points minus the AI's on the
+        same calls) and "vs market" (their winner points minus the bookmakers')."""
+        players: Dict[str, Dict[str, Any]] = {}
+        for row in self.predictions(status="graded", limit=1_000_000):
+            entry = players.setdefault(row["player"], {
+                "player": row["player"], "name": row["name"], "calls": 0, "points": 0.0, "ai_points": 0.0,
+                "vs_market": 0.0, "market_calls": 0, "beat_ai": 0,
+            })
+            entry["calls"] += 1
+            entry["points"] += row["user_points"] or 0.0
+            entry["ai_points"] += row["ai_points"] or 0.0
+            entry["beat_ai"] += (row["user_points"] or 0.0) > (row["ai_points"] or 0.0)
+            winner = next((p for p in (row["result"] or {}).get("parts", []) if p["part"] == "winner"), None)
+            if winner and winner.get("market_points") is not None:
+                entry["vs_market"] += winner["points"] - winner["market_points"]
+                entry["market_calls"] += 1
+        board = sorted(players.values(), key=lambda e: e["points"], reverse=True)
+        for entry in board:
+            entry["vs_ai"] = round(entry["points"] - entry["ai_points"], 1)
+            entry["points"], entry["ai_points"] = round(entry["points"], 1), round(entry["ai_points"], 1)
+            entry["vs_market"] = round(entry["vs_market"], 1)
+        return board
 
     # --- the AI's own predictions -------------------------------------------------
 
@@ -235,6 +261,48 @@ class Store:
         with closing(self._connect()) as db:
             rows = db.execute(sql + " ORDER BY start DESC LIMIT ?", (*args, limit)).fetchall()
         return [_row(AI_FIELDS, values) for values in rows]
+
+    # --- the AI's own bets, one per tier per day, for an honest per-tier record ---------------
+
+    def log_ai_ticket(self, day: str, league: str, tier: str, first_start: str, last_start: str,
+                      payload: Dict[str, Any], now_iso: str) -> None:
+        """Save (or update) a tier's ticket for the day, until its first game has started."""
+        with closing(self._connect()) as db:
+            db.execute(
+                "INSERT INTO ai_tickets (day, league, tier, logged_at, first_start, last_start, payload) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(day, league, tier) DO UPDATE SET "
+                "logged_at = excluded.logged_at, first_start = excluded.first_start, "
+                "last_start = excluded.last_start, payload = excluded.payload "
+                "WHERE ai_tickets.status = 'pending' AND ai_tickets.first_start > ?",
+                (day, league, tier, time.time(), first_start, last_start, json.dumps(payload), now_iso),
+            )
+
+    def ai_tickets(self, league: Optional[str] = None, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        where, args = [], []
+        for clause, value in (("league = ?", league), ("status = ?", status)):
+            if value is not None:
+                where.append(clause)
+                args.append(value)
+        sql = f"SELECT {', '.join(TICKET_FIELDS)} FROM ai_tickets"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        with closing(self._connect()) as db:
+            rows = db.execute(sql + " ORDER BY day DESC", tuple(args)).fetchall()
+        return [_row(TICKET_FIELDS, values) for values in rows]
+
+    def grade_ai_ticket(self, day: str, league: str, tier: str, status: str, result: Dict[str, Any]) -> None:
+        with closing(self._connect()) as db:
+            db.execute(
+                "UPDATE ai_tickets SET status = ?, result = ?, graded_at = ? WHERE day = ? AND league = ? AND tier = ?",
+                (status, json.dumps(result), time.time(), day, league, tier),
+            )
+
+    def ai_prediction(self, league: str, event_id: str) -> Optional[Dict[str, Any]]:
+        with closing(self._connect()) as db:
+            values = db.execute(
+                f"SELECT {', '.join(AI_FIELDS)} FROM ai_predictions WHERE league = ? AND event_id = ?", (league, event_id)
+            ).fetchone()
+        return _row(AI_FIELDS, values) if values else None
 
     def grade_ai_prediction(self, league: str, event_id: str, status: str, result: Dict[str, Any]) -> None:
         with closing(self._connect()) as db:

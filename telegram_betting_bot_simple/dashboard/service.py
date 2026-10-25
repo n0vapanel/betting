@@ -150,7 +150,9 @@ class DashboardService:
                 nba_model.league_average(previous), self.params.team_prior_games,
             )
             context = {"current": current, "previous": previous, "avg": league_avg,
-                       "label": nba_model.season_label(today)}
+                       "label": nba_model.season_label(today),
+                       # Each season's own average, so last season's strengths can be regressed to the mean
+                       "averages": (nba_model.league_average(current), nba_model.league_average(previous), league_avg)}
             context["level"] = self._scoring_level(league, context)
             return context
 
@@ -183,7 +185,7 @@ class DashboardService:
                 continue
             ratings = [
                 nba_model.team_rating(context["current"].get(match[f"{side}_id"]),
-                                      context["previous"].get(match[f"{side}_id"]), self.params)
+                                      context["previous"].get(match[f"{side}_id"]), self.params, context["averages"])
                 for side in ("home", "away")
             ]
             if not all(ratings):
@@ -254,7 +256,8 @@ class DashboardService:
             rating, impact, missing, back_to_back = None, 0.0, [], False
             if match and context:
                 team_id = match[f"{side}_id"]
-                rating = nba_model.team_rating(context["current"].get(team_id), context["previous"].get(team_id), self.params)
+                rating = nba_model.team_rating(context["current"].get(team_id), context["previous"].get(team_id),
+                                               self.params, context["averages"])
                 team_games = (context["current"].get(team_id) or {}).get("games") or 0
                 for player in injuries.get(team_id, []):
                     if player["status"].lower() not in OUT_STATUSES:
@@ -283,6 +286,8 @@ class DashboardService:
             view[market] = {}
             for side, offer in sides.items():
                 chance = prediction.probability(market, side, offer["point"]) if prediction else offer["fair"]
+                # A push hands the stake back, so it counts in expected value but not as a win
+                push = prediction.push_probability(market, side, offer["point"]) if prediction else 0.0
                 view[market][side] = {
                     "price": offer["price"],
                     "american": format_american(decimal_to_american(offer["price"])) if offer["price"] > 1 else None,
@@ -291,7 +296,8 @@ class DashboardService:
                     "books": offer["books"],
                     "fair": offer["fair"],
                     "ai": chance,
-                    "ev": chance * offer["price"] - 1 if chance is not None else None,
+                    "push": push,
+                    "ev": chance * offer["price"] + push - 1 if chance is not None else None,
                     "label": outcome_label(game, market, side, offer["point"]),
                 }
         return view
@@ -316,12 +322,14 @@ class DashboardService:
         p = self.params
         model = 1 - p.market_weight - p.espn_weight
         return (
-            f"Model {MODEL_VERSION} blends the bookmakers' consensus ({p.market_weight:.0%}), ESPN's matchup predictor "
-            f"({p.espn_weight:.0%}) and our team model ({model:.0%}: points scored and allowed this season and last, "
-            f"home court, back-to-backs, injured players' scoring), with the scoring level set by today's market "
-            f"totals. Win, cover and over/under chances assume the final margin and total vary around the "
-            f"prediction by about {p.margin_sd:g} and {p.total_sd:g} points. The closing betting market is the best "
-            f"public NBA predictor; where the AI disagrees with it, treat that as an opinion, not an edge."
+            f"Model {MODEL_VERSION} leans on the bookmakers' consensus ({p.market_weight:.0%}), with ESPN's matchup "
+            f"predictor ({p.espn_weight:.0%}) and our team model ({model:.0%}: points scored and allowed this season "
+            f"and last, home court, back-to-backs, injured players' scoring). On ~13,900 NBA games (2011-22) a "
+            f"results-only team model added nothing on top of the closing odds, so the market dominates whenever "
+            f"there is a line; the team model takes over when there isn't one. Final margins spread around the "
+            f"prediction by about {p.margin_sd_factor:g}·√total points (13 at a 230 total), totals by "
+            f"{p.total_sd_factor:g}·√total (19). For scale: the closing market picks about 68% of NBA winners, "
+            f"the realistic ceiling for anyone."
         )
 
     def _book_view(self, book: Dict[str, Any]) -> Dict[str, Any]:
@@ -498,7 +506,9 @@ class DashboardService:
                     self.store.grade_prediction(row["id"], "void", final, None, None)
                     continue
                 box = self.espn.box_score(row["league"], final["espn_id"]) if row["call"].get("props") else None
-                result = calls.grade_call(row["call"], row["ai"], final, box)
+                # The AI and the market are scored on their last numbers before tip-off
+                logged = self.store.ai_prediction(row["league"], row["event_id"])
+                result = calls.grade_call(row["call"], row["ai"], final, box, (logged or {}).get("payload"))
                 self.store.grade_prediction(row["id"], "graded", result, result["points"], result["ai_points"])
                 graded += 1
             except Exception:
@@ -521,6 +531,25 @@ class DashboardService:
                 graded += 1
             except Exception:
                 logging.exception("Couldn't grade the AI prediction for %s", row["event_id"])
+        for row in self.store.ai_tickets(status="pending"):
+            if row["last_start"] >= cutoff:
+                continue
+            try:
+                finals = []
+                for leg in row["payload"]["legs"]:
+                    final = self._final({"league": row["league"], **leg})
+                    finals.append(final)
+                if any(f["state"] == "pending" for f in finals):
+                    if row["first_start"] < give_up:
+                        self.store.grade_ai_ticket(row["day"], row["league"], row["tier"], "void", {"reason": "no result"})
+                    continue
+                status, result = bets.grade_ticket(
+                    row["payload"]["legs"], [f if f["state"] == "final" else None for f in finals]
+                )
+                self.store.grade_ai_ticket(row["day"], row["league"], row["tier"], status, result)
+                graded += 1
+            except Exception:
+                logging.exception("Couldn't grade the AI's %s ticket for %s", row["tier"], row["day"])
         return graded
 
     def track_record(self, league: str = "basketball_nba") -> Dict[str, Any]:
@@ -530,7 +559,9 @@ class DashboardService:
             return {"games": 0}
         self.grade_due()
         rows = self.store.ai_predictions(league=league, status="graded")
-        return calls.track_record(rows)
+        record = calls.track_record(rows)
+        record["tiers"] = bets.tier_record(self.store.ai_tickets(league=league))
+        return record
 
     # --- AI-built bets: safe, risky, crazy --------------------------------------
 
@@ -546,22 +577,46 @@ class DashboardService:
                 for side, offer in sides.items():
                     if offer["ai"] is None or (allowed is not None and (card["id"], market, side) not in allowed):
                         continue
-                    prices = self._book_prices(league, card["id"], market, side, offer["point"])
+                    prices = self._book_prices(league, card["id"], market, side, offer["point"], max_hold=bets.MAX_HOLD)
                     if prices:
                         candidates.append(bets.Candidate(
                             event_id=card["id"], game=f"{card['away']} @ {card['home']}", market=market, side=side,
                             point=offer["point"], label=offer["label"], probability=offer["ai"], fair=offer["fair"],
-                            prices=prices,
+                            prices=prices, push=offer.get("push") or 0.0,
                         ))
         if league in AI_LEAGUES:
-            note = ("Built from the AI's probabilities and the best price at one bookmaker per bet. "
-                    "Most multis lose money over time: the bookmaker's edge grows with every leg.")
+            note = ("Built from the AI's chances and the best price at one bookmaker per bet. The AI leans on the "
+                    "bookmakers, so expect small negative value: these are for fun, not tips. " + bets.VIG_NOTE)
         else:
             note = ("No AI model for this league yet, so these use the bookmakers' own chances: "
-                    "expect slightly negative value on all of them.")
+                    "expect slightly negative value on all of them. " + bets.VIG_NOTE)
         if allowed is not None and not allowed:
             note = "You have no open calls in this league yet: make some in Games, then come back."
-        return {"league": league, "source": source, "note": note, "tiers": bets.build_all(candidates)}
+        tiers = bets.build_all(candidates)
+        if source == "all" and league in AI_LEAGUES:
+            self._log_ai_tickets(league, board, tiers)
+        return {"league": league, "source": source, "note": note, "tiers": tiers}
+
+    def _log_ai_tickets(self, league: str, board: Dict[str, Any], tiers: Dict[str, Dict[str, Any]]) -> None:
+        """Keep each tier's top ticket for the day (until its first game starts), to grade it later."""
+        if self.store is None:
+            return
+        cards = {card["id"]: card for card in board["games"]}
+        now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for key, tier in tiers.items():
+            if not tier["bets"]:
+                continue
+            ticket = tier["bets"][0]
+            legs = [{**leg, "home": cards[leg["event_id"]]["home"], "away": cards[leg["event_id"]]["away"],
+                     "start": cards[leg["event_id"]]["start"]} for leg in ticket["legs"] if leg["event_id"] in cards]
+            if len(legs) != len(ticket["legs"]):
+                continue
+            starts = sorted(leg["start"] for leg in legs)
+            day = _parse_time(starts[0]).astimezone(ESPN_DAY_TZ).date().isoformat()
+            try:
+                self.store.log_ai_ticket(day, league, key, starts[0], starts[-1], {**ticket, "legs": legs}, now_iso)
+            except Exception:
+                logging.exception("Couldn't log the AI's %s ticket", key)
 
     def _legs_from_calls(self, league: str, player: str, board: Dict[str, Any]) -> set:
         """The bets someone's open calls imply: their winner, and from their score the side of the
@@ -652,12 +707,26 @@ class DashboardService:
         result["removed"] = missing
         return result
 
-    def _book_prices(self, league: str, event_id: str, market: str, side: str, point: Optional[float]) -> Dict[str, float]:
-        """Each bookmaker's decimal price for one pick, at the same line as the pick."""
+    def _book_prices(self, league: str, event_id: str, market: str, side: str, point: Optional[float],
+                     max_hold: Optional[float] = None) -> Dict[str, float]:
+        """Each bookmaker's decimal price for one pick, at the same line as the pick.
+
+        With ``max_hold``, bookmakers whose margin on this market (at this
+        line) is higher are left out.
+        """
         game = next((g for g in self.odds.league_games(league) if g["id"] == event_id), None)
         prices = {}
         for book in (game or {}).get("books", []):
-            offer = book["markets"].get(market, {}).get(side)
-            if offer and offer["point"] == point:
-                prices[book["title"]] = offer["price"]
+            outcomes = book["markets"].get(market, {})
+            offer = outcomes.get(side)
+            if not offer or offer["point"] != point:
+                continue
+            if max_hold is not None:
+                if any(o["point"] != (-point if market == "spreads" and s != side and point is not None else point)
+                       for s, o in outcomes.items() if s != "draw"):
+                    continue  # the other side is at a different line: the margin can't be measured
+                hold = sum(1 / o["price"] for o in outcomes.values()) - 1
+                if hold > max_hold:
+                    continue
+            prices[book["title"]] = offer["price"]
         return prices

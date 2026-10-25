@@ -228,6 +228,7 @@ def test_anyone_can_make_a_call_and_see_it_scored(service, tmp_path) -> None:
     assert "Who wins?" in screens[-1]["text"]
     tap(handlers.call_winner, screens[-1]["buttons"][0][1][1])  # the home team, the Thunder
     assert "80%: +21.0 if right, -39.0 if wrong" in screens[-1]["text"]
+    assert "AI agrees: it gives them" in screens[-1]["text"]  # the Thunder are big favourites
     confirm = tap(handlers.call_confirm, "cc:basketball_nba:g1:h:80")
     assert confirm.answers == ["Call saved ✓"]
     assert "Call saved: Oklahoma City Thunder at 80%" in screens[-1]["text"]

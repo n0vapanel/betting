@@ -52,6 +52,7 @@ class PropCall(BaseModel):
     stat: Literal["pts", "reb", "ast", "fg3m", "stl", "blk", "tov", "pra"]
     line: float = Field(ge=0, le=150)
     side: Literal["over", "under"]
+    confidence: float = Field(0.6, ge=0.5, le=1.0)
 
 
 class Call(BaseModel):
