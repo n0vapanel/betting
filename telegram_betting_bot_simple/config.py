@@ -1,5 +1,5 @@
 # telegram_betting_bot_simple/config.py
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,6 +22,19 @@ class Config(BaseSettings):
     odds_regions: str = Field("us", validation_alias="ODDS_REGIONS")
     # Below this many Odds API requests left this month, serve saved odds instead of fetching
     odds_reserve: int = Field(50, validation_alias="ODDS_RESERVE")
+    # AI analysts: each one is switched on by its API key. Their forecasts are graded, and only move the
+    # AI's own chances once their record earns it
+    anthropic_api_key: Optional[str] = Field(None, validation_alias="ANTHROPIC_API_KEY")
+    anthropic_model: str = Field("claude-opus-5-5", validation_alias="ANTHROPIC_MODEL")
+    deepseek_api_key: Optional[str] = Field(None, validation_alias="DEEPSEEK_API_KEY")
+    deepseek_model: str = Field("deepseek-v4-pro", validation_alias="DEEPSEEK_MODEL")
+    # Calls per analyst per 24 hours (each costs money on your API account), how hard Claude thinks,
+    # whether Claude checks the latest news with web search first (about a cent per search), and how
+    # many hours before tip-off games get analysed
+    ai_daily_limit: int = Field(25, validation_alias="AI_DAILY_LIMIT")
+    ai_effort: Literal["low", "medium", "high", "xhigh", "max"] = Field("medium", validation_alias="AI_EFFORT")
+    ai_web_search: bool = Field(False, validation_alias="AI_WEB_SEARCH")
+    ai_lookahead_hours: float = Field(6.0, validation_alias="AI_LOOKAHEAD_HOURS")
     # Writable folder for the odds store and bot state shared by the bot and dashboard;
     # systemd sets STATE_DIRECTORY for services with StateDirectory=
     state_dir: Optional[str] = Field(None, validation_alias="STATE_DIRECTORY")

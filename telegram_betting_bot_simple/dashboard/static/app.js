@@ -172,6 +172,7 @@ const state = {
   calls: [], // my calls (/api/calls)
   betsSource: saved.betsSource === "mine" ? "mine" : "all",
   draft: null, // the call being made in the modal
+  asking: null, // "gameId:analyst" while an AI analyst is being asked
 };
 
 function persist() {
@@ -385,6 +386,7 @@ function renderCard(game) {
       <div class="matchup">${team("away")}${team("home")}${draw}</div>
       <div class="sumline">${summary}</div>
       <div class="leans">${leanChip(game, "h2h")}${leanChip(game, "spreads")}${leanChip(game, "totals")}</div>
+      ${analystLine(game)}
       <div class="card-foot">
         ${yours || '<span></span>'}
         <span class="foot-actions">${callButton}
@@ -393,6 +395,16 @@ function renderCard(game) {
       </div>
       ${open ? `<div class="details">${renderDetails(game)}</div>` : ""}
     </article>`;
+}
+
+// The AI analysts' latest picks (Claude, DeepSeek), one chip each
+function analystLine(game) {
+  const list = game.analysts || [];
+  if (!list.length) return "";
+  return `<div class="analysts-line">${list.map((a) => {
+    const home = a.home_win >= 0.5;
+    return `<span class="chip analyst-chip" title="${esc(a.label)}'s forecast: open the AI analysts tab for its reasons">🧠 ${esc(a.label)}: ${esc(shortName(home ? game.home : game.away))} ${pct(home ? a.home_win : 1 - a.home_win)}</span>`;
+  }).join(" ")}</div>`;
 }
 
 function callSummary(call, game) {
@@ -437,10 +449,10 @@ function renderDetails(game) {
   const detail = state.details[game.id];
   if (!detail) return '<div class="loading">Loading prediction, players and every bookmaker…</div>';
   if (detail.error) return `<div class="error-box">${esc(detail.error)}</div>`;
-  const tabs = detail.prediction ? ["prediction", "players", "odds"] : ["odds"];
+  const tabs = detail.prediction ? ["prediction", "analysts", "players", "odds"] : ["odds"];
   const tab = tabs.includes(state.tabs[game.id]) ? state.tabs[game.id] : tabs[0];
-  const names = { prediction: "Prediction", players: "Players", odds: "All odds" };
-  const body = tab === "prediction" ? predictionTab(detail) : tab === "players" ? playersTab(detail) : oddsTab(detail);
+  const names = { prediction: "Prediction", analysts: "AI analysts", players: "Players", odds: "All odds" };
+  const body = { prediction: predictionTab, analysts: analystsTab, players: playersTab, odds: oddsTab }[tab](detail);
   return `
     <div class="tabs">${tabs.map((t) => `<button class="${t === tab ? "on" : ""}" data-tab="${t}" data-id="${esc(game.id)}">${names[t]}</button>`).join("")}</div>
     ${body}`;
@@ -467,6 +479,87 @@ function predictionTab(game) {
     ${p.factors.length ? `<h4>What moved our model</h4><ul class="factors">${p.factors.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}
     <h4>Injury report</h4>${injuries}
     <p class="note">${esc(p.method || "")}</p>`;
+}
+
+function ago(seconds) {
+  const minutes = Math.max(0, Math.round((Date.now() / 1000 - seconds) / 60));
+  return minutes < 60 ? `${minutes} min ago` : minutes < 48 * 60 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} days ago`;
+}
+
+// Links found by Claude's web search: only plain web addresses are shown as links
+const webLink = (source) => /^https?:\/\//i.test(source.url || "")
+  ? `<a href="${esc(source.url)}" target="_blank" rel="noopener noreferrer">${esc(source.title || source.url)}</a>` : "";
+
+function analystsTab(game) {
+  const view = game.analysts;
+  if (!view) {
+    return `<div class="note">No AI analysts are switched on. To add Claude and/or DeepSeek, put
+      <code>ANTHROPIC_API_KEY=...</code> and/or <code>DEEPSEEK_API_KEY=...</code> in front of the install command on the
+      server and run it again. They then forecast each NBA game a few hours before tip-off, and their forecasts are
+      graded like everyone else's.</div>`;
+  }
+  const setup = Object.fromEntries((view.setup || []).map((entry) => [entry.key, entry]));
+  return `${view.analysts.map((a) => analystCard(game, a, setup[a.key])).join("")}
+    <p class="note">Each analyst reads this game's odds, the AI's numbers, injuries, rest and player projections
+      (Claude can also search the web for late news), then gives its own forecast. Forecasts are graded after the
+      game. An analyst only moves the AI's numbers once its graded record shows it helps: it needs at least 40 graded
+      games, and the AI keeps only the part of its moves it is 95% sure of. Each call costs a little on your API
+      account.</p>`;
+}
+
+function analystCard(game, a, setup) {
+  const f = a.forecast;
+  const busy = state.asking === `${game.id}:${a.key}`;
+  const usage = setup ? `${setup.calls_24h}/${setup.daily_limit} calls in 24 h` : "";
+  const ask = a.enabled && !game.live
+    ? `<button class="ghost small ask-btn" data-ask="${esc(a.key)}" data-id="${esc(game.id)}"${busy || state.asking ? " disabled" : ""}>${busy ? `Asking ${esc(a.label)}… (up to 2 min)` : f ? "Ask again" : `Ask ${esc(a.label)} now`}</button>`
+    : "";
+  const head = `<div class="analyst-head"><b>${esc(a.label)}</b>
+    <span class="muted small">${esc(a.model || "")}${f ? ` · ${ago(a.created_at)}` : ""}${f && a.cost != null ? ` · about $${a.cost.toFixed(3)}` : ""}${usage ? ` · ${usage}` : ""}</span>${ask}</div>`;
+  if (!f) {
+    return `<div class="analyst">${head}<div class="muted small">${a.enabled
+      ? "No forecast yet: it runs by itself a few hours before tip-off, or ask now."
+      : "Switched off on the server (no API key)."}</div></div>`;
+  }
+  const home = f.home_win_prob >= 0.5;
+  const side = (p) => (p == null ? null : home ? p : 1 - p);
+  const team = shortName(home ? game.home : game.away);
+  const gap = a.market_home_win != null ? side(f.home_win_prob) - side(a.market_home_win) : null;
+  return `
+    <div class="analyst">
+      ${head}
+      <div class="analyst-call">${esc(team)} <b>${pct(side(f.home_win_prob))}</b> · ${esc(marginText(f.home_margin, game))} ·
+        total ${Number(f.total).toFixed(0)} · <span class="tag">${esc(f.confidence)} confidence</span></div>
+      <div class="muted small">Same team: bookmakers ${pct(side(a.market_home_win))}, AI ${pct(side(a.base_home_win))}${gap != null && Math.abs(gap) >= 0.005 ? ` · ${gap > 0 ? "above" : "below"} the bookmakers by ${Math.abs(gap * 100).toFixed(0)} pts` : ""}</div>
+      <p>${esc(f.summary)}</p>
+      ${f.factors?.length ? `<ul class="factors">${f.factors.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+      <div class="small"><b>Where it sees an edge:</b> ${esc(f.edge)}</div>
+      ${a.news ? `<details class="news"><summary>Late news it used</summary><p class="small">${esc(a.news)}</p>
+        <div class="small">${(a.sources || []).map(webLink).filter(Boolean).join(" · ")}</div></details>` : ""}
+      <div class="muted small trust">Trust earned: ${pct(a.trust)}${a.trust > 0
+        ? " of its move away from the AI is in the AI's numbers"
+        : " (its forecasts don't move the AI until its graded record shows they help)"}</div>
+    </div>`;
+}
+
+async function askAnalyst(id, key) {
+  state.asking = `${id}:${key}`;
+  renderGames();
+  try {
+    const view = await api("/api/analysts/ask", { method: "POST", body: JSON.stringify({ league: state.league, id, analyst: key }) });
+    if (state.details[id]) state.details[id].analysts = view;
+    const card = state.data?.games.find((g) => g.id === id);
+    if (card) {
+      card.analysts = view.analysts.filter((a) => a.forecast && a.status === "pending")
+        .map((a) => ({ analyst: a.key, label: a.label, home_win: a.forecast.home_win_prob }));
+    }
+    toast("New forecast in");
+  } catch (error) {
+    if (!error.signIn) toast(error.message);
+  } finally {
+    state.asking = null;
+    if (state.view === "games") renderGames();
+  }
 }
 
 function playersTab(game) {
@@ -951,10 +1044,33 @@ async function loadRecord() {
         <td>${g.final_away}–${g.final_home}</td><td>${g.hit ? '<span class="good">✓</span>' : '<span class="bad">✗</span>'}</td></tr>`).join("")}</tbody>
     </table></div>`}
     ${!r.games ? tierRecord(r.tiers) : ""}
+    ${analystRecord(r.analysts)}
     <p class="note">What good looks like: nobody gets near 100%. The closing betting market picks about 68% of NBA winners
       (65.7-69.8% by season) with a Brier score near 0.20; a sound model lands at 66-69% and 0.20-0.21. Brier score is the
       average squared miss of the win chance: always saying 50% scores 0.250. Against the closing spread, 50-53% is
       realistic and 52.4% is needed to break even at standard prices.</p>`;
+}
+
+// The AI analysts (Claude, DeepSeek): graded next to the AI and the bookmakers, with the trust they've earned
+function analystRecord(analysts) {
+  if (!analysts?.length) return "";
+  const brier = (x) => (x == null ? "–" : x.toFixed(3));
+  const rows = analysts.map((a) => `<tr><td>${esc(a.label)}${a.enabled ? "" : ' <span class="muted small">(off)</span>'}</td>
+    <td>${a.games}</td><td>${a.games ? pct(a.accuracy) : "–"}</td><td>${brier(a.brier)}</td><td>${brier(a.brier_ai)}</td>
+    <td>${brier(a.brier_market)}</td>
+    <td class="${a.points == null || a.ai_points == null ? "" : a.points >= a.ai_points ? "good" : "bad"}">${a.points != null && a.ai_points != null ? signed(a.points - a.ai_points) : "–"}</td>
+    <td>${a.games < a.min_games ? `0% <span class="muted small">(${a.games}/${a.min_games} games)</span>` : pct(a.trust)}</td>
+    <td>${a.calls_24h}/${a.daily_limit} · $${a.cost_24h.toFixed(2)} <span class="muted small">($${a.cost.toFixed(2)} total)</span></td></tr>`).join("");
+  return `
+    <h3 class="section">AI analysts: Claude and DeepSeek, graded like everyone else</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Analyst</th><th>Graded</th><th>Winners right</th><th>Brier</th><th>AI's Brier</th><th>Bookmakers' Brier</th>
+        <th>Points vs AI</th><th>Trust earned</th><th>Calls (24 h) · spend</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <p class="note">Brier scores are on the same games, from the moment each analyst gave its forecast. An analyst earns
+      trust only when its moves away from the AI line up with results over many games; until then its forecasts are
+      shown but don't change the AI's numbers. Spend is estimated from the tokens each call used.</p>`;
 }
 
 // How the AI's own daily bets did, per risk level: is Safe really safe?
@@ -990,6 +1106,8 @@ document.addEventListener("click", (event) => {
     else render();
   } else if (target.dataset.call) {
     openCall(target.dataset.call);
+  } else if (target.dataset.ask) {
+    askAnalyst(target.dataset.id, target.dataset.ask);
   } else if (target.classList.contains("details-btn")) {
     toggleDetails(target.dataset.id);
   } else if (target.dataset.tab) {

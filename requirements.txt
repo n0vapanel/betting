@@ -12,4 +12,6 @@ tzdata>=2023.3
 # Web dashboard
 fastapi>=0.115,<1
 uvicorn>=0.30,<1
+# AI analysts: Claude through the official SDK (DeepSeek's API is called with requests)
+anthropic>=2.3,<3
 pytest>=7.4

@@ -24,6 +24,14 @@
 # space so the keys stay out of the shell history:
 #    TELEGRAM_BOT_TOKEN=... TELEGRAM_CHANNEL_ID=... THE_ODDS_API_KEY=... bash setup_vps.sh
 # Also: API_SPORTS_KEY, DASHBOARD_PASSWORD, BRANCH (default main), REPO_URL.
+#
+# AI analysts (optional; each call costs money on that API account):
+#   ANTHROPIC_API_KEY=sk-ant-...  Claude (console.anthropic.com)
+#   DEEPSEEK_API_KEY=sk-...       DeepSeek (platform.deepseek.com)
+#   AI_WEB_SEARCH=1               Claude checks the latest news before each forecast (about $0.01 a search)
+#   AI_DAILY_LIMIT=25             calls per analyst per 24 hours
+#   AI_EFFORT=medium              how hard Claude thinks: low, medium, high, xhigh or max
+#   ANTHROPIC_MODEL, DEEPSEEK_MODEL to pick other models
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/n0vapanel/betting.git}"
@@ -36,7 +44,8 @@ ENV_FILE="$APP/.env"
 SERVICE="bettingbot"
 DASHBOARD="bettingdash"
 # Secrets may be pre-set in the environment: keep them away from apt, git and pip.
-export -n TELEGRAM_BOT_TOKEN TELEGRAM_CHANNEL_ID API_SPORTS_KEY THE_ODDS_API_KEY NEWS_API_KEY DASHBOARD_PASSWORD
+export -n TELEGRAM_BOT_TOKEN TELEGRAM_CHANNEL_ID API_SPORTS_KEY THE_ODDS_API_KEY NEWS_API_KEY DASHBOARD_PASSWORD \
+  ANTHROPIC_API_KEY DEEPSEEK_API_KEY
 
 # Settings that can be given on the command line, and what a valid value looks like
 declare -A PATTERNS=(
@@ -45,6 +54,13 @@ declare -A PATTERNS=(
   [THE_ODDS_API_KEY]='^[A-Za-z0-9_-]{16,64}$'
   [API_SPORTS_KEY]='^[A-Za-z0-9_-]{16,64}$'
   [DASHBOARD_PASSWORD]='^[A-Za-z0-9_.@%+=:-]{8,64}$'
+  [ANTHROPIC_API_KEY]='^sk-ant-[A-Za-z0-9_-]{20,300}$'
+  [DEEPSEEK_API_KEY]='^sk-[A-Za-z0-9]{16,100}$'
+  [AI_WEB_SEARCH]='^(0|1|true|false)$'
+  [AI_DAILY_LIMIT]='^[0-9]{1,4}$'
+  [AI_EFFORT]='^(low|medium|high|xhigh|max)$'
+  [ANTHROPIC_MODEL]='^claude-[a-z0-9.-]{3,60}$'
+  [DEEPSEEK_MODEL]='^deepseek-[a-z0-9.-]{2,60}$'
 )
 PRESET=()
 for var in "${!PATTERNS[@]}"; do

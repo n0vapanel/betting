@@ -7,6 +7,7 @@ import tempfile
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+from .ai.desk import AnalystDesk
 from .config import Config
 from .dashboard.service import DashboardService
 from .data.cache import TTLCache
@@ -28,4 +29,20 @@ def build_service(config: Config) -> Optional[DashboardService]:
         config.odds_api_key, cache, config.odds_cache_minutes, config.odds_regions,
         store=store, reserve=config.odds_reserve,
     )
-    return DashboardService(odds, EspnClient(cache), ZoneInfo(config.timezone), store=store)
+    return DashboardService(odds, EspnClient(cache), ZoneInfo(config.timezone), store=store,
+                            analysts=build_analysts(config, store))
+
+
+def build_analysts(config: Config, store: Store) -> Optional[AnalystDesk]:
+    """The AI analysts whose API keys are set (None when there are none)."""
+    analysts = []
+    if config.anthropic_api_key:
+        from .ai.claude import ClaudeAnalyst  # the SDK is only needed with a key
+        analysts.append(ClaudeAnalyst(config.anthropic_api_key, config.anthropic_model, config.ai_effort,
+                                      config.ai_web_search))
+    if config.deepseek_api_key:
+        from .ai.deepseek import DeepSeekAnalyst
+        analysts.append(DeepSeekAnalyst(config.deepseek_api_key, config.deepseek_model))
+    if not analysts:
+        return None
+    return AnalystDesk(store, analysts, config.ai_daily_limit, config.ai_lookahead_hours)

@@ -16,6 +16,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
+from ..ai.desk import AnalystDesk
+from ..ai.forecast import AnalystError
 from ..data.cache import TTLCache
 from ..data.espn_client import ESPN_DAY_TZ, LEAGUES as ESPN_LEAGUES, OUT_STATUSES, EspnClient
 from ..data.leagues import SPORTS, pick_leagues
@@ -63,6 +65,7 @@ class DashboardService:
         params: nba_model.Params = nba_model.Params(),
         workers: int = 8,
         store: Optional[Store] = None,
+        analysts: Optional[AnalystDesk] = None,
     ) -> None:
         self.odds = odds
         self.espn = espn
@@ -72,6 +75,8 @@ class DashboardService:
         self.pool = ThreadPoolExecutor(max_workers=workers)
         # People's predictions and the AI's track record; None turns those features off
         self.store = store
+        # The AI analysts (Claude, DeepSeek), when an API key for one is set
+        self.analysts = analysts
 
     # --- menus -----------------------------------------------------------
 
@@ -107,6 +112,10 @@ class DashboardService:
             results = list(self.pool.map(lambda game: self._card(league, game, context), games))
             cards = [card for card, _ in results]
             self._log_ai_predictions(league, results)
+            if self.analysts and league in AI_LEAGUES:
+                briefs = self.analysts.briefs(league)
+                for card in cards:
+                    card["analysts"] = briefs.get(card["id"], [])
             return {
                 "league": league,
                 "title": next((s["title"] for s in self.odds.sports() if s.get("key") == league), league),
@@ -132,7 +141,13 @@ class DashboardService:
         card["books"] = [self._book_view(book) for book in game["books"]]
         if league in AI_LEAGUES and info.get("prediction") and info.get("match"):
             card["players"] = self._players(league, info, context)
+        if self.analysts and league in AI_LEAGUES:
+            card["analysts"] = self.analysts.game_view(league, event_id)
         return card
+
+    def forget(self, league: str) -> None:
+        """Rebuild the league's game cards on the next request (new analyst forecasts)."""
+        self.cache.invalidate(("games", league))
 
     def _league_context(self, league: str) -> Optional[Dict[str, Any]]:
         """Standings this season and last, for the team model (NBA only)."""
@@ -207,6 +222,11 @@ class DashboardService:
         except Exception:
             logging.exception("Prediction failed for %s @ %s", game["away"], game["home"])
         prediction = info.get("prediction")
+        if prediction is not None and self.analysts:
+            try:
+                self.analysts.adjust(league, game["id"], prediction, self.params)
+            except Exception:
+                logging.exception("Couldn't apply the analysts' forecasts to %s", game["id"])
         card = {
             "id": game["id"],
             "league": league,
@@ -394,7 +414,7 @@ class DashboardService:
 
     # --- people's predictions ("calls") and the AI's track record ------------------
 
-    def _detail(self, league: str, event_id: str) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Dict[str, Any]]]:
+    def detail(self, league: str, event_id: str) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Dict[str, Any]]]:
         """A game's card, the prediction behind it, and its players' projections by player id."""
         game = next((g for g in self.odds.league_games(league) if g["id"] == event_id), None)
         if game is None:
@@ -411,7 +431,7 @@ class DashboardService:
 
     def judge(self, league: str, event_id: str, call: Dict[str, Any]) -> Dict[str, Any]:
         """What the AI thinks of a call, part by part (shown live while someone makes it)."""
-        card, info, players = self._detail(league, event_id)
+        card, info, players = self.detail(league, event_id)
         prediction = info.get("prediction")
         if prediction is None:
             raise CallRejected("Calls are open for NBA games for now: the AI has no prediction for this game.")
@@ -421,7 +441,7 @@ class DashboardService:
         """Save someone's call on a game (replacing their earlier one) with the AI's view of it."""
         if self.store is None:
             raise CallRejected("Saving calls needs the server's state folder.")
-        card, info, players = self._detail(league, event_id)
+        card, info, players = self.detail(league, event_id)
         if card["live"]:
             raise CallRejected("This game has started: calls close at tip-off.")
         prediction = info.get("prediction")
@@ -477,7 +497,7 @@ class DashboardService:
             except Exception:
                 logging.exception("Couldn't log the AI prediction for %s", card["id"])
 
-    def _final(self, row: Dict[str, Any]) -> Dict[str, Any]:
+    def final(self, row: Dict[str, Any]) -> Dict[str, Any]:
         """A finished game's score from ESPN (state final, void or pending)."""
         espn_id = row.get("espn_id")
         if not espn_id and row["league"] in ESPN_LEAGUES:
@@ -502,7 +522,7 @@ class DashboardService:
         graded = 0
         for row in self.store.predictions(status="pending", started_before=cutoff):
             try:
-                final = self._final(row)
+                final = self.final(row)
                 if final["state"] == "pending":
                     if row["start"] < give_up:
                         self.store.grade_prediction(row["id"], "void", {"reason": "no result"}, None, None)
@@ -520,7 +540,7 @@ class DashboardService:
                 logging.exception("Couldn't grade call %s", row["id"])
         for row in self.store.ai_predictions(status="pending", started_before=cutoff):
             try:
-                final = self._final(row)
+                final = self.final(row)
                 if final["state"] == "pending":
                     if row["start"] < give_up:
                         self.store.grade_ai_prediction(row["league"], row["event_id"], "void", {"reason": "no result"})
@@ -542,7 +562,7 @@ class DashboardService:
             try:
                 finals = []
                 for leg in row["payload"]["legs"]:
-                    final = self._final({"league": row["league"], **leg})
+                    final = self.final({"league": row["league"], **leg})
                     finals.append(final)
                 if any(f["state"] == "pending" for f in finals):
                     if row["first_start"] < give_up:
@@ -555,6 +575,8 @@ class DashboardService:
                 graded += 1
             except Exception:
                 logging.exception("Couldn't grade the AI's %s ticket for %s", row["tier"], row["day"])
+        if self.analysts:
+            graded += self.analysts.grade_due(self, cutoff, give_up)
         return graded
 
     def track_record(self, league: str = "basketball_nba") -> Dict[str, Any]:
@@ -566,7 +588,22 @@ class DashboardService:
         rows = self.store.ai_predictions(league=league, status="graded")
         record = calls.track_record(rows)
         record["tiers"] = bets.tier_record(self.store.ai_tickets(league=league))
+        record["analysts"] = self.analysts.record() if self.analysts else []
         return record
+
+    # --- the AI analysts ----------------------------------------------------------------
+
+    def ask_analyst(self, league: str, event_id: str, analyst: str) -> Dict[str, Any]:
+        """Ask one analyst about a game now (within its daily limit); returns the game's analyst view."""
+        if self.analysts is None:
+            raise CallRejected("No AI analysts are set up: add ANTHROPIC_API_KEY or DEEPSEEK_API_KEY on the server.")
+        try:
+            result = self.analysts.analyze(self, league, event_id, only=analyst, asked=True)[analyst]
+        except AnalystError as exc:
+            raise CallRejected(str(exc)) from None
+        if result["status"] != "done":
+            raise CallRejected(result["message"])
+        return self.analysts.game_view(league, event_id)
 
     # --- AI-built bets: safe, risky, crazy --------------------------------------
 

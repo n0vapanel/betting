@@ -148,6 +148,17 @@ def game_card_text(card: Dict[str, Any], odds_as_of: Optional[str]) -> str:
         if card.get("espn_home_win") is not None:
             lines.append(f"ESPN predictor: {esc(short_name(home, league))} {pct(card['espn_home_win'])}")
 
+    analysts = [a for a in (card.get("analysts") or {}).get("analysts", []) if a.get("forecast")]
+    if analysts:
+        lines += ["", "🧠 <b>AI analysts</b>"]
+        for analyst in analysts:
+            forecast = analyst["forecast"]
+            home_pick = forecast["home_win_prob"] >= 0.5
+            chance = forecast["home_win_prob"] if home_pick else 1 - forecast["home_win_prob"]
+            first = (forecast.get("summary") or "").split(". ")[0].rstrip(".")
+            lines.append(f"{esc(analyst['label'])}: {esc(short_name(home if home_pick else away, league))} "
+                         f"{pct(chance)}" + (f": {esc(first[:200])}." if first else ""))
+
     injuries = card.get("injuries") or {}
     out = {side: [i for i in injuries.get(side, []) if "(Out)" in i or "(Doubtful)" in i] for side in ("away", "home")}
     if any(out.values()):

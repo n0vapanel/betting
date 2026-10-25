@@ -4,8 +4,9 @@ Holds each league's latest odds snapshot (so the two processes never pay
 twice for the same fetch and nothing is lost on restart), a log of The
 Odds API's quota headers, short leases so only one process refreshes a
 league at a time, the predictions people make (and how they scored), and
-the AI's own pre-game predictions for its track record. WAL mode lets
-readers and a writer work concurrently.
+the AI's own pre-game predictions for its track record, and the AI
+analysts' forecasts (Claude, DeepSeek) with what each call cost. WAL mode
+lets readers and a writer work concurrently.
 """
 
 from __future__ import annotations
@@ -82,6 +83,31 @@ CREATE TABLE IF NOT EXISTS ai_predictions (
     graded_at REAL,
     PRIMARY KEY (league, event_id)
 );
+CREATE TABLE IF NOT EXISTS analyses (
+    analyst TEXT NOT NULL,         -- claude or deepseek
+    league TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    espn_id TEXT,
+    home TEXT NOT NULL,
+    away TEXT NOT NULL,
+    start TEXT NOT NULL,
+    created_at REAL NOT NULL,      -- its latest forecast before tip-off
+    payload TEXT NOT NULL,         -- JSON: the forecast, its reasons, and the AI's and market's chances then
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending, graded or void
+    result TEXT,
+    graded_at REAL,
+    PRIMARY KEY (analyst, league, event_id)
+);
+CREATE TABLE IF NOT EXISTS analyst_calls (
+    ts REAL NOT NULL,
+    analyst TEXT NOT NULL,
+    model TEXT NOT NULL,
+    event_id TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cost REAL NOT NULL,            -- estimated US dollars
+    ok INTEGER NOT NULL            -- 0 when no forecast came back (it still counts toward the daily limit)
+);
 """
 
 PREDICTION_FIELDS = ("id", "player", "name", "league", "event_id", "espn_id", "home", "away", "start",
@@ -90,6 +116,8 @@ AI_FIELDS = ("league", "event_id", "espn_id", "home", "away", "start", "logged_a
              "result", "graded_at")
 TICKET_FIELDS = ("day", "league", "tier", "logged_at", "first_start", "last_start", "payload", "status", "result",
                  "graded_at")
+ANALYSIS_FIELDS = ("analyst", "league", "event_id", "espn_id", "home", "away", "start", "created_at", "payload",
+                   "status", "result", "graded_at")
 JSON_FIELDS = {"call", "ai", "result", "payload"}
 
 
@@ -310,3 +338,76 @@ class Store:
                 "UPDATE ai_predictions SET status = ?, result = ?, graded_at = ? WHERE league = ? AND event_id = ?",
                 (status, json.dumps(result), time.time(), league, event_id),
             )
+
+    # --- the AI analysts' forecasts and what they cost ---------------------------------
+
+    def save_analysis(self, row: Dict[str, Any]) -> None:
+        """Save an analyst's latest forecast for a game (replacing its earlier one until the game is graded)."""
+        with closing(self._connect()) as db:
+            db.execute(
+                "INSERT INTO analyses (analyst, league, event_id, espn_id, home, away, start, created_at, payload) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(analyst, league, event_id) DO UPDATE SET "
+                "espn_id = COALESCE(excluded.espn_id, analyses.espn_id), start = excluded.start, "
+                "created_at = excluded.created_at, payload = excluded.payload WHERE analyses.status = 'pending'",
+                (row["analyst"], row["league"], row["event_id"], row.get("espn_id"), row["home"], row["away"],
+                 row["start"], time.time(), json.dumps(row["payload"])),
+            )
+
+    def analysis(self, analyst: str, league: str, event_id: str) -> Optional[Dict[str, Any]]:
+        with closing(self._connect()) as db:
+            values = db.execute(
+                f"SELECT {', '.join(ANALYSIS_FIELDS)} FROM analyses WHERE analyst = ? AND league = ? AND event_id = ?",
+                (analyst, league, event_id),
+            ).fetchone()
+        return _row(ANALYSIS_FIELDS, values) if values else None
+
+    def analyses(self, analyst: Optional[str] = None, league: Optional[str] = None, event_id: Optional[str] = None,
+                 status: Optional[str] = None, started_before: Optional[str] = None,
+                 limit: int = 5000) -> List[Dict[str, Any]]:
+        where, args = [], []
+        for clause, value in (("analyst = ?", analyst), ("league = ?", league), ("event_id = ?", event_id),
+                              ("status = ?", status), ("start < ?", started_before)):
+            if value is not None:
+                where.append(clause)
+                args.append(value)
+        sql = f"SELECT {', '.join(ANALYSIS_FIELDS)} FROM analyses"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        with closing(self._connect()) as db:
+            rows = db.execute(sql + " ORDER BY start DESC LIMIT ?", (*args, limit)).fetchall()
+        return [_row(ANALYSIS_FIELDS, values) for values in rows]
+
+    def grade_analysis(self, analyst: str, league: str, event_id: str, status: str, result: Dict[str, Any]) -> None:
+        with closing(self._connect()) as db:
+            db.execute(
+                "UPDATE analyses SET status = ?, result = ?, graded_at = ? WHERE analyst = ? AND league = ? "
+                "AND event_id = ?",
+                (status, json.dumps(result), time.time(), analyst, league, event_id),
+            )
+
+    def log_analyst_call(self, analyst: str, model: str, event_id: Optional[str], input_tokens: int,
+                         output_tokens: int, cost: float, ok: bool) -> None:
+        with closing(self._connect()) as db:
+            db.execute(
+                "INSERT INTO analyst_calls (ts, analyst, model, event_id, input_tokens, output_tokens, cost, ok) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (time.time(), analyst, model, event_id, input_tokens, output_tokens, cost, int(ok)),
+            )
+
+    def analyst_spend(self, analyst: str, since: float = 0.0) -> Tuple[int, float]:
+        """(calls, estimated dollars) for an analyst since a time (epoch seconds)."""
+        with closing(self._connect()) as db:
+            row = db.execute(
+                "SELECT COUNT(*), COALESCE(SUM(cost), 0) FROM analyst_calls WHERE analyst = ? AND ts >= ?",
+                (analyst, since),
+            ).fetchone()
+        return int(row[0]), float(row[1])
+
+    def last_analyst_call(self, analyst: str, event_id: str) -> Optional[Tuple[float, bool]]:
+        """(when, whether a forecast came back) of the analyst's latest call on a game."""
+        with closing(self._connect()) as db:
+            row = db.execute(
+                "SELECT ts, ok FROM analyst_calls WHERE analyst = ? AND event_id = ? ORDER BY ts DESC LIMIT 1",
+                (analyst, event_id),
+            ).fetchone()
+        return (row[0], bool(row[1])) if row else None

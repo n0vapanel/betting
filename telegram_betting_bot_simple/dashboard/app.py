@@ -43,6 +43,12 @@ class SlipRequest(BaseModel):
     picks: List[Pick] = Field(default_factory=list, max_length=20)
 
 
+class AskRequest(BaseModel):
+    league: str = Field(pattern=LEAGUE_KEY)
+    id: str = Field(max_length=64)
+    analyst: Literal["claude", "deepseek"]
+
+
 class Login(BaseModel):
     password: str = Field(max_length=256)
 
@@ -238,6 +244,11 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     @app.get("/api/leaderboard", dependencies=signed_in)
     def leaderboard(svc: DashboardService = Depends(get_service)) -> List[Dict[str, Any]]:
         return calls_errors(svc.leaderboard)
+
+    @app.post("/api/analysts/ask", dependencies=signed_in)
+    def ask_analyst(body: AskRequest, svc: DashboardService = Depends(get_service)) -> Dict[str, Any]:
+        """Ask one AI analyst about a game now (it can take a minute; each call costs money)."""
+        return calls_errors(lambda: svc.ask_analyst(body.league, body.id, body.analyst))
 
     @app.get("/api/track-record", dependencies=signed_in)
     def track_record(league: str = Query("basketball_nba", pattern=LEAGUE_KEY),

@@ -15,6 +15,7 @@ from .app import create_app
 from .service import DashboardService
 
 GRADE_EVERY_SECONDS = 600
+ANALYZE_EVERY_SECONDS = 600
 
 
 def grade_forever(service: DashboardService) -> None:
@@ -27,6 +28,18 @@ def grade_forever(service: DashboardService) -> None:
         time.sleep(GRADE_EVERY_SECONDS)
 
 
+def analyze_forever(service: DashboardService) -> None:
+    """Ask the AI analysts about NBA games starting in the next few hours (within their daily limits)."""
+    while True:
+        try:
+            done = service.analysts.run_due(service)
+            if done:
+                logging.info("AI analysts made %d new forecasts", done)
+        except Exception:
+            logging.exception("The AI analysts' run failed")
+        time.sleep(ANALYZE_EVERY_SECONDS)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     config = load_config()
@@ -35,6 +48,8 @@ def main() -> None:
     service = build_service(config)
     if service is not None:
         threading.Thread(target=grade_forever, args=(service,), name="grader", daemon=True).start()
+        if service.analysts is not None:
+            threading.Thread(target=analyze_forever, args=(service,), name="analysts", daemon=True).start()
     app = create_app(service, config.dashboard_password)
     uvicorn.run(app, host="0.0.0.0", port=config.dashboard_port, access_log=False)
 
