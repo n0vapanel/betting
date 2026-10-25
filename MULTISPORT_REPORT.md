@@ -1,40 +1,46 @@
-# MULTI-SPORT PREDICTION BRAIN — Backtest Board (v1)
+# MULTI-SPORT PREDICTION BRAIN — Backtest Board (v2, accuracy-max wave)
 
-Generated 2026-10-24. Every sport: strict walk-forward (train strictly before test window), no-lookahead rolling features, settled at the book's CLOSING odds, flat-$1 stakes, edge gates on model-vs-devigged-market probability, bootstrap CIs clustered by date. Numbers below are independently re-verified from the per-game prediction CSVs by the coordinator (not just agent self-reports).
+Generated 2026-10-24 (v2 wave). Every number below was independently recomputed by the coordinator from the per-game prediction CSVs (own odds math, own accuracy/pnl loops, own bootstrap where marked) — not taken from agent self-reports. Protocol everywhere: strict walk-forward, no-lookahead, settled at closing odds, flat $1 stakes, edge gates on model-vs-devigged-market probability, date/week-clustered bootstrap CIs.
 
-## Scoreboard (verified)
+## FINAL SCOREBOARD (verified)
 
-| Sport | Test window | n | Pick acc | Model flat ROI | Market-fav flat | Verdict |
+| Sport | Test window | n | Pick acc | Flat ROI | Market acc | Verdict |
 |---|---|---|---|---|---|---|
-| **MMA/UFC** | 2020-2026 | 2,843 | 77.1% (fav: 67.4%) | **+27.6%** (every year +) | ~0% | **REAL EDGE (candidate)** |
-| **NBA** (v3) | Mar 2022 | 229 | 65.5% | -4.52% | -0.8% | market efficient |
-| **NHL** | Mar-Jun 2022 | 555 | 59.1% | -0.26% | ~-0.5% | noise |
-| **Soccer** (EPL+4) 1X2 | Mar-May 2022 | 571 | 54.1% | +7.82% (CI -10.5..+24.6) | -0.58% | not significant |
-| **MLB** | May-Jun 2022 | 824 | 54.9% | -4.20% | ~-2% | market efficient |
-| **Tennis ATP** | 2022 | 2,538 | 67.8% | -6.18% | ~-2% | market efficient |
-| **NFL** | 2021 w15-2022 | running (Devin) | — | — | — | pending |
+| **MMA/UFC v2** | 2020-2026 | 2,843 | **80.2%** | **+40.3%** (CI +36..+44) | 67.4% | **REAL EDGE** |
+| Tennis v2 | 2022 | 2,538 | 67.5% | -5.2% | 68.1% | efficient |
+| NBA v3-ext | Jan-Mar 2022 | 623 | 66.0% | -4.3% (v3-only -0.3%) | — | efficient |
+| NFL (Devin) | 2021w15-2022 | 335 | 64.6% | +2.7% (CI straddles 0) | 66.1% | not significant |
+| NHL v2 | Mar-Jun 2022 | 555 | 60.4% | +1.2% (CI straddles 0) | 64.9% | noise |
+| Soccer v2 1X2 | Mar-May 2022 | 571 | 55.2% (market 54.8%) | +1.1% | 54.8% | not significant |
+| Soccer v2 O/U 2.5 | Mar-May 2022 | 571 | **59.7%** | **+4.0% / +6.9% / +28.7%** (eps 0/.02/.05) | 57.4% | promising, CI not yet clean |
+| MLB v2 | Apr-Jun 2022 | 1,099 | 56.1% | -3.3% | 60.0% | market beats model |
 
-## The one that matters: MMA
+Every sport now has ≥3 months of backdated games (MMA 7 years, tennis 12 months, NFL 13 months, NHL 4, NBA/MLB/soccer 3).
 
-- Source: Kaggle `mdabbert/ultimate-ufc-dataset` (7,177 fights → 2026) + ufcstats strike data merged from `rajeevw/ufcdata` (primary window only).
-- Model: calibrated LogReg + LightGBM ensemble, trained ONCE on 2016-2019, frozen, then bet 2020-2026 (2,843 fights).
-- Edge vs market: pick accuracy 77.1% vs favorite 67.4%; model Brier 0.166 vs market 0.207; positive flat ROI in **every single year** (2020 +27.7 / 2021 +33.7 / 2022 +28.6 / 2023 +23.9 / 2024 +23.5 / 2025 +31.5 / 2026 +7.0).
-- Bootstrap 95% CI on primary window ROI: [+22.9%, +42.3%] — entirely above zero.
-- Lookahead audit (coordinator): strike features use prior-fights-only aggregates (verified `prev_*` lags in build_features.py); Elo updated per-fight in strict time order; recompute of both CSVs from raw odds columns matches exactly (+32.7% / +27.6%).
-- Residual risks (flagged honestly in MMA report): odds are BestFightOdds "closing" per dataset docs — transcription errors would inflate ROI; not true last-second sharps closers. Next step = live paper-trade on current cards to validate before real money.
+## MMA v2 — the crown jewel (verified to the digit)
 
-## The honest rest
+- Upgraded from v1: yearly walk-forward refits, XGBoost added, height/reach/age/country/stance/opponent-style/recent-3 features. Per-class models tried and honestly rejected (OOF logloss worsens).
+- Frozen-train discipline maintained; all features from fights strictly before the bout.
+- **Verified by coordinator**: acc 80.2%, flat ROI +40.3% (2,843 fights), Brier 0.1368 vs market 0.2072, day-clustered 1000-resample bootstrap CI [+36.1%, +44.4%] — entirely above zero. Positive every year 2020-2026 (2025: +48%).
+- Recommended betting pair (LGBM+XGB): acc 80.4%, ROI +43.4%, Brier 0.1273.
+- **UFC picker built**: `backtest/multisport/mma/ufc_picker.py` — feed tonight's card CSV (date, fighters, class, American odds) → feature build with cutoff, frozen-model probs, de-vigged edge, flat + quarter-Kelly stakes. Smoke-tested exit 0 on a real 2026 card (Fiziev +17.6% edge → 8.7% Kelly).
+- Odds source for upcoming cards: bestfightodds.com event pages scrape cleanly with curl+UA (documented in PICKER_README.md); ufc.com API dead; tapology Cloudflare-blocked.
+- Residual risk (unchanged): mdabbert odds are "closing per dataset docs". **Gate to real money = paper-trade live cards for a few weeks.**
 
-NBA/NHL/MLB/tennis closing lines are efficient: no model here beats them after vig (flat ROIs all negative, gates not significant after bootstrap). Soccer 1X2 shows +7.8% flat but the date-clustered CI straddles zero and it's EPL-driven (41 bets) — treat as noise. Soccer's stat engine is still real: expected-goals/shots regressors beat naive baselines on every quantity (shots MAE -2.2%, goals -1.4% vs team-season baseline) — the user-requested stats-vs-actual comparison.
+## What the accuracy-max wave proved
+
+- **More features ≈ +accuracy everywhere but ROI only in MMA.** Soccer O/U flipped from negative-everywhere to positive-everywhere (+7pp accuracy from xG/CLV/open-market features — ablation-verified). MMA jumped 77.1→80.2% acc and +27.6→+40.3% ROI. NBA/NHL/MLB/tennis added injuries/goalies/starters/park factors/xG — accuracy ticked up ~1pp, ROI stayed ~zero: those closing lines are efficient, full stop.
+- **Honest ceilings**: favorites-only markets (NFL/NBA/NHL/MLB/tennis) cap out at market accuracy (60-68%) and won't clear vig. The soft market (UFC) is where the brain's money lives.
+- Tennis lane caught its own h2h leak (constant feature encoding the target → fantasy 78%/+37%; fixed + lesson saved). Everything green here was re-verified independent of the builders.
 
 ## Structure
 
-- `backtest/multisport/<sport>/` — each: `build_features.py`, `run_backtest.py`-style runner, `<SPORT>_BACKTEST_REPORT.md`, `<sport>_predictions.csv` (full per-game: odds, probs, edge, bet, result).
-- Shared protocol is the NBA v3 harness convention; venv `~/.hermes/cache/scratch/msports-venv` (py3.11: nfl_data_py, pybaseball, kaggle, lightgbm, xgboost).
-- Raw datasets gitignored (re-downloadable: football-data.co.uk CSVs, Retrosheet zips, moneypuck, Kaggle slugs documented per report).
+- `backtest/multisport/<sport>/` — v1 lanes; `<sport>_v2/` — accuracy-max lanes; each has REPORT.md + predictions CSV + code. `backtest/v3_extended/` = NBA 3-month. This file = the board.
+- Shared venv `~/.hermes/cache/scratch/msports-venv` (py3.11). Raw data gitignored; download recipes in each report.
+- Commits: `7d8b0ef` (v1 board), `f24f8fa` (accuracy-max wave), `fa491c7` (NFL).
 
-## Next moves
+## Next
 
-1. NFL lane lands → add row, adjudicate.
-2. MMA: build live card picker (pull tonight's card from BestFightOdds/UFC API, run frozen model, paper-trade).
-3. Cross-model audit of the MMA pipeline (the multi-model lanes: Claude/Atria reviews once provider config unblocked).
+1. **Paper-trade UFC live** (picker + real cards, tracked ledger) — the only result that converts to money.
+2. Soccer O/U follow-up: 2 more seasons (2022-23, 2023-24) to see if the +28.7% gate is real or window luck.
+3. Optional: NHL goalie-first model (v2 goalie features helped; CIs still straddle 0).
