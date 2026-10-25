@@ -7,4 +7,6 @@ requests>=2.31
 aiohttp>=3.9
 pandas>=1.5
 numpy>=1.24
+# zoneinfo needs timezone data; servers without the system tz database fall back to this
+tzdata>=2023.3
 pytest>=7.4

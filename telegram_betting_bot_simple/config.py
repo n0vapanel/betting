@@ -12,7 +12,10 @@ class Config(BaseSettings):
     odds_api_key: Optional[str] = Field(None, validation_alias="THE_ODDS_API_KEY")
     news_api_key: Optional[str] = Field(None, validation_alias="NEWS_API_KEY")
     log_level: str = Field("INFO", validation_alias="LOG_LEVEL")
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # IANA name of the timezone game start times are shown in
+    timezone: str = Field("America/New_York", validation_alias="TIMEZONE")
+    # .env also holds settings for other tools (e.g. TELEGRAM_CHANNEL_ID for brain/notify.py)
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 def load_config(env_file: str = ".env") -> Config:
     load_dotenv(env_file)

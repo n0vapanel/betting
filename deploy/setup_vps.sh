@@ -100,17 +100,16 @@ main() {
   else
     ask TELEGRAM_BOT_TOKEN "Telegram bot token (hidden while you paste)" '^[0-9]{6,12}:[A-Za-z0-9_-]{30,}$' secret
     ask TELEGRAM_CHANNEL_ID "Chat ID for bot notifications" '^-?[0-9]{5,20}$'
-    echo "  API keys for real predictions are optional: press Enter to skip, add them to $ENV_FILE later."
-    ask API_SPORTS_KEY "API-Sports key" '^[A-Za-z0-9_-]*$'
+    echo "  Games and odds come from The Odds API (free key at the-odds-api.com)."
+    echo "  Press Enter to skip for now and add it to $ENV_FILE later."
     ask THE_ODDS_API_KEY "The Odds API key" '^[A-Za-z0-9_-]*$'
-    ask NEWS_API_KEY "NewsAPI key" '^[A-Za-z0-9_-]*$'
     ( umask 077
       cat > "$ENV_FILE" <<EOF
 TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
 TELEGRAM_CHANNEL_ID=$TELEGRAM_CHANNEL_ID
-API_SPORTS_KEY=$API_SPORTS_KEY
 THE_ODDS_API_KEY=$THE_ODDS_API_KEY
-NEWS_API_KEY=$NEWS_API_KEY
+# Timezone for game start times (IANA name, e.g. America/Chicago or Europe/London)
+TIMEZONE=America/New_York
 EOF
     )
     chown "root:$BOT_USER" "$ENV_FILE"

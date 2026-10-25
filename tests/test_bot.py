@@ -1,19 +1,28 @@
-"""Unit tests for the bot's session management, tier classification and handler wiring.
+"""Unit tests for the bot's session management, tier classification and handlers.
 
 These tests focus on components that do not require network access or a
 Telegram environment: the SessionManager used to track user state
 across messages, the TierClassifier that assigns predictions to
-confidence tiers, and how handlers build the engine and format results.
+confidence tiers, and how handlers wire the odds feed, pick leagues and
+format games.
 """
 
 from __future__ import annotations
 
 import asyncio
+import datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
-from telegram.ext import Application, CallbackQueryHandler, ConversationHandler
+from telegram.ext import Application, CallbackQueryHandler
 
-from telegram_betting_bot_simple.bot.handlers import format_prediction, setup_handlers, split_message
+from telegram_betting_bot_simple.bot.handlers import (
+    MAX_LEAGUES,
+    format_games,
+    pick_leagues,
+    setup_handlers,
+    split_message,
+)
 from telegram_betting_bot_simple.bot.session_manager import SessionManager
 from telegram_betting_bot_simple.config import Config
 from telegram_betting_bot_simple.engine.tier_classifier import TierClassifier
@@ -46,32 +55,61 @@ def test_tier_classifier_thresholds() -> None:
     outcome, tier = classifier.classify({"A": 0.55, "B": 0.45})
     assert tier == "Hot"
 
-def test_setup_handlers_passes_api_keys_to_engine() -> None:
-    config = Config(
-        TELEGRAM_BOT_TOKEN="123456:test",
-        API_SPORTS_KEY="sports",
-        THE_ODDS_API_KEY="odds",
-        NEWS_API_KEY="news",
-    )
+def _application(**env: str) -> Application:
+    config = Config(TELEGRAM_BOT_TOKEN="123456:test", **env)
     application = Application.builder().token(config.telegram_token).build()
     setup_handlers(application, config)
-    engine = application.bot_data["pred_engine"]
-    assert (engine.api_sports_key, engine.odds_api_key, engine.news_api_key) == ("sports", "odds", "news")
+    return application
 
-def test_format_prediction() -> None:
-    prediction = {
-        "home_team": "Lakers",
-        "away_team": "Celtics",
-        "winner": "Lakers",
-        "tier": "Middle",
-        "probabilities": {"Lakers": 0.62, "Celtics": 0.38},
-    }
-    assert format_prediction(prediction) == "Celtics @ Lakers → Lakers (Middle, 62%)"
+def test_setup_handlers_wires_odds_client_from_config() -> None:
+    application = _application(THE_ODDS_API_KEY="odds", TIMEZONE="Europe/London")
+    assert application.bot_data["odds_client"].api_key == "odds"
+    assert application.bot_data["timezone"] == ZoneInfo("Europe/London")
+    # Without a key the bot still starts, and tells users how to add one
+    assert _application().bot_data["odds_client"] is None
+
+def test_pick_leagues_keeps_in_season_game_leagues_popular_first() -> None:
+    sports = [
+        {"key": "soccer_spain_segunda_division", "group": "Soccer", "title": "La Liga 2", "active": True, "has_outrights": False},
+        {"key": "soccer_epl", "group": "Soccer", "title": "EPL", "active": True, "has_outrights": False},
+        {"key": "soccer_fifa_world_cup", "group": "Soccer", "title": "FIFA World Cup", "active": False, "has_outrights": False},
+        {"key": "soccer_epl_winner", "group": "Soccer", "title": "EPL Winner", "active": True, "has_outrights": True},
+        {"key": "basketball_nba", "group": "Basketball", "title": "NBA", "active": True, "has_outrights": False},
+    ]
+    assert [league["key"] for league in pick_leagues(sports, "Soccer")] == ["soccer_epl", "soccer_spain_segunda_division"]
+    many = [
+        {"key": f"soccer_{i:02d}", "group": "Soccer", "title": f"League {i:02d}", "active": True, "has_outrights": False}
+        for i in range(30)
+    ]
+    assert len(pick_leagues(many, "Soccer")) == MAX_LEAGUES
+
+def test_format_games_lists_soonest_first_with_american_odds() -> None:
+    events = [
+        {
+            "home_team": "Arsenal", "away_team": "Chelsea", "start_time": "2026-10-26T15:00:00Z",
+            "markets": {"h2h": {"Arsenal": 110.0, "Chelsea": 220.0, "Draw": 240.0}}, "bookmaker": "FanDuel",
+        },
+        {
+            "home_team": "Los Angeles Lakers", "away_team": "Boston Celtics", "start_time": "2026-10-25T23:30:00Z",
+            "markets": {"h2h": {"Boston Celtics": 130.0, "Los Angeles Lakers": -150.0}}, "bookmaker": "DraftKings",
+        },
+        {"home_team": "Home", "away_team": "Away", "start_time": "2026-10-25T11:00:00Z", "markets": {}, "bookmaker": None},
+    ]
+    now = datetime.datetime(2026, 10, 25, 12, 0, tzinfo=datetime.timezone.utc)
+    blocks = format_games(events, "Test League", ZoneInfo("America/New_York"), now=now)
+    assert blocks == [
+        "Test League: next 3 games (moneyline odds)",
+        "🔴 Live now\nAway @ Home\nOdds not posted yet",
+        "Sun Oct 25, 7:30 PM EDT\nBoston Celtics @ Los Angeles Lakers\n"
+        "Boston Celtics +130 · Los Angeles Lakers -150 (DraftKings)",
+        "Mon Oct 26, 11:00 AM EDT\nChelsea @ Arsenal\nChelsea +220 · Arsenal +110 · Draw +240 (FanDuel)",
+    ]
 
 def test_split_message_respects_telegram_limit() -> None:
     assert split_message(["a", "b"]) == ["a\nb"]
-    # A busy soccer day: hundreds of fixtures won't fit in one 4096-character message
-    lines = ["Here are your predictions:"] + [
+    assert split_message(["a", "b"], separator="\n\n") == ["a\n\nb"]
+    # A busy soccer day: hundreds of lines won't fit in one 4096-character message
+    lines = ["Here are your games:"] + [
         f"• Team {i} @ Team {i + 1} → Team {i} (Hot, 51%)" for i in range(300)
     ]
     messages = split_message(lines)
@@ -81,13 +119,12 @@ def test_split_message_respects_telegram_limit() -> None:
     assert "\n".join(messages).split("\n") == lines
 
 def test_taps_on_expired_menus_get_an_answer() -> None:
-    config = Config(TELEGRAM_BOT_TOKEN="123456:test")
-    application = Application.builder().token(config.telegram_token).build()
-    setup_handlers(application, config)
-    handlers = application.handlers[0]
-    # The fallback must come after the conversation, so it only sees taps the conversation didn't claim
-    conv_index = next(i for i, h in enumerate(handlers) if isinstance(h, ConversationHandler))
-    fallback = next(h for h in handlers[conv_index + 1:] if isinstance(h, CallbackQueryHandler))
+    handlers = _application().handlers[0]
+    button_handlers = [h for h in handlers if isinstance(h, CallbackQueryHandler)]
+    # The catch-all must come last, so it only sees taps no menu step claimed
+    fallback = button_handlers[-1]
+    assert fallback.pattern is None
+    assert all(h.pattern is not None for h in button_handlers[:-1])
 
     answers = []
 

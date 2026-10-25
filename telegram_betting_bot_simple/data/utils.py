@@ -37,8 +37,10 @@ def fetch_json(
         response = requests.get(url, params=params, headers=headers, timeout=timeout)
         response.raise_for_status()
     except requests.RequestException as exc:
-        logging.exception("HTTP request to %s failed: %s", url, exc)
-        raise RuntimeError(f"HTTP request failed for {url}: {exc}") from exc
+        # Don't log or chain exc: its message holds the full query string, API keys included
+        reason = getattr(exc.response, "status_code", None) or type(exc).__name__
+        logging.error("HTTP request to %s failed (%s)", url, reason)
+        raise RuntimeError(f"HTTP request failed for {url} ({reason})") from None
     try:
         return response.json()
     except ValueError as exc:
