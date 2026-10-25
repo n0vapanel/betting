@@ -1,5 +1,5 @@
 # telegram_betting_bot_simple/requirements.txt
-python-telegram-bot==20.8
+python-telegram-bot==22.8
 pydantic>=2.0
 pydantic-settings>=2.0
 python-dotenv>=1.0

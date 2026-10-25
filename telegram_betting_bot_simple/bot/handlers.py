@@ -170,6 +170,17 @@ async def date_entered(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return SELECT_TYPE
 
 
+def format_prediction(prediction: dict) -> str:
+    """Render one engine prediction, e.g. ``Celtics @ Lakers → Lakers (Middle, 62%)``."""
+    winner = prediction.get("winner", "")
+    probability = prediction.get("probabilities", {}).get(winner)
+    confidence = f", {probability:.0%}" if probability is not None else ""
+    return (
+        f"{prediction.get('away_team', '?')} @ {prediction.get('home_team', '?')}"
+        f" → {winner} ({prediction.get('tier', '')}{confidence})"
+    )
+
+
 async def prediction_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Generate and display predictions based on the user's selections."""
     query = update.callback_query
@@ -208,8 +219,7 @@ async def prediction_type_selected(update: Update, context: ContextTypes.DEFAULT
     else:
         lines = ["Here are your predictions:"]
         for p in predictions:
-            desc = p.get("prediction", "")
-            lines.append(f"• {desc}")
+            lines.append(f"• {format_prediction(p)}")
         response = "\n".join(lines)
     await query.message.reply_text(response)
     # Reset session
@@ -226,9 +236,13 @@ def setup_handlers(application: Application, config: Config) -> None:
     """
     # Create shared objects and store them in bot_data
     session_manager = SessionManager()
-    # Instantiate prediction engine with sports API key from config
+    # Instantiate prediction engine with the API keys from config
     from ..engine.prediction_engine import PredictionEngine
-    pred_engine = PredictionEngine(api_key=config.sports_api_key)  # type: ignore[attr-defined]
+    pred_engine = PredictionEngine(
+        api_sports_key=config.api_sports_key or config.sports_api_key,
+        odds_api_key=config.odds_api_key,
+        news_api_key=config.news_api_key,
+    )
     application.bot_data["session_manager"] = session_manager
     application.bot_data["pred_engine"] = pred_engine
     application.bot_data["config"] = config

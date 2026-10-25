@@ -1,14 +1,18 @@
-"""Unit tests for the bot's session management and tier classification.
+"""Unit tests for the bot's session management, tier classification and handler wiring.
 
 These tests focus on components that do not require network access or a
 Telegram environment: the SessionManager used to track user state
-across messages and the TierClassifier that assigns predictions to
-confidence tiers.
+across messages, the TierClassifier that assigns predictions to
+confidence tiers, and how handlers build the engine and format results.
 """
 
 from __future__ import annotations
 
+from telegram.ext import Application
+
+from telegram_betting_bot_simple.bot.handlers import format_prediction, setup_handlers
 from telegram_betting_bot_simple.bot.session_manager import SessionManager
+from telegram_betting_bot_simple.config import Config
 from telegram_betting_bot_simple.engine.tier_classifier import TierClassifier
 
 def test_session_manager_reuse() -> None:
@@ -38,3 +42,25 @@ def test_tier_classifier_thresholds() -> None:
     # Hot: below middle threshold
     outcome, tier = classifier.classify({"A": 0.55, "B": 0.45})
     assert tier == "Hot"
+
+def test_setup_handlers_passes_api_keys_to_engine() -> None:
+    config = Config(
+        TELEGRAM_BOT_TOKEN="123456:test",
+        API_SPORTS_KEY="sports",
+        THE_ODDS_API_KEY="odds",
+        NEWS_API_KEY="news",
+    )
+    application = Application.builder().token(config.telegram_token).build()
+    setup_handlers(application, config)
+    engine = application.bot_data["pred_engine"]
+    assert (engine.api_sports_key, engine.odds_api_key, engine.news_api_key) == ("sports", "odds", "news")
+
+def test_format_prediction() -> None:
+    prediction = {
+        "home_team": "Lakers",
+        "away_team": "Celtics",
+        "winner": "Lakers",
+        "tier": "Middle",
+        "probabilities": {"Lakers": 0.62, "Celtics": 0.38},
+    }
+    assert format_prediction(prediction) == "Celtics @ Lakers → Lakers (Middle, 62%)"
