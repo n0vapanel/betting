@@ -13,10 +13,14 @@ prediction, with spreads that grow with the expected total (fitted on the
 same data), to get win, cover and over/under probabilities; whole-number
 lines can push.
 
-Player model: projected minutes (season averages blended with last
-season, injured teammates' minutes shared across the rotation) times
-per-minute rates, with points scaled so the players add up to the team's
-predicted score.
+Player model (fitted on 2025-26 player games and open-source projection
+repos; see research_notes): minutes blended with last season's (this
+season counts n/(n+4)), per-minute rates shrunk toward last season with
+stat-specific padding, the team's 241 minutes filled from the top of the
+rotation down, injured teammates' minutes only 40% to the rotation plus a
+usage bump for players in the same position group, blowout minutes cut
+from the favourite's starters, and pace, the team's predicted score and
+home court applied at half strength.
 """
 
 from __future__ import annotations
@@ -39,7 +43,9 @@ class Params:
     # Share of last season's strength (above or below average) that carries over: betting
     # markets imply 62% for the NBA (Lopez, Matthews & Baumer 2018)
     season_carryover: float = 0.62
-    player_prior_games: float = 8.0
+    player_prior_games: float = 8.0  # (legacy) per-game prior; rates now use per-stat padding
+    # Minutes: this season counts n/(n + 4) against last season's minutes per game
+    minutes_prior_games: float = 4.0
     # Margin lost per point an absent player scores (scaled by minutes / 36): a 31-point star is
     # worth ~4 points, in line with market moves for stars (1.5-5.5 points by depth)
     injury_impact: float = 0.15
@@ -55,12 +61,20 @@ class Params:
     market_weight: float = 0.90
     espn_weight: float = 0.05
     market_total_weight: float = 0.90
-    team_minutes: float = 240.0
+    team_minutes: float = 241.0  # 240 plus the average overtime
     max_minutes: float = 38.0
-    # Starters sit late in lopsided games: they lose this share of their minutes per point
-    # of expected margin beyond blowout_margin (RotoGrinders' rule of thumb), the bench gains it
-    blowout_margin: float = 7.0
-    blowout_cut: float = 0.015
+    # Of the minutes an injured rotation player leaves, the tracked rotation absorbs only 40% (100%
+    # overshot by 2.5 minutes a player); the rest goes to the end of the bench
+    injury_minutes_fill: float = 0.4
+    rotation_size: int = 9
+    # Starters sit late in lopsided games (2025-26 minutes by pre-game spread): the favourite's lose
+    # 0.77% of their minutes per point beyond 6 (up to 15%), the underdog's 0.25% per point beyond 9;
+    # the deep bench gets those minutes
+    blowout_margin: float = 6.0
+    blowout_cut: float = 0.0077
+    blowout_cap: float = 0.15
+    underdog_margin: float = 9.0
+    underdog_cut: float = 0.0025
 
 
 def season_label(day: datetime.date) -> str:
@@ -119,21 +133,33 @@ def league_average(standings: Dict[str, Dict[str, Any]]) -> Optional[float]:
     return sum(values) / len(values) if values else None
 
 
+# Per-minute rates are shrunk toward last season's with this much "padding", in minutes (stabilisation
+# points from Medvedovsky's table converted to minutes): steals take ~300 minutes to say much
+RATE_PADDING = {"pts": 45.0, "reb": 30.0, "ast": 30.0, "fg3m": 15.0, "stl": 300.0, "blk": 75.0, "tov": 200.0}
+
+
 def player_profile(seasons: List[Dict[str, Any]], current_label: str, params: Params) -> Optional[Dict[str, float]]:
-    """A player's expected per-game line: this season blended with last season."""
+    """A player's expected per-game line: minutes and per-minute rates, this season shrunk toward last."""
     by_label = {row["season"]: row for row in seasons}
     current = by_label.get(current_label)
     start = int(current_label[:4])
     previous = by_label.get(f"{start - 1}-{start % 100:02d}")
     if not current and not previous:
         return None
-    gp = current["gp"] if current else 0.0
-    profile = {"gp": gp}
-    for key in ("min",) + STATS:
-        profile[key] = blend(
-            current[key] if current else None, gp,
-            previous[key] if previous else None, params.player_prior_games if previous else 0,
-        ) or 0.0
+    gp = current["gp"] if current and current.get("min") else 0.0
+    minutes = blend(current["min"] if gp else None, gp,
+                    previous["min"] if previous else None, params.minutes_prior_games if previous else 0) or 0.0
+    profile = {"gp": gp, "min": minutes}
+    season_minutes = current["min"] * gp if gp else 0.0
+    for stat in STATS:
+        prior = previous[stat] / previous["min"] if previous and previous.get("min") else None
+        if gp and prior is not None:
+            rate = (current[stat] * gp + RATE_PADDING[stat] * prior) / (season_minutes + RATE_PADDING[stat])
+        elif gp:
+            rate = current[stat] / current["min"]
+        else:
+            rate = prior or 0.0
+        profile[stat] = rate * minutes
     return profile
 
 
@@ -347,50 +373,93 @@ class PlayerProjection:
     out: bool = False
 
 
+POSITION_GROUPS = {"PG": "G", "SG": "G", "G": "G", "SF": "F", "PF": "F", "F": "F", "C": "C"}
+# Usage bump per unit of the missing teammate's share of the team's stat (same position group: full;
+# others: half)
+USAGE_BUMP = {"pts": 0.30, "ast": 0.30, "fg3m": 0.30, "reb": 0.175}
+
+
 def project_players(
     players: List[Dict[str, Any]],
     team_points: Optional[float],
     pace_factor: float,
     params: Params = Params(),
     margin: float = 0.0,
+    home: Optional[bool] = None,
+    team_games: float = 0.0,
 ) -> List[PlayerProjection]:
     """Project each player's stat line for this game.
 
     ``players`` items have id, name, position, status, out (bool) and
     profile (from ``player_profile``, may be None for players with no data).
-    ``margin`` is the predicted final margin, used for blowout minutes.
+    ``margin`` is the team's own expected margin (positive when favoured),
+    used for blowout minutes; ``home`` adds a small home/away effect; and
+    ``team_games`` (games played this season) says how much of an injured
+    teammate's absence is already in everyone's numbers.
     """
     available = [p for p in players if not p["out"] and p.get("profile") and p["profile"]["min"] >= 4]
     available.sort(key=lambda p: p["profile"]["min"], reverse=True)
-    # Fill the team's 240 minutes from the top of the rotation down: regulars keep their usual
-    # minutes and a crowded roster squeezes the end of the bench, not the stars
+    rotation = {p["id"] for p in available[: params.rotation_size]}
+    out = [p for p in players if p["out"] and p.get("profile") and p["profile"]["min"] >= 15]
+
+    # Fill the team's minutes from the top of the rotation down: regulars keep their usual minutes
+    # and a crowded roster squeezes the end of the bench, not the stars
     minutes: Dict[str, float] = {}
     remaining = params.team_minutes
     for p in available:
         minutes[p["id"]] = min(p["profile"]["min"], params.max_minutes, remaining)
         remaining -= minutes[p["id"]]
-    # Minutes left over (injuries thinned the rotation) go to the players who are on the floor,
-    # in proportion to their usual playing time, up to the per-player cap
-    for _ in range(5):
-        uncapped = [pid for pid, m in minutes.items() if 0 < m < params.max_minutes]
-        if remaining < 0.5 or not uncapped:
-            break
-        uncapped_total = sum(minutes[pid] for pid in uncapped)
-        for pid in uncapped:
-            minutes[pid] = min(minutes[pid] + remaining * minutes[pid] / uncapped_total, params.max_minutes)
-        remaining = params.team_minutes - sum(minutes.values())
 
-    cut = params.blowout_cut * max(0.0, abs(margin) - params.blowout_margin)
-    starters = [p["id"] for p in available[:5]]
-    bench = [p for p in available[5:]]
-    if cut and bench:
+    def share_out(amount: float, receivers: List[Dict[str, Any]]) -> float:
+        """Give ``amount`` minutes to ``receivers`` in proportion to their usual minutes, up to the cap."""
+        for _ in range(5):
+            open_ = [p for p in receivers if minutes[p["id"]] < params.max_minutes]
+            usual = sum(p["profile"]["min"] for p in open_)
+            if amount < 0.25 or not usual:
+                break
+            given = 0.0
+            for p in open_:
+                extra = min(amount * p["profile"]["min"] / usual, params.max_minutes - minutes[p["id"]])
+                minutes[p["id"]] += extra
+                given += extra
+            amount -= given
+        return amount
+
+    # Minutes left over (injuries thinned the rotation): only 40% go to the regular rotation, the rest
+    # to the end of the bench (or to the rotation when there is no bench)
+    if remaining > 0.25:
+        deep = [p for p in available if p["id"] not in rotation]
+        left = share_out(remaining * params.injury_minutes_fill, [p for p in available if p["id"] in rotation])
+        left += remaining * (1 - params.injury_minutes_fill)
+        left = share_out(left, deep) if deep else left
+        share_out(left, available)
+
+    # Blowouts: the favourite's starters sit late, the underdog's a little; the deep bench plays
+    starters = [p for p in available[:5]]
+    if margin >= 0:
+        cut = min(params.blowout_cut * max(0.0, margin - params.blowout_margin), params.blowout_cap)
+    else:
+        cut = params.underdog_cut * max(0.0, -margin - params.underdog_margin)
+    if cut:
         freed = 0.0
-        for pid in starters:
-            freed += minutes[pid] * cut
-            minutes[pid] *= 1 - cut
-        bench_usual = sum(p["profile"]["min"] for p in bench)
-        for p in bench:
-            minutes[p["id"]] = min(minutes[p["id"]] + freed * p["profile"]["min"] / bench_usual, params.max_minutes)
+        for p in starters:
+            freed += minutes[p["id"]] * cut
+            minutes[p["id"]] *= 1 - cut
+        bench = [p for p in available if p["id"] not in rotation] or available[5:]
+        share_out(freed, bench)
+
+    # Usage: a missing teammate's shots and passes go mostly to players at his position. If he has
+    # already missed games this season, part of that is in everyone's numbers already
+    bumps = {p["id"]: {stat: 1.0 for stat in USAGE_BUMP} for p in available}
+    totals = {stat: sum(p["profile"][stat] for p in available + out) for stat in USAGE_BUMP}
+    for missing in out:
+        played_share = min(missing["profile"]["gp"] / team_games, 1.0) if team_games else 1.0
+        group = POSITION_GROUPS.get(missing.get("position", ""), "")
+        for p in available:
+            overlap = 1.0 if group and POSITION_GROUPS.get(p.get("position", "")) == group else 0.5
+            for stat, alpha in USAGE_BUMP.items():
+                if totals[stat]:
+                    bumps[p["id"]][stat] *= 1 + alpha * missing["profile"][stat] / totals[stat] * overlap * played_share
 
     projections = []
     for p in available:
@@ -399,19 +468,25 @@ def project_players(
         profile = p["profile"]
         share = minutes[p["id"]] / profile["min"]
         projections.append(PlayerProjection(
-            id=p["id"], name=p["name"], position=p["position"], status=p["status"],
-            minutes=minutes[p["id"]], **{stat: profile[stat] * share for stat in STATS},
+            id=p["id"], name=p["name"], position=p["position"], status=p["status"], minutes=minutes[p["id"]],
+            **{stat: profile[stat] * share * bumps[p["id"]].get(stat, 1.0) for stat in STATS},
         ))
-    pace = min(max(pace_factor, 0.92), 1.08)
+    # Game context at half strength (full-strength pace and score scaling overshot in testing)
+    pace = min(max(pace_factor ** 0.5, 0.94), 1.06)
     projected_points = sum(proj.pts for proj in projections)
     scoring = 1.0
     if team_points and projected_points:
-        scoring = min(max(team_points / projected_points, 0.85), 1.15)
+        scoring = min(max((team_points / projected_points) ** 0.5, 0.90), 1.10)
+    home_points = {True: 1.007, False: 0.993}.get(home, 1.0)
+    home_blocks = {True: 1.035, False: 0.965}.get(home, 1.0)
+    home_turnovers = {True: 0.99, False: 1.01}.get(home, 1.0)
     for proj in projections:
-        proj.pts *= scoring
+        proj.pts *= scoring * home_points
         proj.fg3m *= scoring
         for stat in ("reb", "ast", "stl", "blk", "tov"):
             setattr(proj, stat, getattr(proj, stat) * pace)
+        proj.blk *= home_blocks
+        proj.tov *= home_turnovers
     projections.sort(key=lambda proj: proj.minutes, reverse=True)
     for p in players:
         if p["out"]:

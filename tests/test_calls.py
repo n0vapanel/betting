@@ -47,10 +47,15 @@ def test_stat_probabilities() -> None:
     assert calls._negative_binomial_cdf(60, 6.0, 1.4) == pytest.approx(1.0, abs=1e-9)
     # Lines below the projection are likely, above it unlikely, and it falls as the line rises
     over = [calls.stat_over_prob("pts", 25.0, line) for line in (19.5, 24.5, 29.5, 34.5)]
-    assert over == sorted(over, reverse=True) and over[0] > 0.75 and over[-1] < 0.1
+    assert over == sorted(over, reverse=True) and over[0] > 0.7 and over[-1] < 0.2  # points vary a lot
     assert 0.4 < calls.stat_over_prob("pts", 25.0, 24.5) < 0.6
     assert 0.35 < calls.stat_over_prob("ast", 8.0, 7.5) < 0.6
     assert calls.stat_over_prob("reb", 0.0, 0.5) == 0.0
+    # A whole-number line can push: the three outcomes add up to 1
+    over_, under, push = calls.stat_probabilities("reb", 6.0, 6)
+    assert push > 0.1 and over_ + under + push == pytest.approx(1.0)
+    # Bench players' numbers swing more
+    assert calls.stat_over_prob("pts", 8.0, 14.5, minutes=14) > calls.stat_over_prob("pts", 8.0, 14.5, minutes=30)
 
 
 def test_the_ai_judges_each_part_of_a_call() -> None:
@@ -63,6 +68,7 @@ def test_the_ai_judges_each_part_of_a_call() -> None:
     assert view["winner"]["ai_prob"] == pytest.approx(1 - p.home_win_prob)
     assert view["winner"]["market_prob"] == pytest.approx(0.25)
     assert view["winner"]["label"] == "AI disagrees" and view["winner"]["compare"] == "Against the AI"
+    assert "You: 70%, against the AI." in view["verdict"]
     # The AI (62%) is 13 points off the bookmakers (75%): flagged
     assert view["caution"] and "Caution" in view["verdict"]
     # Away by 4 or more when the AI has home by 4: well under half
@@ -143,10 +149,10 @@ class FinishedGames:
 
 def test_calls_are_saved_judged_graded_and_ranked(service, store) -> None:
     service.store = store
-    saved = service.save_call("web:abc12345", "Aidan", "basketball_nba", "g1", {"winner": "away", "confidence": 0.6})
+    saved = service.save_call("web:abc12345", "Sam", "basketball_nba", "g1", {"winner": "away", "confidence": 0.6})
     assert saved["ai"]["winner"]["team"] == "Los Angeles Clippers"
     # Saving again replaces the earlier call
-    service.save_call("web:abc12345", "Aidan", "basketball_nba", "g1", {"winner": "home", "confidence": 0.9})
+    service.save_call("web:abc12345", "Sam", "basketball_nba", "g1", {"winner": "home", "confidence": 0.9})
     assert [c["call"]["winner"] for c in service.my_calls("web:abc12345")] == ["home"]
     # The AI's own pre-game predictions are logged when the games are shown
     service.games("basketball_nba")
@@ -161,7 +167,7 @@ def test_calls_are_saved_judged_graded_and_ranked(service, store) -> None:
     call = service.my_calls("web:abc12345")[0]
     assert call["status"] == "graded" and call["user_points"] == calls.winner_points(0.9)
     board = service.leaderboard()
-    assert board[0]["name"] == "Aidan" and board[0]["calls"] == 1
+    assert board[0]["name"] == "Sam" and board[0]["calls"] == 1
     assert board[0]["vs_ai"] == round(board[0]["points"] - board[0]["ai_points"], 1)
     record = service.track_record()
     assert record["games"] == 2 and record["winner_accuracy"] == 1.0
@@ -191,4 +197,4 @@ def test_calls_close_at_tip_off(service, store) -> None:
     games = service.odds.league_games("basketball_nba")
     service.odds.league_games = lambda league, refresh=False: [{**g, "commence_time": "2020-01-01T00:00:00Z"} for g in games]
     with pytest.raises(CallRejected):
-        service.save_call("web:abc12345", "Aidan", "basketball_nba", "g1", {"winner": "home", "confidence": 0.6})
+        service.save_call("web:abc12345", "Sam", "basketball_nba", "g1", {"winner": "home", "confidence": 0.6})

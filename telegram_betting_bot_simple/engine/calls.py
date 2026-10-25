@@ -15,7 +15,9 @@ better; copying the AI scores exactly 0 on it:
 - score: max(0, 15 - margin miss) + max(0, 20 - total miss), plus a 10-point
   bullseye when both teams' scores are within 2.
 - player lines: the winner rule at 40% weight (+10 to -30); the AI is scored
-  on its own chance for the same side; a player who doesn't play voids it.
+  on its own chance for the same side (from a negative binomial with each
+  stat's measured spread); a player who doesn't play, or an exact whole-number
+  line, voids it.
 
 The AI and the market are scored on their last numbers before tip-off.
 """
@@ -25,7 +27,7 @@ from __future__ import annotations
 import math
 from decimal import ROUND_HALF_UP, Decimal
 from statistics import NormalDist
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .nba_model import GamePrediction
 
@@ -92,30 +94,41 @@ def compare_confidence(yours: float, ai: float) -> str:
 
 # --- player stat probabilities ------------------------------------------------------------
 
-def stat_over_prob(stat: str, mean: float, line: float) -> float:
-    """Chance a player's stat goes over ``line`` given the projected ``mean``.
+# Game-to-game variance / mean of each stat for rotation players (2025-26 residuals, matching fitted
+# repos and DraftKings' alt ladders): points vary far more than a Poisson count, mostly because minutes do
+STAT_DISPERSION = {"pts": 2.9, "reb": 1.4, "ast": 1.4, "fg3m": 1.3, "stl": 1.1, "blk": 1.15, "tov": 1.07, "pra": 3.5}
+# Points also have a "short night" (early foul trouble, injury, blowout): about 4% of games at ~30% of normal
+SHORT_NIGHT = (0.04, 0.3)
+BENCH_DISPERSION = 1.3  # extra spread for players projected under 20 minutes
 
-    Counting stats use a negative binomial (a Poisson with extra game-to-game
-    spread); points and points+rebounds+assists use a normal with a spread
-    that grows with the mean. Half-point lines have no push; for a whole
-    number line, "over" means at least line + 1.
+
+def stat_probabilities(stat: str, mean: float, line: float, minutes: Optional[float] = None) -> Tuple[float, float, float]:
+    """(over, under, push) chances for a player stat line, from a negative binomial around ``mean``.
+
+    Half-point lines can't push; on a whole-number line the exact number is a
+    push (the bet is void), so over means line + 1 or more.
     """
     if mean <= 0:
-        return 0.0
-    if stat in ("pts", "pra"):
-        sd = max(1.0, STAT_SD_SCALE[stat] * math.sqrt(mean) + STAT_SD_FLOOR[stat])
-        threshold = math.floor(line) + 1  # whole points: over 27.5 means 28 or more
-        return 1 - _NORMAL.cdf((threshold - 0.5 - mean) / sd)
-    dispersion = STAT_DISPERSION.get(stat, 1.2)
-    threshold = math.floor(line) + 1
-    return 1 - _negative_binomial_cdf(threshold - 1, mean, dispersion)
+        return 0.0, 1.0, 0.0
+    dispersion = STAT_DISPERSION.get(stat, 1.3) * (BENCH_DISPERSION if minutes is not None and minutes < 20 else 1.0)
+
+    def cdf(k: int) -> float:
+        if stat == "pts":
+            weight, scale = SHORT_NIGHT
+            return ((1 - weight) * _negative_binomial_cdf(k, mean / (1 - weight + weight * scale), dispersion)
+                    + weight * _negative_binomial_cdf(k, mean * scale / (1 - weight + weight * scale), dispersion))
+        return _negative_binomial_cdf(k, mean, dispersion)
+
+    if float(line).is_integer():
+        k = int(line)
+        under, at_most = cdf(k - 1), cdf(k)
+        return 1 - at_most, under, at_most - under
+    k = math.floor(line)
+    return 1 - cdf(k), cdf(k), 0.0
 
 
-# Spread of points around the projection: sd = scale * sqrt(mean) + floor
-STAT_SD_SCALE = {"pts": 1.2, "pra": 1.25}
-STAT_SD_FLOOR = {"pts": 1.0, "pra": 1.5}
-# Variance / mean for counting stats (1.0 would be a plain Poisson)
-STAT_DISPERSION = {"reb": 1.3, "ast": 1.4, "fg3m": 1.25, "stl": 1.1, "blk": 1.4, "tov": 1.15}
+def stat_over_prob(stat: str, mean: float, line: float, minutes: Optional[float] = None) -> float:
+    return stat_probabilities(stat, mean, line, minutes)[0]
 
 
 def _negative_binomial_cdf(k: int, mean: float, variance_ratio: float) -> float:
@@ -173,12 +186,13 @@ def judge_call(prediction: GamePrediction, call: Dict[str, Any], home: str, away
         if view["market_home_win"] is not None:
             market_prob = view["market_home_win"] if side == "home" else 1 - view["market_home_win"]
         yours = float(call.get("confidence") or 0.5)
+        compare = compare_confidence(yours, ai_prob)
         view["winner"] = {"side": side, "team": team, "ai_prob": ai_prob, "your_prob": yours,
                           "market_prob": market_prob, "label": agreement(ai_prob),
-                          "compare": compare_confidence(yours, ai_prob)}
+                          "compare": compare}
         notes.append(f"{agreement(ai_prob)}: it gives {team} {ai_prob:.0%}"
                      + (f" (bookmakers {market_prob:.0%})" if market_prob is not None else "")
-                     + f". You: {yours:.0%}, {compare_confidence(yours, ai_prob).lower()}.")
+                     + f". You: {yours:.0%}, {compare[0].lower() + compare[1:]}.")
         if view["caution"]:
             notes.append("Caution: the AI is far from the bookmakers on this game; check the injury news.")
 
@@ -216,8 +230,9 @@ def judge_call(prediction: GamePrediction, call: Dict[str, Any], home: str, away
             continue
         seen.add(key)
         mean = projection.get(stat) if stat != "pra" else sum(projection.get(s, 0.0) for s in ("pts", "reb", "ast"))
-        over = stat_over_prob(stat, mean or 0.0, float(prop["line"]))
-        ai_prob = over if prop.get("side") == "over" else 1 - over
+        over, under, push = stat_probabilities(stat, mean or 0.0, float(prop["line"]), projection.get("minutes"))
+        # A push voids the line, so the chance that matters is the chance of winning given it isn't a push
+        ai_prob = (over if prop.get("side") == "over" else under) / max(1 - push, 1e-9)
         props.append({**prop, "confidence": float(prop.get("confidence") or 0.6),
                       "player": projection.get("name", prop.get("player")), "ai_mean": mean, "ai_prob": ai_prob,
                       "label": agreement(ai_prob)})

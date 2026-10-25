@@ -89,22 +89,38 @@ def test_player_profile_and_projection() -> None:
         {"season": "2026-27", "gp": 2, "min": 36.0, "pts": 35.0, "reb": 7.0, "ast": 8.0, "fg3m": 4.0, "stl": 2.0, "blk": 1.0, "tov": 2.0},
     ]
     profile = player_profile(seasons, "2026-27", Params())
-    assert profile["pts"] == pytest.approx((35 * 2 + 25 * 8) / 10)
+    # Minutes: 2 games this season count 2/(2+4); points per minute get 45 minutes of last season's rate
+    minutes = (36 * 2 + 34 * 4) / 6
+    rate = (35 * 2 + 45 * 25 / 34) / (36 * 2 + 45)
+    assert profile["min"] == pytest.approx(minutes) and profile["pts"] == pytest.approx(rate * minutes)
+    # Steals take far longer to stabilise: still mostly last season's rate
+    assert profile["stl"] / minutes == pytest.approx((2 * 2 + 300 * 1 / 34) / (72 + 300))
 
-    def player(pid, minutes, pts, out=False):
-        return {"id": pid, "name": pid, "position": "G", "status": "Out" if out else "", "out": out,
+    def player(pid, minutes, pts, out=False, position="G"):
+        return {"id": pid, "name": pid, "position": position, "status": "Out" if out else "", "out": out,
                 "profile": {"gp": 10, "min": minutes, "pts": pts, "reb": 4.0, "ast": 3.0, "fg3m": 1.0, "stl": 1.0, "blk": 0.5, "tov": 1.5}}
 
-    players = [player("a", 34, 25), player("b", 32, 18), player("c", 30, 14), player("d", 28, 12),
+    players = [player("a", 34, 25), player("b", 32, 18), player("c", 30, 14, position="F"), player("d", 28, 12),
                player("e", 26, 10), player("f", 22, 8), player("g", 20, 7), player("h", 18, 6),
-               player("star", 34, 28, out=True)]
-    projections = project_players(players, team_points=112.0, pace_factor=1.0)
-    playing = [p for p in projections if not p.out]
-    assert sum(p.minutes for p in playing) == pytest.approx(240.0, abs=0.5)
-    assert all(p.minutes <= 38.0 for p in playing)
-    assert playing[0].minutes > 34  # the star's minutes go to the rotation
-    assert sum(p.pts for p in playing) == pytest.approx(112.0, rel=0.01)
+               player("i", 12, 4), player("j", 10, 3), player("star", 34, 28, out=True)]
+    projections = project_players(players, team_points=None, pace_factor=1.0)
+    playing = {p.name: p for p in projections if not p.out}
+    assert sum(p.minutes for p in playing.values()) == pytest.approx(241.0, abs=0.5)
+    assert all(p.minutes <= 38.0 for p in playing.values())
+    # Everyone plays their usual minutes; of the 9 left over (241 - 232) only 40% go to the
+    # 9-man rotation and the end of the bench gets the rest
+    rotation = sum(p.minutes for name, p in playing.items() if name != "j")
+    assert rotation - (34 + 32 + 30 + 28 + 26 + 22 + 20 + 18 + 12) == pytest.approx(0.4 * 9)
+    assert playing["j"].minutes == pytest.approx(10 + 0.6 * 9)
+    # The guards pick up more of the missing guard's scoring than the forward does
+    guard = playing["a"].pts / (25 * playing["a"].minutes / 34)
+    forward = playing["c"].pts / (14 * playing["c"].minutes / 30)
+    assert guard > forward > 1.0
     assert projections[-1].name == "star" and projections[-1].out
+    # The team's predicted score pulls points halfway (at most 10%)
+    scaled = project_players(players, team_points=150.0, pace_factor=1.0)
+    total = sum(p.pts for p in projections if not p.out)
+    assert sum(p.pts for p in scaled if not p.out) == pytest.approx(total * 1.10, rel=0.01)
 
 def test_crowded_roster_squeezes_the_bench_not_the_stars() -> None:
     def player(pid, minutes):
@@ -116,16 +132,19 @@ def test_crowded_roster_squeezes_the_bench_not_the_stars() -> None:
     usual = [36, 34, 32, 30, 28, 24, 20, 18, 16, 16, 16, 15, 15]
     projections = project_players([player(f"p{i}", m) for i, m in enumerate(usual)], team_points=None, pace_factor=1.0)
     minutes = {p.name: p.minutes for p in projections}
-    assert sum(minutes.values()) == pytest.approx(240.0, abs=0.5)
+    assert sum(minutes.values()) == pytest.approx(241.0, abs=0.5)
     assert minutes["p0"] == 36 and minutes["p1"] == 34  # the stars keep their minutes
     assert "p12" not in minutes  # the end of the bench doesn't play
 
-    # Expected 17-point blowout: starters lose 15% of their minutes to the bench, total unchanged
-    blowout = project_players([player(f"p{i}", m) for i, m in enumerate(usual)], None, 1.0, margin=-17.0)
+    # A 16-point favourite: its starters lose 0.77% of their minutes per point beyond 6, to the deep bench
+    blowout = project_players([player(f"p{i}", m) for i, m in enumerate(usual)], None, 1.0, margin=16.0)
     minutes = {p.name: p.minutes for p in blowout}
-    assert minutes["p0"] == pytest.approx(36 * 0.85)
-    assert minutes["p12"] > 0  # garbage time for the end of the bench
-    assert sum(minutes.values()) == pytest.approx(240.0, abs=0.5)
+    assert minutes["p0"] == pytest.approx(36 * (1 - 0.077))
+    assert minutes["p10"] > 0 and minutes["p8"] == 16  # garbage time for the end of the bench only
+    assert sum(minutes.values()) == pytest.approx(241.0, abs=0.5)
+    # The 16-point underdog's starters lose much less
+    underdog = project_players([player(f"p{i}", m) for i, m in enumerate(usual)], None, 1.0, margin=-16.0)
+    assert {p.name: p.minutes for p in underdog}["p0"] == pytest.approx(36 * (1 - 0.0025 * 7))
 
 def test_last_season_is_regressed_to_the_mean() -> None:
     # Last season +8 points above a 112 average: only 62% of that carries over

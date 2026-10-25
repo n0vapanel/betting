@@ -105,7 +105,7 @@ def test_calls_api_judges_saves_and_validates(client, service, tmp_path) -> None
     for call in bad:
         assert client.post("/api/judge", json={**game, "call": call}).status_code == 422, call
 
-    me = {"player": "abcdef123456", "name": "Aidan"}
+    me = {"player": "abcdef123456", "name": "Sam"}
     saved = client.post("/api/calls", json={**game, **me, "call": {"home_score": 118, "away_score": 104}})
     assert saved.status_code == 200 and saved.json()["ai"]["winner"]["side"] == "home"
     mine = client.get("/api/calls", params={"player": me["player"]}).json()

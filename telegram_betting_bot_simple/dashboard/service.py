@@ -373,7 +373,12 @@ class DashboardService:
             shift = 2 * ((context.get("level") or context["avg"] or 0) - (context["avg"] or 0))
             normal_total = rating.points_for + rating.points_against + shift if rating else None
             pace = prediction.total / normal_total if normal_total else 1.0
-            projections = nba_model.project_players(players, team_points, pace, self.params, margin=prediction.margin)
+            team_games = (context["current"].get(team_id) or {}).get("games") or 0
+            projections = nba_model.project_players(
+                players, team_points, pace, self.params,
+                margin=prediction.margin if side == "home" else -prediction.margin,
+                home=side == "home", team_games=team_games,
+            )
             out[side] = [
                 {key: (round(value, 1) if isinstance(value, float) else value) for key, value in vars(p).items()}
                 for p in projections

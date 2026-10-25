@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS leases (
 );
 CREATE TABLE IF NOT EXISTS predictions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    player TEXT NOT NULL,          -- who made it, e.g. "web:Aidan" or "tg:12345"
+    player TEXT NOT NULL,          -- who made it, e.g. "web:5f2c9a1e7b3d" (a random browser id) or "tg:12345"
     name TEXT NOT NULL,            -- name shown on the leaderboard
     league TEXT NOT NULL,
     event_id TEXT NOT NULL,        -- the odds feed's game id

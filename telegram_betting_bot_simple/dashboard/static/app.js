@@ -531,6 +531,7 @@ async function openCall(gameId) {
     if (!state.draft || state.draft.game.id !== gameId) return;
     state.draft.players = ["away", "home"].flatMap((side) =>
       (detail.players?.[side] || []).filter((pl) => !pl.out).map((pl) => ({ ...pl, team: shortName(game[side]) })));
+    fillProps();
     renderProps();
   } catch {
     /* sign-in modal took over */
@@ -575,7 +576,7 @@ function callForm() {
 
       <div class="field">
         <label for="my-name">Your name <span class="muted">(for the leaderboard)</span></label>
-        <input type="text" id="my-name" maxlength="24" value="${esc(state.me.name)}" placeholder="e.g. Aidan">
+        <input type="text" id="my-name" maxlength="24" value="${esc(state.me.name)}" placeholder="e.g. Sam">
       </div>
       <div class="verdict" id="verdict"></div>
       <div class="form-error" role="alert" id="call-error"></div>
@@ -601,7 +602,7 @@ function renderProps() {
         <select data-k="confidence" title="How sure are you?">${[55, 60, 65, 70, 75, 80, 90, 100].map((c) =>
           `<option value="${c / 100}"${Math.round((prop.confidence ?? 0.6) * 100) === c ? " selected" : ""}>${c}%</option>`).join("")}</select>
         <span class="prop-ai">${ai ? `<span class="${ai.ai_prob >= 0.6 ? "good" : ai.ai_prob < 0.4 ? "bad" : ""}">AI <b>${pct(ai.ai_prob)}</b></span> <span class="muted">avg ${ai.ai_mean.toFixed(1)}</span>` : ""}
-          <span class="muted small">${signed(forecastPoints(prop.confidence ?? 0.6, PROP_WEIGHT))} / ${signed(forecastPoints(1 - (prop.confidence ?? 0.6), PROP_WEIGHT))}</span></span>
+          <span class="muted small" title="Your points if this call is right / wrong">${signed(forecastPoints(prop.confidence ?? 0.6, PROP_WEIGHT))} / ${signed(forecastPoints(1 - (prop.confidence ?? 0.6), PROP_WEIGHT))} pts</span></span>
         <button type="button" class="x" data-remove-prop="${i}" title="Remove">×</button>
       </div>`;
   }).join("");
@@ -609,17 +610,24 @@ function renderProps() {
 }
 
 function addProp() {
-  const draft = state.draft;
-  if (!draft.players.length) {
-    toast("Players are still loading");
-    return;
-  }
-  // The next player down the list who has no call yet (players come busiest first)
-  const used = new Set(draft.call.props.map((prop) => String(prop.player_id)));
-  const next = draft.players.find((pl) => !used.has(String(pl.id))) || draft.players[0];
-  draft.call.props.push({ player_id: String(next.id), stat: "pts", line: Math.max(0.5, Math.round(next.pts) - 0.5), side: "over", confidence: 0.6 });
+  state.draft.call.props.push({ player_id: "", stat: "pts", line: 0.5, side: "over", confidence: 0.6 });
+  fillProps();
   renderProps();
   judgeDraft();
+}
+
+// New rows get the next player down the list with no call yet (players come busiest first);
+// rows added while the players are still loading are filled in when they arrive
+function fillProps() {
+  const draft = state.draft;
+  if (!draft.players.length) return;
+  const used = new Set(draft.call.props.map((prop) => String(prop.player_id)));
+  for (const prop of draft.call.props.filter((x) => !x.player_id)) {
+    const next = draft.players.find((pl) => !used.has(String(pl.id))) || draft.players[0];
+    prop.player_id = String(next.id);
+    prop.line = suggestLine(prop);
+    used.add(prop.player_id);
+  }
 }
 
 // The line defaults to just under the player's projection, so changing player or stat resets it
@@ -682,8 +690,8 @@ function updateHints() {
     ${caution ? '<br><span class="warn">⚠ The AI is far from the bookmakers on this game: check the injury news.</span>' : ""}`;
   const score = verdict?.score;
   $("#score-hint").innerHTML = score && call.home_score != null
-    ? `${esc(shortName(score.winner_side === "home" ? game.home : game.away))} by ${Math.abs(score.margin)}+ : AI <b>${pct(score.wins_by_at_least)}</b> ·
-       total over ${score.total}: AI <b>${pct(score.total_over_yours)}</b> · up to 10 pts each for a close margin and total`
+    ? `${esc(shortName(score.winner_side === "home" ? game.home : game.away))} by ${Math.abs(score.margin)}+: AI <b>${pct(score.wins_by_at_least)}</b> ·
+       total over ${score.total}: AI <b>${pct(score.total_over_yours)}</b>`
     : "Leave blank to call just the winner.";
   $("#verdict").textContent = verdict?.verdict || "";
 }

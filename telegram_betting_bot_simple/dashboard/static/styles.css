@@ -203,7 +203,19 @@ body.modal-open { overflow: hidden; }
 .hint { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
 .hint b { color: var(--text); }
 .score-row { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 8px; align-items: center; }
-.prop-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr) 76px auto minmax(80px, auto) 20px; gap: 6px; align-items: center; margin-bottom: 6px; }
+/* Player call: who and which stat on the first line, the call and the AI's view on the second */
+.prop-row {
+  display: grid; grid-template-columns: 76px auto 76px minmax(0, 1fr) 20px; gap: 6px; align-items: center;
+  grid-template-areas: "player player player stat x" "line side conf ai ai";
+  padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--line);
+}
+.prop-row > [data-k="player_id"] { grid-area: player; }
+.prop-row > [data-k="stat"] { grid-area: stat; }
+.prop-row > [data-k="line"] { grid-area: line; }
+.prop-row > .seg { grid-area: side; }
+.prop-row > [data-k="confidence"] { grid-area: conf; }
+.prop-row > .prop-ai { grid-area: ai; }
+.prop-row > .x { grid-area: x; }
 .prop-row select, .prop-row input { padding: 7px 8px; }
 .prop-row .seg button { padding: 5px 9px; }
 .prop-ai { font-size: 12px; white-space: nowrap; }
@@ -240,9 +252,11 @@ body.modal-open { overflow: hidden; }
   .full { display: none; }
   .short { display: inline; }
   .team-row { grid-template-columns: minmax(70px, 1fr) 34px minmax(50px, 1.2fr) 40px; gap: 8px; }
-  .prop-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 64px; }
-  .prop-row .seg { grid-column: 1 / 2; }
-  .prop-row .prop-ai { grid-column: 2 / 3; }
+  .prop-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px 20px;
+    grid-template-areas: "player player player x" "stat stat line line" "side side conf conf" "ai ai ai ai";
+  }
+  .prop-ai { white-space: normal; }
   .modal { padding: 18px; }
   .foot-actions { margin-left: 0; width: 100%; justify-content: space-between; }
 }
@@ -252,7 +266,3 @@ body.modal-open { overflow: hidden; }
 .lean.caution { border-color: rgba(251, 191, 36, 0.6); }
 .lean.caution b { color: var(--warn); }
 .warn { color: var(--warn); }
-.prop-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr) 70px auto 70px minmax(96px, auto) 20px; }
-@media (max-width: 760px) {
-  .prop-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 64px; }
-}
