@@ -43,7 +43,6 @@ class Params:
     # Share of last season's strength (above or below average) that carries over: betting
     # markets imply 62% for the NBA (Lopez, Matthews & Baumer 2018)
     season_carryover: float = 0.62
-    player_prior_games: float = 8.0  # (legacy) per-game prior; rates now use per-stat padding
     # Minutes: this season counts n/(n + 4) against last season's minutes per game
     minutes_prior_games: float = 4.0
     # Margin lost per point an absent player scores (scaled by minutes / 36): a 31-point star is
