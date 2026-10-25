@@ -16,13 +16,8 @@ from zoneinfo import ZoneInfo
 
 from telegram.ext import Application, CallbackQueryHandler
 
-from telegram_betting_bot_simple.bot.handlers import (
-    MAX_LEAGUES,
-    format_games,
-    pick_leagues,
-    setup_handlers,
-    split_message,
-)
+from telegram_betting_bot_simple.bot.handlers import format_games, setup_handlers, split_message
+from telegram_betting_bot_simple.data.leagues import MAX_LEAGUES, pick_leagues
 from telegram_betting_bot_simple.bot.session_manager import SessionManager
 from telegram_betting_bot_simple.config import Config
 from telegram_betting_bot_simple.engine.tier_classifier import TierClassifier

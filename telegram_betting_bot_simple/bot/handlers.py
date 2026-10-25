@@ -37,36 +37,8 @@ from telegram.ext import (
 
 from ..config import Config
 from ..data.apis import TheOddsApiClient
+from ..data.leagues import SPORTS, pick_leagues
 
-# Sport picker buttons: (label, The Odds API sport group)
-SPORTS = [
-    ("🏀 Basketball", "Basketball"),
-    ("🏒 Ice Hockey", "Ice Hockey"),
-    ("⚽ Soccer", "Soccer"),
-    ("🎾 Tennis", "Tennis"),
-    ("⚾ Baseball", "Baseball"),
-    ("🏈 Football", "American Football"),
-    ("🥊 MMA", "Mixed Martial Arts"),
-]
-
-# Leagues listed first when a sport has more in season than fit in the menu
-POPULAR_LEAGUES = [
-    "basketball_nba",
-    "basketball_ncaab",
-    "icehockey_nhl",
-    "americanfootball_nfl",
-    "americanfootball_ncaaf",
-    "baseball_mlb",
-    "soccer_epl",
-    "soccer_uefa_champs_league",
-    "soccer_spain_la_liga",
-    "soccer_italy_serie_a",
-    "soccer_germany_bundesliga",
-    "soccer_france_ligue_one",
-    "soccer_usa_mls",
-    "mma_mixed_martial_arts",
-]
-MAX_LEAGUES = 12
 MAX_GAMES = 10
 
 # Telegram rejects text messages longer than this, counted in UTF-16 code units.
@@ -187,21 +159,6 @@ async def send_games(
     blocks.append("Send /start to look at another league.")
     for text in split_message(blocks, separator="\n\n"):
         await message.reply_text(text)
-
-
-def pick_leagues(sports: List[Dict[str, Any]], group: str) -> List[Dict[str, Any]]:
-    """Return ``group``'s leagues that are in season and have games (not futures), popular first."""
-    leagues = [
-        sport for sport in sports
-        if sport.get("group") == group and sport.get("active") and not sport.get("has_outrights")
-    ]
-
-    def rank(league: Dict[str, Any]) -> tuple:
-        key = league.get("key")
-        popularity = POPULAR_LEAGUES.index(key) if key in POPULAR_LEAGUES else len(POPULAR_LEAGUES)
-        return popularity, league.get("title", "")
-
-    return sorted(leagues, key=rank)[:MAX_LEAGUES]
 
 
 def format_games(

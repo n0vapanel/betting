@@ -9,4 +9,7 @@ pandas>=1.5
 numpy>=1.24
 # zoneinfo needs timezone data; servers without the system tz database fall back to this
 tzdata>=2023.3
+# Web dashboard
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
 pytest>=7.4

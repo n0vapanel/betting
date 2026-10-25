@@ -14,6 +14,12 @@ class Config(BaseSettings):
     log_level: str = Field("INFO", validation_alias="LOG_LEVEL")
     # IANA name of the timezone game start times are shown in
     timezone: str = Field("America/New_York", validation_alias="TIMEZONE")
+    # Web dashboard: login password (required to start it) and port
+    dashboard_password: Optional[str] = Field(None, validation_alias="DASHBOARD_PASSWORD")
+    dashboard_port: int = Field(8787, validation_alias="DASHBOARD_PORT")
+    # Minutes to keep a league's odds before fetching again (each fetch costs 3 quota units)
+    odds_cache_minutes: float = Field(120, validation_alias="ODDS_CACHE_MINUTES")
+    odds_regions: str = Field("us", validation_alias="ODDS_REGIONS")
     # .env also holds settings for other tools (e.g. TELEGRAM_CHANNEL_ID for brain/notify.py)
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

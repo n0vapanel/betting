@@ -1,0 +1,118 @@
+"""Tests for the NBA game and player model."""
+
+from __future__ import annotations
+
+import datetime
+from statistics import NormalDist
+
+import pytest
+
+from telegram_betting_bot_simple.engine.nba_model import (
+    Params,
+    TeamInputs,
+    TeamRating,
+    absence_impact,
+    blend,
+    player_profile,
+    predict_game,
+    project_players,
+    season_label,
+    team_rating,
+)
+
+MARKET = {
+    "h2h": {"home": {"fair": 0.70}, "away": {"fair": 0.30}},
+    "spreads": {"home": {"point": -6.5}, "away": {"point": 6.5}},
+    "totals": {"over": {"point": 224.5}, "under": {"point": 224.5}},
+}
+
+def test_season_label() -> None:
+    assert season_label(datetime.date(2026, 10, 25)) == "2026-27"
+    assert season_label(datetime.date(2027, 3, 1)) == "2026-27"
+    assert season_label(datetime.date(2027, 9, 1)) == "2027-28"
+
+def test_blend_shrinks_small_samples_toward_last_season() -> None:
+    assert blend(130.0, 2, 110.0, 10) == pytest.approx(113.33, abs=0.01)
+    assert blend(None, 0, 110.0, 10) == 110.0
+    assert blend(120.0, 5, None, 10) == 120.0
+    rating = team_rating({"games": 2, "points_for": 130.0, "points_against": 100.0},
+                         {"games": 82, "points_for": 110.0, "points_against": 110.0}, Params())
+    assert (rating.points_for, rating.points_against) == (pytest.approx(113.33, abs=0.01), pytest.approx(108.33, abs=0.01))
+
+def test_market_only_prediction_follows_the_spread_and_total() -> None:
+    prediction = predict_game(TeamInputs("Home", None), TeamInputs("Away", None), None, MARKET, None)
+    assert prediction.margin == pytest.approx(6.5)
+    assert prediction.total == pytest.approx(224.5)
+    assert prediction.home_score - prediction.away_score == pytest.approx(6.5)
+    assert prediction.home_win_prob == pytest.approx(NormalDist().cdf(6.5 / Params().margin_sd))
+    # Covering exactly the market spread is a coin flip
+    assert prediction.probability("spreads", "home", -6.5) == pytest.approx(0.5)
+    assert prediction.probability("spreads", "away", 6.5) == pytest.approx(0.5)
+    assert prediction.probability("totals", "over", 224.5) == pytest.approx(0.5)
+    assert prediction.probability("h2h", "away") == pytest.approx(1 - prediction.home_win_prob)
+
+def test_blended_prediction_uses_model_market_and_espn() -> None:
+    home = TeamInputs("Home", TeamRating(118.0, 108.0, 10))
+    away = TeamInputs("Away", TeamRating(112.0, 114.0, 10), injury_impact=3.0, injured=["Star"], back_to_back=True)
+    params = Params()
+    prediction = predict_game(home, away, 115.0, MARKET, 0.75, params)
+    model = prediction.sources["model"]
+    # 118 vs 114 allowed, home court, away team loses 3 (injury) + 1.25 (back-to-back)
+    assert model["margin"] == pytest.approx((118 - 115 + 114 + 1) - (112 - 115 + 108 - 1) + 4.25, abs=1e-9)
+    espn_margin = params.margin_sd * NormalDist().inv_cdf(0.75)
+    expected = (model["margin"] * 0.25 + 6.5 * 0.65 + espn_margin * 0.10)
+    assert prediction.margin == pytest.approx(expected)
+    assert prediction.total == pytest.approx(0.6 * 224.5 + 0.4 * model["total"])
+    assert any("back-to-back" in factor for factor in prediction.factors)
+    assert any("Star" in factor for factor in prediction.factors)
+
+def test_absence_impact_is_not_counted_twice() -> None:
+    star = {"gp": 10, "min": 36.0, "pts": 28.0}
+    assert absence_impact(star, 0, Params()) == pytest.approx(4.2)
+    assert absence_impact(star, 10, Params()) == pytest.approx(4.2)  # played every game so far
+    long_term = {"gp": 0, "min": 36.0, "pts": 28.0}  # missed all 30 games: mostly priced in already
+    assert absence_impact(long_term, 30, Params()) == pytest.approx(4.2 * 10 / 40)
+
+def test_player_profile_and_projection() -> None:
+    seasons = [
+        {"season": "2025-26", "gp": 70, "min": 34.0, "pts": 25.0, "reb": 5.0, "ast": 6.0, "fg3m": 2.0, "stl": 1.0, "blk": 0.5, "tov": 3.0},
+        {"season": "2026-27", "gp": 2, "min": 36.0, "pts": 35.0, "reb": 7.0, "ast": 8.0, "fg3m": 4.0, "stl": 2.0, "blk": 1.0, "tov": 2.0},
+    ]
+    profile = player_profile(seasons, "2026-27", Params())
+    assert profile["pts"] == pytest.approx((35 * 2 + 25 * 8) / 10)
+
+    def player(pid, minutes, pts, out=False):
+        return {"id": pid, "name": pid, "position": "G", "status": "Out" if out else "", "out": out,
+                "profile": {"gp": 10, "min": minutes, "pts": pts, "reb": 4.0, "ast": 3.0, "fg3m": 1.0, "stl": 1.0, "blk": 0.5, "tov": 1.5}}
+
+    players = [player("a", 34, 25), player("b", 32, 18), player("c", 30, 14), player("d", 28, 12),
+               player("e", 26, 10), player("f", 22, 8), player("g", 20, 7), player("h", 18, 6),
+               player("star", 34, 28, out=True)]
+    projections = project_players(players, team_points=112.0, pace_factor=1.0)
+    playing = [p for p in projections if not p.out]
+    assert sum(p.minutes for p in playing) == pytest.approx(240.0, abs=0.5)
+    assert all(p.minutes <= 38.0 for p in playing)
+    assert playing[0].minutes > 34  # the star's minutes go to the rotation
+    assert sum(p.pts for p in playing) == pytest.approx(112.0, rel=0.01)
+    assert projections[-1].name == "star" and projections[-1].out
+
+def test_crowded_roster_squeezes_the_bench_not_the_stars() -> None:
+    def player(pid, minutes):
+        return {"id": pid, "name": pid, "position": "G", "status": "", "out": False,
+                "profile": {"gp": 10, "min": minutes, "pts": minutes / 2, "reb": 4.0, "ast": 3.0, "fg3m": 1.0,
+                            "stl": 1.0, "blk": 0.5, "tov": 1.5}}
+
+    # 13 players who averaged 300 minutes between them (new signings, rookies)
+    usual = [36, 34, 32, 30, 28, 24, 20, 18, 16, 16, 16, 15, 15]
+    projections = project_players([player(f"p{i}", m) for i, m in enumerate(usual)], team_points=None, pace_factor=1.0)
+    minutes = {p.name: p.minutes for p in projections}
+    assert sum(minutes.values()) == pytest.approx(240.0, abs=0.5)
+    assert minutes["p0"] == 36 and minutes["p1"] == 34  # the stars keep their minutes
+    assert "p12" not in minutes  # the end of the bench doesn't play
+
+    # Expected 17-point blowout: starters lose 15% of their minutes to the bench, total unchanged
+    blowout = project_players([player(f"p{i}", m) for i, m in enumerate(usual)], None, 1.0, margin=-17.0)
+    minutes = {p.name: p.minutes for p in blowout}
+    assert minutes["p0"] == pytest.approx(36 * 0.85)
+    assert minutes["p12"] > 0  # garbage time for the end of the bench
+    assert sum(minutes.values()) == pytest.approx(240.0, abs=0.5)
