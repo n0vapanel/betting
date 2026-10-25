@@ -9,3 +9,13 @@ dist/
 build/
 .DS_Store
 .aegis-cache/
+.env
+*.pem
+*.key
+*.crt
+__pycache__/
+venv/
+.venv/
+node_modules/
+*.log
+.DS_Store
