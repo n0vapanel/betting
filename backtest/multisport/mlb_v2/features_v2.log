@@ -1,0 +1,18 @@
+schedule join coverage: 3566 of 4859
+  unmatched 2021: 2 of 2429
+  unmatched 2022: 1291 of 2430
+statcast game coverage (via game_pk): 3566 of 4859
+park factor coverage: 4859 of 4859
+(4859, 154)
+games with odds: 4676 of 4859
+statcast SP coverage 2022: 1004 of 2430
+odds coverage by month (2022):
+           n  n_odds
+date                
+2022-04  317     313
+2022-05  420     392
+2022-06  404     394
+2022-07  390     379
+2022-08  420     411
+2022-09  401     382
+2022-10   78      71

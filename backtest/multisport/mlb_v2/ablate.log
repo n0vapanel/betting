@@ -1,0 +1,9 @@
+variant                       ens_brier   lr_brier  lgb_brier
+A_v2_full                       0.24370    0.25103    0.26938
+B_v1_plus_park_tz_ops_bp        0.24508    0.25091    0.27510
+C_v1_plus_park_tz_ops           0.24520    0.25090    0.27265
+D_v1_plus_park_tz               0.24518    0.25083    0.27237
+E_v1_plus_park_only             0.24379    0.24893    0.27038
+F_v1_plus_sp_only               0.24332    0.24922    0.26958
+G_v1_plus_bp_only               0.24477    0.24907    0.27358
+BEST: F_v1_plus_sp_only (0.24332181144154388, 0.24921910231531952, 0.26957734903791336)

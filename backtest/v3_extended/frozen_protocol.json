@@ -1,0 +1,63 @@
+{
+  "primary_name": "plus_minutes",
+  "primary_selection": "Lowest pre-December ensemble CV log loss across the four registered candidates; ties prefer registration order.",
+  "selected_gates": {
+    "v3_only": {
+      "variant": "winner",
+      "eps": 0.01,
+      "n_bets": 22,
+      "win_rate": 0.6818181818181818,
+      "roi": 0.10937007997368807,
+      "pnl": 2.4061417594211374,
+      "selection_period": "2021-12-24..2021-12-31",
+      "minimum_bets": 20,
+      "fallback": false
+    },
+    "plus_injuries": {
+      "variant": "winner",
+      "eps": 0.03,
+      "n_bets": 22,
+      "win_rate": 0.6818181818181818,
+      "roi": 0.11991179798108109,
+      "pnl": 2.638059555583784,
+      "selection_period": "2021-12-24..2021-12-31",
+      "minimum_bets": 20,
+      "fallback": false
+    },
+    "plus_minutes": {
+      "variant": "lean",
+      "eps": 0.02,
+      "n_bets": 40,
+      "win_rate": 0.5,
+      "roi": -0.061695042210883864,
+      "pnl": -2.4678016884353546,
+      "selection_period": "2021-12-24..2021-12-31",
+      "minimum_bets": 20,
+      "fallback": false
+    },
+    "all": {
+      "variant": "winner",
+      "eps": 0.03,
+      "n_bets": 24,
+      "win_rate": 0.625,
+      "roi": 0.07058458225225846,
+      "pnl": 1.694029974054203,
+      "selection_period": "2021-12-24..2021-12-31",
+      "minimum_bets": 20,
+      "fallback": false
+    }
+  },
+  "candidate_cv_log_losses": {
+    "v3_only": 0.6077006870374021,
+    "plus_injuries": 0.605263926723208,
+    "plus_minutes": 0.5959193581373018,
+    "all": 0.6028546482591629
+  },
+  "training_input_fingerprints": {
+    "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/v3_extended/features_train.csv": {
+      "bytes": 550725,
+      "sha256": "976150c291d66b70244b1b8faa720d5954fb8e5025143f94d99f07344bd40e96"
+    }
+  },
+  "frozen_at_utc": "2026-10-25T00:21:53.866863+00:00"
+}

@@ -1,0 +1,24 @@
+## before hashes
+92106f1cd35e66d70fefdf561872de2fbefd778d7b48e4f8e64423b74e73ba44  nfl_predictions.csv
+37a34508806996936fceb293fb156d98dbbd6fa084313267439a405438e096b9  .cache/evaluation.json
+## render-only
+Test games: 335
+Model: lightgbm; accuracy: 64.56% (333 decisive)
+Flat $1 ROI: 2.66%
+Best gate (pre-test selected): lean_eps_05; ROI: -1.21%; bets: 242
+/Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/nfl/nfl_predictions.csv
+/Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/nfl/NFL_BACKTEST_REPORT.md
+/Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/nfl/README_nfl.md
+EXIT_CODE_RENDER=0
+## verify-only
+Test games: 335
+Model: lightgbm; accuracy: 64.56% (333 decisive)
+Flat $1 ROI: 2.66%
+Best gate (pre-test selected): lean_eps_05; ROI: -1.21%; bets: 242
+/Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/nfl/nfl_predictions.csv
+/Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/nfl/NFL_BACKTEST_REPORT.md
+/Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/nfl/README_nfl.md
+EXIT_CODE_VERIFY=0
+## after hashes
+92106f1cd35e66d70fefdf561872de2fbefd778d7b48e4f8e64423b74e73ba44  nfl_predictions.csv
+37a34508806996936fceb293fb156d98dbbd6fa084313267439a405438e096b9  .cache/evaluation.json

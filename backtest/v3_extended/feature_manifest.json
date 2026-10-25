@@ -1,0 +1,405 @@
+{
+  "input_fingerprints": {
+    "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/cache/v3/game_odds.csv": {
+      "bytes": 95656765,
+      "sha256": "e91eef1c143a347eeeddb2a3446cc4e4bd1e65d824f6bd94d9401e594f829a75"
+    },
+    "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/cache/v3/team_boxscores.csv": {
+      "bytes": 61056762,
+      "sha256": "aaf094148868adda3bc3f9f2c95711ecc8bd5ed615fc7b777cf5f1d1f2671424"
+    },
+    "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/cache/v3/player_boxscores.csv": {
+      "bytes": 766459222,
+      "sha256": "ea0b94125d98fe3e6e3e51d5d178509e223b7edea3a64d51336d37d3f86409e3"
+    },
+    "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/cache/nba_teamlog_2021_22.csv": {
+      "bytes": 350316,
+      "sha256": "c69259a17249d125258681ff2a42322ea63a025ebb946c440c006957ea878f24"
+    },
+    "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/cache/nba_playerlog_2021_22.csv": {
+      "bytes": 3907371,
+      "sha256": "2a892225011377437b184c7eb55f0faa4f6ebd439e92e08a2ad92e9172d5a4dd"
+    },
+    "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/cache/injury_reports_2021_22.csv": {
+      "bytes": 2510646,
+      "sha256": "e92b6c5f7155add65ea24c7bae9837c1c71882223e6f34e7d410567fc7b1a4ef"
+    },
+    "/Users/x/.cache/kagglehub/datasets/cviaxmiwnptr/nba-betting-data-october-2007-to-june-2024/versions/4/nba_2008-2026.csv": {
+      "bytes": 2493308,
+      "sha256": "729eb2ead85c14affbb81ae9a4c611fee9790b8dd3d1d7824e1ddba14410a8c4"
+    },
+    "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/v3/player_features_2021_22.csv": {
+      "bytes": 315671,
+      "sha256": "88259d4ca5c2e19cb4abf91fc6d318f528602131aab6f0cc9ab58447dc521b5f"
+    },
+    "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/v3/player_features.py": {
+      "bytes": 12140,
+      "sha256": "17eff84c02fe531e35ba9b83e4c89a1d4306878b522481725503b83eff92c9eb"
+    },
+    "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/v3/features_v3.py": {
+      "bytes": 28672,
+      "sha256": "241b8a429e6a8f505127b6aafd1bb9a7f9741ee3885a35f36088232da6596770"
+    },
+    "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/v3_extended/features_extended.py": {
+      "bytes": 27488,
+      "sha256": "6d37d2ed0f7c4d5685ccc7730f5b06a1a8048b2abc2ce3e90f26242305a76e4c"
+    }
+  },
+  "n_train": 428,
+  "n_test": 623,
+  "n_features": 67,
+  "train_date_min": "2021-11-01",
+  "train_date_max": "2021-12-31",
+  "test_date_min": "2022-01-01",
+  "test_date_max": "2022-03-31",
+  "training_candidates_with_closing_lines": 527,
+  "training_dropped_incomplete": 99,
+  "training_missing_by_feature": {
+    "off_eFG_home": 78,
+    "off_eFG_away": 78,
+    "tov_home": 78,
+    "tov_away": 78,
+    "orb_home": 78,
+    "orb_away": 78,
+    "ftr_home": 78,
+    "ftr_away": 78,
+    "pace_diff": 78,
+    "xprod_home": 78,
+    "xprod_away": 78,
+    "rest_diff": 16,
+    "inj_home": 1,
+    "inj_away": 1,
+    "inj_diff": 1,
+    "winpct_diff": 16,
+    "margin_diff": 16,
+    "player_team_rating_diff": 93,
+    "player_top8_share_diff": 93,
+    "player_depth_dropoff_diff": 93,
+    "player_pts_margin_ewma_diff": 93,
+    "player_margin_std_ewma_diff": 93,
+    "player_plus_minus_ewma_diff": 93,
+    "player_adv_ts_diff": 78,
+    "player_adv_pie_diff": 78,
+    "player_adv_net_diff": 78,
+    "player_adv_creation_diff": 78,
+    "player_adv_turnover_diff": 78,
+    "player_adv_usage_hhi_diff": 78,
+    "prior_clv_diff": 78,
+    "prior_steam_diff": 78,
+    "prior_updates_diff": 78,
+    "box_pace_diff": 78,
+    "box_ts_diff": 78,
+    "box_off_diff": 78,
+    "box_def_diff": 78,
+    "box_net_diff": 78,
+    "box_off_proxy_diff": 78,
+    "box_def_proxy_diff": 78,
+    "box_q_score_std_diff": 78,
+    "box_q_margin_std_diff": 78,
+    "box_q4_margin_diff": 78,
+    "box_three_rate_diff": 78,
+    "box_ast_to_diff": 78,
+    "box_net_ewma_diff": 78,
+    "box_ts_ewma_diff": 78,
+    "inj_scoring_diff": 1,
+    "inj_questionable_diff": 1,
+    "load7_home": 15,
+    "load7_away": 15,
+    "load7_diff": 16,
+    "top8share_diff": 16,
+    "stability_diff": 33,
+    "injx_home": 5,
+    "injx_away": 5,
+    "injx_diff": 5,
+    "injout_home": 5,
+    "injout_away": 5,
+    "injout_diff": 5
+  },
+  "test_incomplete_games": [
+    {
+      "game_id": "0022100591",
+      "date": "2022-01-08",
+      "home": "LAC",
+      "away": "MEM",
+      "missing_features": "injx_home,injx_away,injx_diff,injout_home,injout_away,injout_diff"
+    },
+    {
+      "game_id": "0022100597",
+      "date": "2022-01-09",
+      "home": "LAC",
+      "away": "ATL",
+      "missing_features": "injx_home,injx_away,injx_diff,injout_home,injout_away,injout_diff"
+    },
+    {
+      "game_id": "0022100711",
+      "date": "2022-01-10",
+      "home": "HOU",
+      "away": "PHI",
+      "missing_features": "open_implied_home,open_implied_away,open_home"
+    },
+    {
+      "game_id": "0022100617",
+      "date": "2022-01-16",
+      "home": "DET",
+      "away": "PHX",
+      "missing_features": "open_implied_home,open_implied_away,open_home"
+    },
+    {
+      "game_id": "0022100659",
+      "date": "2022-01-17",
+      "home": "LAC",
+      "away": "IND",
+      "missing_features": "injx_home,injx_away,injx_diff,injout_home,injout_away,injout_diff"
+    },
+    {
+      "game_id": "0022100730",
+      "date": "2022-01-24",
+      "home": "OKC",
+      "away": "CHI",
+      "missing_features": "open_implied_home,open_implied_away,open_home"
+    },
+    {
+      "game_id": "0022100729",
+      "date": "2022-01-28",
+      "home": "NOP",
+      "away": "DEN",
+      "missing_features": "open_implied_home,open_implied_away,open_home"
+    },
+    {
+      "game_id": "0022100767",
+      "date": "2022-01-31",
+      "home": "ATL",
+      "away": "TOR",
+      "missing_features": "open_implied_home,open_implied_away,open_home"
+    },
+    {
+      "game_id": "0022100784",
+      "date": "2022-02-01",
+      "home": "TOR",
+      "away": "MIA",
+      "missing_features": "open_implied_home,open_implied_away,open_home"
+    },
+    {
+      "game_id": "0022100804",
+      "date": "2022-02-06",
+      "home": "DEN",
+      "away": "BKN",
+      "missing_features": "injx_home,injx_away,injx_diff,injout_home,injout_away,injout_diff"
+    },
+    {
+      "game_id": "0022100845",
+      "date": "2022-02-12",
+      "home": "POR",
+      "away": "NYK",
+      "missing_features": "injx_home,injx_away,injx_diff,injout_home,injout_away,injout_diff"
+    },
+    {
+      "game_id": "0022100913",
+      "date": "2022-02-27",
+      "home": "PHX",
+      "away": "UTA",
+      "missing_features": "injx_home,injx_away,injx_diff,injout_home,injout_away,injout_diff"
+    },
+    {
+      "game_id": "0022100726",
+      "date": "2022-02-28",
+      "home": "BKN",
+      "away": "TOR",
+      "missing_features": "open_implied_home,open_implied_away,open_home"
+    },
+    {
+      "game_id": "0022100710",
+      "date": "2022-03-03",
+      "home": "ATL",
+      "away": "CHI",
+      "missing_features": "open_implied_home,open_implied_away,open_home"
+    },
+    {
+      "game_id": "0022101062",
+      "date": "2022-03-20",
+      "home": "IND",
+      "away": "POR",
+      "missing_features": "injx_home,injx_away,injx_diff,injout_home,injout_away,injout_diff"
+    }
+  ],
+  "test_complete_per_candidate": {
+    "v3_only": 615,
+    "plus_injuries": 608,
+    "plus_minutes": 615,
+    "all": 608
+  },
+  "test_fallback_policy": "Before evaluation, any Jan-Mar test row missing a candidate's features is assigned Kaggle no-vig market probability for that candidate. Never remove a benchmark game or fabricate a filing/quote.",
+  "feature_groups": {
+    "off_eFG_home": "v2_statistics",
+    "off_eFG_away": "v2_statistics",
+    "tov_home": "v2_statistics",
+    "tov_away": "v2_statistics",
+    "orb_home": "v2_statistics",
+    "orb_away": "v2_statistics",
+    "ftr_home": "v2_statistics",
+    "ftr_away": "v2_statistics",
+    "pace_diff": "v2_statistics",
+    "xprod_home": "v2_statistics",
+    "xprod_away": "v2_statistics",
+    "elo_diff": "v2_statistics",
+    "rest_diff": "v2_statistics",
+    "b2b_home": "v2_statistics",
+    "b2b_away": "v2_statistics",
+    "inj_home": "injuries",
+    "inj_away": "injuries",
+    "inj_diff": "injuries",
+    "market_home": "market",
+    "winpct_diff": "v2_statistics",
+    "margin_diff": "v2_statistics",
+    "market_logit": "market",
+    "player_team_rating_diff": "players",
+    "player_top8_share_diff": "players",
+    "player_depth_dropoff_diff": "players",
+    "player_pts_margin_ewma_diff": "players",
+    "player_margin_std_ewma_diff": "players",
+    "player_plus_minus_ewma_diff": "players",
+    "player_adv_ts_diff": "players",
+    "player_adv_pie_diff": "players",
+    "player_adv_net_diff": "players",
+    "player_adv_creation_diff": "players",
+    "player_adv_turnover_diff": "players",
+    "player_adv_usage_hhi_diff": "players",
+    "open_implied_home": "clv",
+    "open_implied_away": "clv",
+    "open_home": "clv",
+    "prior_clv_diff": "clv",
+    "prior_steam_diff": "clv",
+    "prior_updates_diff": "clv",
+    "box_pace_diff": "boxscores",
+    "box_ts_diff": "boxscores",
+    "box_off_diff": "boxscores",
+    "box_def_diff": "boxscores",
+    "box_net_diff": "boxscores",
+    "box_off_proxy_diff": "boxscores",
+    "box_def_proxy_diff": "boxscores",
+    "box_q_score_std_diff": "boxscores",
+    "box_q_margin_std_diff": "boxscores",
+    "box_q4_margin_diff": "boxscores",
+    "box_three_rate_diff": "boxscores",
+    "box_ast_to_diff": "boxscores",
+    "box_net_ewma_diff": "boxscores",
+    "box_ts_ewma_diff": "boxscores",
+    "inj_scoring_diff": "injuries",
+    "inj_questionable_diff": "injuries",
+    "load7_home": "minutes_load",
+    "load7_away": "minutes_load",
+    "load7_diff": "minutes_load",
+    "top8share_diff": "minutes_load",
+    "stability_diff": "minutes_load",
+    "injx_home": "injuries_ext",
+    "injx_away": "injuries_ext",
+    "injx_diff": "injuries_ext",
+    "injout_home": "injuries_ext",
+    "injout_away": "injuries_ext",
+    "injout_diff": "injuries_ext"
+  },
+  "odds_read": {
+    "rows_scanned": 514660,
+    "rows_retained": 24875,
+    "chunksize": 50000,
+    "columns_read": [
+      "game_id",
+      "game_date",
+      "odds_date",
+      "moneyline_home",
+      "moneyline_away"
+    ]
+  },
+  "boxscore_read": {
+    "rows_scanned": 76046,
+    "rows_retained": 2300,
+    "chunksize": 50000,
+    "columns_read": [
+      "game_id",
+      "game_date",
+      "team_abbreviation",
+      "pace",
+      "ts_pct",
+      "off_rating",
+      "def_rating",
+      "fga",
+      "fta",
+      "oreb",
+      "tov",
+      "pts",
+      "fg3a",
+      "ast",
+      "q1_pts",
+      "q1_plus_minus",
+      "q2_pts",
+      "q2_plus_minus",
+      "q3_pts",
+      "q3_plus_minus",
+      "q4_pts",
+      "q4_plus_minus"
+    ]
+  },
+  "player_read": {
+    "rows_scanned": 787531,
+    "rows_retained": 24381,
+    "chunksize": 50000,
+    "columns_read": [
+      "game_id",
+      "game_date",
+      "player_id",
+      "team_abbreviation",
+      "min",
+      "ts_pct",
+      "usg_pct",
+      "pie",
+      "net_rating",
+      "ast_pct",
+      "tm_tov_pct"
+    ]
+  },
+  "closing_line_agreement": {
+    "training": {
+      "n_games": 527,
+      "n_matched": 527,
+      "exact_both_moneylines": 59,
+      "fraction_exact_both": 0.11195445920303605,
+      "fraction_within_10_both": 0.6774193548387096,
+      "mean_abs_home_probability_difference": 0.007451291525446967,
+      "median_abs_home_probability_difference": 0.005680457605421574,
+      "max_abs_home_probability_difference": 0.10683316299412493,
+      "favorite_side_agreement": 0.9867172675521821
+    },
+    "test_window": {
+      "n_games": 623,
+      "n_matched": 615,
+      "exact_both_moneylines": 59,
+      "fraction_exact_both": 0.0959349593495935,
+      "fraction_within_10_both": 0.5707317073170731,
+      "mean_abs_home_probability_difference": 0.007203429739192382,
+      "median_abs_home_probability_difference": 0.005968349973719422,
+      "max_abs_home_probability_difference": 0.08185653128761494,
+      "favorite_side_agreement": 0.9902439024390244
+    }
+  },
+  "injury_snapshot_counts": {
+    "17:00": 1104,
+    "13:00": 45
+  },
+  "official_filing_counts": {
+    "game-day 5PM official filing": 1089,
+    "day-before 5PM official filing (early tip)": 49,
+    "day-before 5PM filing has only NOT YET SUBMITTED rows": 12
+  },
+  "official_filing_policy": "Official NBA injury report = the 5PM ET filing. Evening tips (>=18:00 ET) use the game-day 5PM report (snapshot_date == game_date); earlier tips use the day-before 5PM report (snapshot_date == game_date - 1) with 'NOT YET SUBMITTED' teams dropped. Impact = status weight (Out 1.0, Doubtful 0.5, Questionable 0.25) x player's prior-minutes share (10-game-halflife EWMA minutes over the team's last <=10 games, zeros for absences, divided by rotation minutes). injout = Out-only EWMA minutes / 240.",
+  "minutes_load_policy": "From the cached player boxscores (chunked 50k-row reads, single pass, columns game_id/game_date/player_id/team_abbreviation/min). load7 = team minutes over prior 7 calendar days (0.0 when the window contains zero games, e.g. after the All-Star break; NaN only at cold start). top8share = mean over the team's last 5 games of top-8 minutes / team minutes. stability = mean over the last 6 games' consecutive pairs of |top5_g AND top5_prev| / 5. All histories strictly prior to the target date.",
+  "timestamp_policy": {
+    "statistics": "Completed games with source date strictly less than target date; rolling last 10, minimum 5, EWMA half-life 10.",
+    "opening": "Only odds_date == open; no marker publication timestamp exists. Semantic historical opening, not exact point-in-time provable.",
+    "closing": "Kaggle supplied closing moneylines are the sole closing market input and settlement price; actual publication timestamps unavailable.",
+    "movement": "Current game close/move/steam/update-count fields are never predictors. Historical versions use strictly previous game dates.",
+    "injuries_v3": "Latest complete official snapshot with Eastern timestamp strictly less than scheduled Eastern tip (v3 formulation, part of the 56).",
+    "injuries_ext": "Official 5PM ET game-day filing for evening tips; day-before 5PM filing for earlier tips with NOT-YET-SUBMITTED teams dropped.",
+    "minutes": "Player boxscore histories strictly prior to the target date; 7-day window excludes the target day.",
+    "test_window": "Model weights, calibration, mixture and gate freeze on 2021-12-31. Completed Jan-Mar games update statistics only, never model parameters."
+  }
+}

@@ -1,0 +1,85 @@
+tuned: brier=0.2426 lr_c=0.03 lgb(63,0.02) w_lgb=0.4 cal=isotonic
+[phase1] calibration: isotonic | lr_c=0.03 lgb(63,0.02) w_lgb=0.4
+[phase2] calibration: isotonic | lr_c=0.03 lgb(63,0.02) w_lgb=0.4
+chosen gate: {"variant": "winner", "eps": 0.02, "n_bets": 247, "win_rate": 0.3522267206477733, "roi": -0.24753169903750968, "pnl": -61.14032966226489, "selection_period": "2021-08-16..2021-09-30", "minimum_bets": 30, "fallback": false}
+{
+ "test_eval_all": {
+  "label": "test (all games)",
+  "n_games": 1141,
+  "accuracy": 0.5617879053461875,
+  "flat_roi": -0.04666226005781874,
+  "flat_pnl": -53.241638725971185,
+  "brier": 0.24558222979165362,
+  "market_brier": NaN,
+  "log_loss": 0.684314286177159,
+  "market_accuracy": 0.5985977212971078
+ },
+ "test_eval": {
+  "label": "test (odds subset)",
+  "n_games": 1099,
+  "accuracy": 0.5605095541401274,
+  "flat_roi": -0.032976923317535205,
+  "flat_pnl": -36.24163872597119,
+  "brier": 0.24553689310830634,
+  "market_brier": 0.23843719745083936,
+  "log_loss": 0.6842147704801625,
+  "market_accuracy": 0.5996360327570519
+ },
+ "market_eval": {
+  "label": "market (odds subset)",
+  "n_games": 1099,
+  "accuracy": 0.5996360327570519,
+  "flat_roi": -0.013719659636975494,
+  "flat_pnl": -15.077905941036068,
+  "brier": 0.23843719745083936,
+  "market_brier": 0.23843719745083936,
+  "log_loss": 0.6695764391455179,
+  "market_accuracy": 0.5996360327570519
+ },
+ "gate_choice": {
+  "variant": "winner",
+  "eps": 0.02,
+  "n_bets": 247,
+  "win_rate": 0.3522267206477733,
+  "roi": -0.24753169903750968,
+  "pnl": -61.14032966226489,
+  "selection_period": "2021-08-16..2021-09-30",
+  "minimum_bets": 30,
+  "fallback": false
+ },
+ "kelly": {
+  "bankroll_multiple": 0.2797959913958595,
+  "net_return": -0.7202040086041406,
+  "total_staked": 7.491092249624733,
+  "roi_on_staked": -0.09614138827888806,
+  "n_staked": 470,
+  "n_gate_bets": 488,
+  "max_daily_drawdown": 0.8219253585810737,
+  "policy": "Quarter Kelly, 0-5% per bet; simultaneous games use start-of-Eastern-date bankroll; no within-day recycling."
+ },
+ "bootstrap_flat_roi": [
+  -0.07873369892021977,
+  0.013233519071735528
+ ],
+ "bootstrap_accuracy": [
+  0.534964541163877,
+  0.5867396416774379
+ ],
+ "bootstrap_gate_roi": [
+  -0.12307244988963958,
+  0.03647374092168237
+ ],
+ "bootstrap_brier": [
+  0.24078225413522975,
+  0.25064485562683614
+ ],
+ "bootstrap_market_brier": [
+  0.23210095946738565,
+  0.2454500577243141
+ ],
+ "bootstrap_brier_minus_market": [
+  0.0018948604733286794,
+  0.012080956203569313
+ ]
+}
+n_test_all: 1141 n_test_odds: 1099

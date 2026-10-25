@@ -1,0 +1,65 @@
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+train 7924 test 571
+[ens5050] nf=96 1X2 acc=54.64% ll=0.9811 | eps0: 164b +1.6% CI[-14.0,+16.7] | eps.02: 87b -4.5% | eps.05: 28b -1.1%
+        OU acc=59.72% | eps0: 290b +4.0% CI[-2.7,+10.1] | eps.02: 196b +6.9% | eps.05: 65b +28.7%
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+[ens3070] nf=96 1X2 acc=54.99% ll=0.9798 | eps0: 156b +0.8% CI[-14.5,+15.1] | eps.02: 89b +10.4% | eps.05: 19b +35.9%
+        OU acc=59.89% | eps0: 291b +6.5% CI[-0.0,+13.5] | eps.02: 188b +8.7% | eps.05: 64b +23.1%
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+[ens7030] nf=96 1X2 acc=54.12% ll=0.9829 | eps0: 167b -4.9% CI[-23.1,+11.3] | eps.02: 95b -12.8% | eps.05: 29b +0.4%
+        OU acc=59.02% | eps0: 304b +2.7% CI[-4.4,+9.1] | eps.02: 209b +6.9% | eps.05: 80b +16.4%
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+[lgb_only] nf=96 1X2 acc=54.99% ll=0.9785 | eps0: 179b +2.0% CI[-11.3,+14.6] | eps.02: 100b +10.1% | eps.05: 32b +12.3%
+        OU acc=59.89% | eps0: 311b +4.4% CI[-3.0,+12.2] | eps.02: 202b +9.7% | eps.05: 84b +13.0%
+[lr_only] nf=96 1X2 acc=53.42% ll=0.9863 | eps0: 189b -16.4% CI[-31.3,-2.6] | eps.02: 121b -15.6% | eps.05: 50b -11.8%
+        OU acc=58.84% | eps0: 315b +3.1% CI[-3.2,+9.3] | eps.02: 229b +5.0% | eps.05: 116b +5.4%
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+[no_mopen] nf=92 1X2 acc=54.29% ll=0.9845 | eps0: 207b -2.2% CI[-18.5,+13.7] | eps.02: 147b +6.5% | eps.05: 90b +7.4%
+        OU acc=56.74% | eps0: 287b +1.9% CI[-6.6,+10.0] | eps.02: 227b +3.0% | eps.05: 131b -1.6%
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+[no_clv] nf=86 1X2 acc=54.12% ll=0.9831 | eps0: 188b -5.7% CI[-22.6,+8.7] | eps.02: 138b -3.9% | eps.05: 76b +11.6%
+        OU acc=57.27% | eps0: 284b +1.6% CI[-7.4,+10.5] | eps.02: 210b +4.8% | eps.05: 109b -3.6%
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+[no_xg] nf=81 1X2 acc=54.82% ll=0.9789 | eps0: 156b -5.8% CI[-21.5,+10.0] | eps.02: 78b +11.6% | eps.05: 23b +36.7%
+        OU acc=57.44% | eps0: 296b -1.6% CI[-8.7,+6.2] | eps.02: 190b +4.0% | eps.05: 73b +11.1%
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+[no_form] nf=86 1X2 acc=54.82% ll=0.9792 | eps0: 168b +0.8% CI[-15.9,+17.5] | eps.02: 84b +11.2% | eps.05: 26b +16.3%
+        OU acc=58.84% | eps0: 294b +2.1% CI[-6.6,+10.8] | eps.02: 192b +5.6% | eps.05: 80b +12.5%
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+[v1like_feats] nf=59 1X2 acc=53.59% ll=0.9889 | eps0: 210b -7.0% CI[-24.6,+8.1] | eps.02: 158b -8.4% | eps.05: 90b -9.0%
+        OU acc=52.71% | eps0: 311b -8.1% CI[-17.4,+1.4] | eps.02: 250b -9.3% | eps.05: 155b -13.8%
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+[lgb_cap] nf=96 1X2 acc=54.99% ll=0.9782 | eps0: 173b +4.3% CI[-12.4,+20.3] | eps.02: 114b +13.3% | eps.05: 42b +5.1%
+        OU acc=59.02% | eps0: 294b -0.5% CI[-8.6,+8.3] | eps.02: 207b +2.7% | eps.05: 92b +16.1%
+
+Saved sweep_results.json

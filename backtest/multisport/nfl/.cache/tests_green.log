@@ -1,0 +1,17 @@
+test_american_odds_and_no_vig_probability_properties (test_nfl_backtest.NFLBacktestTests.test_american_odds_and_no_vig_probability_properties) ... ok
+test_future_and_same_week_outcomes_cannot_change_current_features (test_nfl_backtest.NFLBacktestTests.test_future_and_same_week_outcomes_cannot_change_current_features) ... ok
+test_grouped_cv_and_calibration_blocks_are_chronological_and_disjoint (test_nfl_backtest.NFLBacktestTests.test_grouped_cv_and_calibration_blocks_are_chronological_and_disjoint) ... ok
+test_injury_formula_prior_snaps_and_lagged_starting_quarterback (test_nfl_backtest.NFLBacktestTests.test_injury_formula_prior_snaps_and_lagged_starting_quarterback) ... ok
+test_kelly_uses_start_of_week_bankroll_and_actual_price (test_nfl_backtest.NFLBacktestTests.test_kelly_uses_start_of_week_bankroll_and_actual_price) ... ok
+test_lean_can_back_an_underdog_but_conviction_requires_model_winner (test_nfl_backtest.NFLBacktestTests.test_lean_can_back_an_underdog_but_conviction_requires_model_winner) ... ok
+test_moneyline_push_and_ats_spread_sign (test_nfl_backtest.NFLBacktestTests.test_moneyline_push_and_ats_spread_sign) ... ok
+test_only_this_weeks_pre_kickoff_injury_report_may_change_features (test_nfl_backtest.NFLBacktestTests.test_only_this_weeks_pre_kickoff_injury_report_may_change_features) ... ok
+test_tied_games_are_pushes_and_excluded_from_binary_scores (test_nfl_backtest.NFLBacktestTests.test_tied_games_are_pushes_and_excluded_from_binary_scores) ... ok
+test_vendor_snap_rounding_does_not_exceed_full_participation (test_nfl_backtest.NFLBacktestTests.test_vendor_snap_rounding_does_not_exceed_full_participation) ... ok
+test_week_cluster_bootstrap_is_invariant_to_duplicate_rows (test_nfl_backtest.NFLBacktestTests.test_week_cluster_bootstrap_is_invariant_to_duplicate_rows) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.345s
+
+OK
+EXIT_CODE=0

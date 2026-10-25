@@ -1,0 +1,8 @@
+--- before/NFL_BACKTEST_REPORT.md
++++ after/NFL_BACKTEST_REPORT.md
+@@ -170,4 +170,4 @@
+ 
+ ## Verdict
+ 
+-The preselected lightgbm model produced 64.56% decisive-game accuracy and 2.66% flat-stake ROI. Its preselected lean_eps_05 gate returned -1.21% on 242 bets, with a week-clustered 95% ROI interval of [-18.21%, 16.81%]. This does not establish a positive betting edge: the uncertainty interval does not exclude zero on the profitable side. Injury, starter and time-played features are explicitly present, but this experiment does not isolate their causal or incremental contribution; that requires a separately specified ablation and a new untouched evaluation period.
++The preselected lightgbm model produced 64.56% decisive-game accuracy and 2.66% flat-stake ROI. Its preselected lean_eps_05 gate returned -1.21% on 242 bets, with a week-clustered 95% ROI interval of [-18.21%, 16.81%]. This does not establish a positive betting edge: the uncertainty interval does not exclude zero on the profitable side. The selected model's Brier score is 0.22312 versus 0.20934 for the no-vig market; lower is better. Even the least-losing pre-test gate had negative validation ROI in this run, so its selection is a comparison among the requested gates, not a recommendation to bet. Injury, starter and time-played features are explicitly present, but this experiment does not isolate their causal or incremental contribution; that requires a separately specified ablation and a new untouched evaluation period.

@@ -1,0 +1,1882 @@
+{
+  "created_utc": "2026-10-24T23:53:40.835468+00:00",
+  "test_games": 335,
+  "test_first_game": "2021-12-16",
+  "test_last_game": "2023-01-08",
+  "features": [
+    "diff_prior_games",
+    "diff_points_for_4",
+    "diff_points_against_4",
+    "diff_yards_for_4",
+    "diff_yards_against_4",
+    "diff_off_epa_per_play_4",
+    "diff_def_epa_allowed_4",
+    "diff_yards_per_play_4",
+    "diff_pass_epa_per_play_4",
+    "diff_rush_epa_per_play_4",
+    "diff_pass_share_4",
+    "diff_rush_share_4",
+    "diff_points_for_8",
+    "diff_points_against_8",
+    "diff_yards_for_8",
+    "diff_yards_against_8",
+    "diff_off_epa_per_play_8",
+    "diff_def_epa_allowed_8",
+    "diff_yards_per_play_8",
+    "diff_pass_epa_per_play_8",
+    "diff_rush_epa_per_play_8",
+    "diff_pass_share_8",
+    "diff_rush_share_8",
+    "diff_rest_days",
+    "diff_season_opener",
+    "diff_injury_impact",
+    "diff_injury_offense",
+    "diff_injury_defense",
+    "diff_injury_special",
+    "diff_injured_players",
+    "diff_injury_unmatched_players",
+    "diff_injury_matched_share",
+    "diff_injury_report_available",
+    "diff_snap_history_available",
+    "diff_qb_on_report",
+    "diff_qb_injury_weight",
+    "diff_qb_cpoe",
+    "diff_qb_passer_rating",
+    "diff_qb_yards_per_attempt",
+    "diff_depth_available",
+    "diff_starter_usage_quality",
+    "diff_available_starter_usage",
+    "diff_starter_injury_impact",
+    "diff_starter_snap_coverage",
+    "diff_ngs_passing_available",
+    "diff_ngs_team_cpoe",
+    "diff_ngs_rushing_available",
+    "diff_ngs_rush_yards_per_attempt",
+    "diff_ngs_rush_ryoe",
+    "diff_ngs_receiving_available",
+    "diff_ngs_receive_yac_over_expected",
+    "diff_ngs_receive_separation",
+    "home_injury_report_available",
+    "home_snap_history_available",
+    "home_depth_available",
+    "home_ngs_passing_available",
+    "home_ngs_rushing_available",
+    "home_ngs_receiving_available",
+    "away_injury_report_available",
+    "away_snap_history_available",
+    "away_depth_available",
+    "away_ngs_passing_available",
+    "away_ngs_rushing_available",
+    "away_ngs_receiving_available",
+    "home_field",
+    "elo_difference",
+    "elo_home_probability"
+  ],
+  "feature_count": 67,
+  "models": {
+    "logreg": {
+      "games": 335,
+      "decisive_games": 333,
+      "ties": 2,
+      "accuracy": 0.6156156156156156,
+      "accuracy_ci": [
+        0.5810347195517223,
+        0.6516550032175031
+      ],
+      "brier": 0.23476189522428273,
+      "brier_ci": [
+        0.22231507139880913,
+        0.24663106961160244
+      ],
+      "log_loss": 0.6617085505951055,
+      "flat_roi": -0.0396482540909009,
+      "flat_profit": -13.2821651204518,
+      "flat_roi_ci": [
+        -0.09333236286674793,
+        0.013974783784044036
+      ],
+      "flat_bets": 335,
+      "brier_minus_market": 0.025424130347490425,
+      "brier_minus_market_ci": [
+        0.014697550124282133,
+        0.03569540589329765
+      ]
+    },
+    "lightgbm": {
+      "games": 335,
+      "decisive_games": 333,
+      "ties": 2,
+      "accuracy": 0.6456456456456456,
+      "accuracy_ci": [
+        0.6006093050945303,
+        0.688627729435389
+      ],
+      "brier": 0.22312132718261696,
+      "brier_ci": [
+        0.21069941034314885,
+        0.23723902159862956
+      ],
+      "log_loss": 0.6381958701213465,
+      "flat_roi": 0.026607350476891337,
+      "flat_profit": 8.913462409758598,
+      "flat_roi_ci": [
+        -0.054047533223646554,
+        0.1053154336680712
+      ],
+      "flat_bets": 335,
+      "brier_minus_market": 0.013783562305824707,
+      "brier_minus_market_ci": [
+        0.0027699559250406436,
+        0.024159635207307115
+      ]
+    }
+  },
+  "market": {
+    "games": 335,
+    "decisive_games": 333,
+    "ties": 2,
+    "accuracy": 0.6576576576576577,
+    "accuracy_ci": [
+      0.6153846153846154,
+      0.7011843339587243
+    ],
+    "brier": 0.20933776487679226,
+    "brier_ci": [
+      0.19392239779800954,
+      0.22606443257501355
+    ],
+    "log_loss": 0.6058078403167575,
+    "flat_roi": -0.044960780435709405,
+    "flat_profit": -15.06186144596265,
+    "flat_roi_ci": [
+      -0.10808124778196034,
+      0.024754327587380224
+    ],
+    "flat_bets": 335
+  },
+  "gates": {
+    "logreg": [
+      {
+        "name": "lean_eps_00",
+        "kind": "lean",
+        "epsilon": 0.0,
+        "bets": 335,
+        "weeks": 22,
+        "roi": -0.0656623679355009,
+        "profit": -21.9968932583928,
+        "roi_ci": [
+          -0.1906341434050435,
+          0.06887757766611959
+        ]
+      },
+      {
+        "name": "lean_eps_02",
+        "kind": "lean",
+        "epsilon": 0.02,
+        "bets": 286,
+        "weeks": 22,
+        "roi": -0.07202344030205161,
+        "profit": -20.59870392638676,
+        "roi_ci": [
+          -0.20757977470881045,
+          0.07809110537826346
+        ]
+      },
+      {
+        "name": "lean_eps_05",
+        "kind": "lean",
+        "epsilon": 0.05,
+        "bets": 236,
+        "weeks": 22,
+        "roi": -0.11658040968987428,
+        "profit": -27.51297668681033,
+        "roi_ci": [
+          -0.2698870144480339,
+          0.041261297914521704
+        ]
+      },
+      {
+        "name": "winner_conviction_eps_00",
+        "kind": "winner_conviction",
+        "epsilon": 0.0,
+        "bets": 141,
+        "weeks": 22,
+        "roi": -0.06742477488221849,
+        "profit": -9.506893258392807,
+        "roi_ci": [
+          -0.1801058467980117,
+          0.0455474278393561
+        ]
+      },
+      {
+        "name": "winner_conviction_eps_02",
+        "kind": "winner_conviction",
+        "epsilon": 0.02,
+        "bets": 119,
+        "weeks": 21,
+        "roi": -0.05620759602005688,
+        "profit": -6.6887039263867685,
+        "roi_ci": [
+          -0.17830798985546178,
+          0.07654071154484329
+        ]
+      },
+      {
+        "name": "winner_conviction_eps_05",
+        "kind": "winner_conviction",
+        "epsilon": 0.05,
+        "bets": 98,
+        "weeks": 21,
+        "roi": -0.11125486415112591,
+        "profit": -10.902976686810339,
+        "roi_ci": [
+          -0.2557360086095854,
+          0.04051423858288657
+        ]
+      }
+    ],
+    "lightgbm": [
+      {
+        "name": "lean_eps_00",
+        "kind": "lean",
+        "epsilon": 0.0,
+        "bets": 335,
+        "weeks": 22,
+        "roi": -0.00858834225531365,
+        "profit": -2.8770946555300725,
+        "roi_ci": [
+          -0.13807081587538053,
+          0.12766033853412903
+        ]
+      },
+      {
+        "name": "lean_eps_02",
+        "kind": "lean",
+        "epsilon": 0.02,
+        "bets": 293,
+        "weeks": 22,
+        "roi": -0.027657046110263615,
+        "profit": -8.103514510307239,
+        "roi_ci": [
+          -0.16996910566364248,
+          0.12835393764900715
+        ]
+      },
+      {
+        "name": "lean_eps_05",
+        "kind": "lean",
+        "epsilon": 0.05,
+        "bets": 242,
+        "weeks": 22,
+        "roi": -0.012103634472235164,
+        "profit": -2.9290795422809097,
+        "roi_ci": [
+          -0.18209804096250962,
+          0.16805924361846422
+        ]
+      },
+      {
+        "name": "winner_conviction_eps_00",
+        "kind": "winner_conviction",
+        "epsilon": 0.0,
+        "bets": 154,
+        "weeks": 22,
+        "roi": 0.08534354119785664,
+        "profit": 13.142905344469924,
+        "roi_ci": [
+          -0.06507011574113981,
+          0.2472429906801978
+        ]
+      },
+      {
+        "name": "winner_conviction_eps_02",
+        "kind": "winner_conviction",
+        "epsilon": 0.02,
+        "bets": 137,
+        "weeks": 22,
+        "roi": 0.07997434664009309,
+        "profit": 10.956485489692753,
+        "roi_ci": [
+          -0.08779218477841476,
+          0.2622462413199062
+        ]
+      },
+      {
+        "name": "winner_conviction_eps_05",
+        "kind": "winner_conviction",
+        "epsilon": 0.05,
+        "bets": 120,
+        "weeks": 22,
+        "roi": 0.0748410038143257,
+        "profit": 8.980920457719083,
+        "roi_ci": [
+          -0.09633259339156672,
+          0.25331612799571124
+        ]
+      }
+    ]
+  },
+  "by_season": {
+    "logreg": {
+      "2021": {
+        "games": 64,
+        "decisive_games": 64,
+        "ties": 0,
+        "accuracy": 0.640625,
+        "accuracy_ci": [
+          0.53125,
+          0.75
+        ],
+        "brier": 0.2423633181627301,
+        "brier_ci": [
+          0.21528870794146168,
+          0.2656941485771297
+        ],
+        "log_loss": 0.6794755377692281,
+        "flat_roi": -0.027802653059888452,
+        "flat_profit": -1.779369795832861,
+        "flat_roi_ci": [
+          -0.2262065263795639,
+          0.17060122025978694
+        ],
+        "flat_bets": 64
+      },
+      "2022": {
+        "games": 271,
+        "decisive_games": 269,
+        "ties": 2,
+        "accuracy": 0.6096654275092936,
+        "accuracy_ci": [
+          0.5777737665463297,
+          0.6450381679389313
+        ],
+        "brier": 0.23295337824264464,
+        "brier_ci": [
+          0.21900300496871916,
+          0.2467666934110142
+        ],
+        "log_loss": 0.6574814607098124,
+        "flat_roi": -0.04244573920523593,
+        "flat_profit": -11.502795324618937,
+        "flat_roi_ci": [
+          -0.0868282169253507,
+          0.0030451188884624805
+        ],
+        "flat_bets": 271
+      }
+    },
+    "lightgbm": {
+      "2021": {
+        "games": 64,
+        "decisive_games": 64,
+        "ties": 0,
+        "accuracy": 0.671875,
+        "accuracy_ci": [
+          0.625,
+          0.71875
+        ],
+        "brier": 0.21321240175470302,
+        "brier_ci": [
+          0.2010885955931237,
+          0.22533620791628234
+        ],
+        "log_loss": 0.6164740854925608,
+        "flat_roi": 0.021461612393465994,
+        "flat_profit": 1.3735431931818236,
+        "flat_roi_ci": [
+          -0.15748500596082932,
+          0.16655283771248597
+        ],
+        "flat_bets": 64
+      },
+      "2022": {
+        "games": 271,
+        "decisive_games": 269,
+        "ties": 2,
+        "accuracy": 0.6394052044609665,
+        "accuracy_ci": [
+          0.5830106240622845,
+          0.6903072318264791
+        ],
+        "brier": 0.22547884103907231,
+        "brier_ci": [
+          0.21058345688270502,
+          0.24217848972475706
+        ],
+        "log_loss": 0.6433638783601654,
+        "flat_roi": 0.027822580134969657,
+        "flat_profit": 7.539919216576777,
+        "flat_roi_ci": [
+          -0.0669950289376332,
+          0.12039995300729407
+        ],
+        "flat_bets": 271
+      }
+    }
+  },
+  "selection": {
+    "chosen_model": "lightgbm",
+    "chosen_gate": {
+      "name": "lean_eps_05",
+      "kind": "lean",
+      "epsilon": 0.05,
+      "bets": 42,
+      "weeks": 4,
+      "roi": -0.09156131981713375,
+      "profit": -3.8455754323196176,
+      "roi_ci": [
+        -0.47303792113893856,
+        0.1905555555555556
+      ]
+    },
+    "minimum_gate_bets": 20,
+    "gate_selection_fallback": false,
+    "parameters": {
+      "logreg": {
+        "C": 0.1
+      },
+      "lightgbm": {
+        "num_leaves": 3
+      }
+    },
+    "validation_scores": {
+      "logreg": {
+        "games": 58,
+        "decisive_games": 58,
+        "ties": 0,
+        "accuracy": 0.5,
+        "accuracy_ci": [
+          0.288135593220339,
+          0.666964285714284
+        ],
+        "brier": 0.24442575635436292,
+        "brier_ci": [
+          0.21473224919208586,
+          0.2726571398468313
+        ],
+        "log_loss": 0.6808775114534952,
+        "flat_roi": -0.2042309229493697,
+        "flat_profit": -11.845393531063444,
+        "flat_roi_ci": [
+          -0.5281609859413443,
+          0.04220017891094757
+        ],
+        "flat_bets": 58
+      },
+      "lightgbm": {
+        "games": 58,
+        "decisive_games": 58,
+        "ties": 0,
+        "accuracy": 0.603448275862069,
+        "accuracy_ci": [
+          0.5084745762711864,
+          0.6845159774436074
+        ],
+        "brier": 0.2257729226235478,
+        "brier_ci": [
+          0.19937716497951116,
+          0.2530564532998496
+        ],
+        "log_loss": 0.6409856065206225,
+        "flat_roi": -0.0992276955556677,
+        "flat_profit": -5.7552063422287265,
+        "flat_roi_ci": [
+          -0.1587197182631802,
+          -0.04218644472795896
+        ],
+        "flat_bets": 58
+      }
+    },
+    "validation_gates": {
+      "logreg": [
+        {
+          "name": "lean_eps_00",
+          "kind": "lean",
+          "epsilon": 0.0,
+          "bets": 58,
+          "weeks": 4,
+          "roi": -0.1868156088490251,
+          "profit": -10.835305313243456,
+          "roi_ci": [
+            -0.45635564178089955,
+            -0.02816666666666666
+          ]
+        },
+        {
+          "name": "lean_eps_02",
+          "kind": "lean",
+          "epsilon": 0.02,
+          "bets": 53,
+          "weeks": 4,
+          "roi": -0.22668936004668352,
+          "profit": -12.014536082474226,
+          "roi_ci": [
+            -0.49066036512027483,
+            -0.02172413793103448
+          ]
+        },
+        {
+          "name": "lean_eps_05",
+          "kind": "lean",
+          "epsilon": 0.05,
+          "bets": 46,
+          "weeks": 4,
+          "roi": -0.23239130434782612,
+          "profit": -10.690000000000001,
+          "roi_ci": [
+            -0.551859756097561,
+            -0.0316
+          ]
+        },
+        {
+          "name": "winner_conviction_eps_00",
+          "kind": "winner_conviction",
+          "epsilon": 0.0,
+          "bets": 27,
+          "weeks": 4,
+          "roi": -0.330196493083091,
+          "profit": -8.915305313243458,
+          "roi_ci": [
+            -0.7047230089498131,
+            0.05702170896114196
+          ]
+        },
+        {
+          "name": "winner_conviction_eps_02",
+          "kind": "winner_conviction",
+          "epsilon": 0.02,
+          "bets": 24,
+          "weeks": 4,
+          "roi": -0.3201890034364261,
+          "profit": -7.684536082474226,
+          "roi_ci": [
+            -0.6893333333333334,
+            0.06851546391752579
+          ]
+        },
+        {
+          "name": "winner_conviction_eps_05",
+          "kind": "winner_conviction",
+          "epsilon": 0.05,
+          "bets": 20,
+          "weeks": 4,
+          "roi": -0.364,
+          "profit": -7.279999999999999,
+          "roi_ci": [
+            -0.7863636363636364,
+            0.15222222222222223
+          ]
+        }
+      ],
+      "lightgbm": [
+        {
+          "name": "lean_eps_00",
+          "kind": "lean",
+          "epsilon": 0.0,
+          "bets": 58,
+          "weeks": 4,
+          "roi": -0.23022522188802666,
+          "profit": -13.353062869505546,
+          "roi_ci": [
+            -0.5384078032767946,
+            -0.046303492234526976
+          ]
+        },
+        {
+          "name": "lean_eps_02",
+          "kind": "lean",
+          "epsilon": 0.02,
+          "bets": 54,
+          "weeks": 4,
+          "roi": -0.2239456086945472,
+          "profit": -12.093062869505548,
+          "roi_ci": [
+            -0.5392596517412372,
+            0.04957046976790016
+          ]
+        },
+        {
+          "name": "lean_eps_05",
+          "kind": "lean",
+          "epsilon": 0.05,
+          "bets": 42,
+          "weeks": 4,
+          "roi": -0.09156131981713375,
+          "profit": -3.8455754323196176,
+          "roi_ci": [
+            -0.47303792113893856,
+            0.1905555555555556
+          ]
+        },
+        {
+          "name": "winner_conviction_eps_00",
+          "kind": "winner_conviction",
+          "epsilon": 0.0,
+          "bets": 20,
+          "weeks": 4,
+          "roi": -0.3101531434752774,
+          "profit": -6.203062869505548,
+          "roi_ci": [
+            -0.4850961538461539,
+            -0.16640389447236179
+          ]
+        },
+        {
+          "name": "winner_conviction_eps_02",
+          "kind": "winner_conviction",
+          "epsilon": 0.02,
+          "bets": 18,
+          "weeks": 4,
+          "roi": -0.2335034927503082,
+          "profit": -4.203062869505548,
+          "roi_ci": [
+            -0.4850961538461539,
+            0.0259644375724778
+          ]
+        },
+        {
+          "name": "winner_conviction_eps_05",
+          "kind": "winner_conviction",
+          "epsilon": 0.05,
+          "bets": 16,
+          "weeks": 4,
+          "roi": -0.23159846451997612,
+          "profit": -3.705575432319618,
+          "roi_ci": [
+            -0.4850961538461539,
+            0.2495193798449613
+          ]
+        }
+      ]
+    },
+    "cv_records": [
+      {
+        "family": "logreg",
+        "parameters": {
+          "C": 0.1
+        },
+        "fold": 1,
+        "train_last_week": 202009,
+        "validation_first_week": 202010,
+        "validation_last_week": 202013,
+        "train_games": 133,
+        "validation_decisive_games": 59,
+        "log_loss": 0.5890722452962761
+      },
+      {
+        "family": "logreg",
+        "parameters": {
+          "C": 0.1
+        },
+        "fold": 2,
+        "train_last_week": 202013,
+        "validation_first_week": 202014,
+        "validation_last_week": 202017,
+        "train_games": 192,
+        "validation_decisive_games": 64,
+        "log_loss": 0.646507865816295
+      },
+      {
+        "family": "logreg",
+        "parameters": {
+          "C": 0.1
+        },
+        "fold": 3,
+        "train_last_week": 202017,
+        "validation_first_week": 202101,
+        "validation_last_week": 202104,
+        "train_games": 256,
+        "validation_decisive_games": 64,
+        "log_loss": 0.7955239154640537
+      },
+      {
+        "family": "logreg",
+        "parameters": {
+          "C": 1.0
+        },
+        "fold": 1,
+        "train_last_week": 202009,
+        "validation_first_week": 202010,
+        "validation_last_week": 202013,
+        "train_games": 133,
+        "validation_decisive_games": 59,
+        "log_loss": 0.8478575988558342
+      },
+      {
+        "family": "logreg",
+        "parameters": {
+          "C": 1.0
+        },
+        "fold": 2,
+        "train_last_week": 202013,
+        "validation_first_week": 202014,
+        "validation_last_week": 202017,
+        "train_games": 192,
+        "validation_decisive_games": 64,
+        "log_loss": 0.6917704205803137
+      },
+      {
+        "family": "logreg",
+        "parameters": {
+          "C": 1.0
+        },
+        "fold": 3,
+        "train_last_week": 202017,
+        "validation_first_week": 202101,
+        "validation_last_week": 202104,
+        "train_games": 256,
+        "validation_decisive_games": 64,
+        "log_loss": 0.8603254407363153
+      },
+      {
+        "family": "logreg",
+        "parameters": {
+          "C": 10.0
+        },
+        "fold": 1,
+        "train_last_week": 202009,
+        "validation_first_week": 202010,
+        "validation_last_week": 202013,
+        "train_games": 133,
+        "validation_decisive_games": 59,
+        "log_loss": 1.2190728849711705
+      },
+      {
+        "family": "logreg",
+        "parameters": {
+          "C": 10.0
+        },
+        "fold": 2,
+        "train_last_week": 202013,
+        "validation_first_week": 202014,
+        "validation_last_week": 202017,
+        "train_games": 192,
+        "validation_decisive_games": 64,
+        "log_loss": 0.7489251537749765
+      },
+      {
+        "family": "logreg",
+        "parameters": {
+          "C": 10.0
+        },
+        "fold": 3,
+        "train_last_week": 202017,
+        "validation_first_week": 202101,
+        "validation_last_week": 202104,
+        "train_games": 256,
+        "validation_decisive_games": 64,
+        "log_loss": 0.8875771474968153
+      },
+      {
+        "family": "lightgbm",
+        "parameters": {
+          "num_leaves": 3
+        },
+        "fold": 1,
+        "train_last_week": 202009,
+        "validation_first_week": 202010,
+        "validation_last_week": 202013,
+        "train_games": 133,
+        "validation_decisive_games": 59,
+        "log_loss": 0.63382354708838
+      },
+      {
+        "family": "lightgbm",
+        "parameters": {
+          "num_leaves": 3
+        },
+        "fold": 2,
+        "train_last_week": 202013,
+        "validation_first_week": 202014,
+        "validation_last_week": 202017,
+        "train_games": 192,
+        "validation_decisive_games": 64,
+        "log_loss": 0.6508499237014269
+      },
+      {
+        "family": "lightgbm",
+        "parameters": {
+          "num_leaves": 3
+        },
+        "fold": 3,
+        "train_last_week": 202017,
+        "validation_first_week": 202101,
+        "validation_last_week": 202104,
+        "train_games": 256,
+        "validation_decisive_games": 64,
+        "log_loss": 0.6898602292983806
+      },
+      {
+        "family": "lightgbm",
+        "parameters": {
+          "num_leaves": 7
+        },
+        "fold": 1,
+        "train_last_week": 202009,
+        "validation_first_week": 202010,
+        "validation_last_week": 202013,
+        "train_games": 133,
+        "validation_decisive_games": 59,
+        "log_loss": 0.6384438978064667
+      },
+      {
+        "family": "lightgbm",
+        "parameters": {
+          "num_leaves": 7
+        },
+        "fold": 2,
+        "train_last_week": 202013,
+        "validation_first_week": 202014,
+        "validation_last_week": 202017,
+        "train_games": 192,
+        "validation_decisive_games": 64,
+        "log_loss": 0.6579254572884529
+      },
+      {
+        "family": "lightgbm",
+        "parameters": {
+          "num_leaves": 7
+        },
+        "fold": 3,
+        "train_last_week": 202017,
+        "validation_first_week": 202101,
+        "validation_last_week": 202104,
+        "train_games": 256,
+        "validation_decisive_games": 64,
+        "log_loss": 0.7015565160689569
+      }
+    ],
+    "initial_training_games": 464,
+    "tuning_core_games": 320,
+    "selection_calibration_games": 86,
+    "gate_validation_games": 58,
+    "initial_training_decisive_games": 462
+  },
+  "selected_gate_test": {
+    "name": "lean_eps_05",
+    "kind": "lean",
+    "epsilon": 0.05,
+    "bets": 242,
+    "weeks": 22,
+    "roi": -0.012103634472235164,
+    "profit": -2.9290795422809097,
+    "roi_ci": [
+      -0.18209804096250962,
+      0.16805924361846422
+    ]
+  },
+  "best_observed_test_gate_posthoc": {
+    "model": "lightgbm",
+    "name": "winner_conviction_eps_00",
+    "kind": "winner_conviction",
+    "epsilon": 0.0,
+    "bets": 154,
+    "weeks": 22,
+    "roi": 0.08534354119785664,
+    "profit": 13.142905344469924,
+    "roi_ci": [
+      -0.06507011574113981,
+      0.2472429906801978
+    ]
+  },
+  "kelly": {
+    "initial_bankroll": 1000.0,
+    "final_bankroll": 884.1442425469647,
+    "total_return": -0.11585575745303522,
+    "total_return_ci": [
+      -0.5969659256414301,
+      1.1023124480917232
+    ],
+    "max_week_end_drawdown": -0.45804281397669255,
+    "bets": 242,
+    "total_staked": 5780.148942912798,
+    "stake_roi": -0.02004373219397562,
+    "weekly_returns": [
+      0.05520000000000002,
+      0.09382530596545986,
+      -0.115,
+      0.13082318082183872,
+      0.04947263344621835,
+      0.12931544865864938,
+      -0.0865794871794872,
+      -0.08049677419354838,
+      0.043058463351232756,
+      0.16075268817204302,
+      0.17186792452830188,
+      -0.0768048780487805,
+      0.020324080056152268,
+      -0.04413541142952907,
+      -0.0776709677419355,
+      -0.11062699851559363,
+      -0.06906221277036023,
+      -0.0033279571137579344,
+      -0.11155775749255546,
+      -0.04452921563724266,
+      -0.0672675799086758,
+      -0.0011724123832615788
+    ]
+  },
+  "coverage": {
+    "regular_games_by_season": {
+      "2020": 256,
+      "2021": 272,
+      "2022": 271
+    },
+    "test_games_by_season": {
+      "2021": 64,
+      "2022": 271
+    },
+    "test_weeks": 22,
+    "test_moneyline_games": 335,
+    "test_ats_fallback_games": 0,
+    "test_injured_player_reports": 3225,
+    "test_injured_reports_with_prior_snap_match": 3128,
+    "test_injury_snap_match_rate": 0.9699224806201551,
+    "injury_rows_without_completed_game": 17,
+    "source_rows": {
+      "injuries": 11269,
+      "snaps": 52849,
+      "depth": 75267,
+      "ngs_passing": 1792,
+      "ngs_rushing": 1831,
+      "ngs_receiving": 4561
+    },
+    "team_game_test_coverage": {
+      "injury_report_available": {
+        "covered": 667,
+        "total": 670,
+        "rate": 0.9955223880597015
+      },
+      "snap_history_available": {
+        "covered": 670,
+        "total": 670,
+        "rate": 1.0
+      },
+      "depth_available": {
+        "covered": 638,
+        "total": 670,
+        "rate": 0.9522388059701492
+      },
+      "ngs_passing_available": {
+        "covered": 670,
+        "total": 670,
+        "rate": 1.0
+      },
+      "ngs_rushing_available": {
+        "covered": 670,
+        "total": 670,
+        "rate": 1.0
+      },
+      "ngs_receiving_available": {
+        "covered": 670,
+        "total": 670,
+        "rate": 1.0
+      }
+    },
+    "injury_rows_after_kickoff_excluded": 3,
+    "snap_fraction_rows_clipped": 3
+  },
+  "fit_audit": [
+    {
+      "family": "logreg",
+      "prediction_week": 202115,
+      "base_last_week": 202108,
+      "base_games": 378,
+      "calibration_first_week": 202109,
+      "calibration_last_week": 202114,
+      "calibration_games": 86,
+      "calibration_decisive_games": 85,
+      "calibration_intercept": 0.11492029721542162,
+      "calibration_slope": 0.20952783927705695
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202115,
+      "base_last_week": 202108,
+      "base_games": 378,
+      "calibration_first_week": 202109,
+      "calibration_last_week": 202114,
+      "calibration_games": 86,
+      "calibration_decisive_games": 85,
+      "calibration_intercept": 0.09913190807712621,
+      "calibration_slope": 0.5995291878554231
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202116,
+      "base_last_week": 202109,
+      "base_games": 392,
+      "calibration_first_week": 202110,
+      "calibration_last_week": 202115,
+      "calibration_games": 88,
+      "calibration_decisive_games": 87,
+      "calibration_intercept": 0.09653393379534146,
+      "calibration_slope": 0.2397250805800656
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202116,
+      "base_last_week": 202109,
+      "base_games": 392,
+      "calibration_first_week": 202110,
+      "calibration_last_week": 202115,
+      "calibration_games": 88,
+      "calibration_decisive_games": 87,
+      "calibration_intercept": 0.10330842487028079,
+      "calibration_slope": 0.7152841318787275
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202117,
+      "base_last_week": 202110,
+      "base_games": 406,
+      "calibration_first_week": 202111,
+      "calibration_last_week": 202116,
+      "calibration_games": 90,
+      "calibration_decisive_games": 90,
+      "calibration_intercept": 0.11508804582383023,
+      "calibration_slope": 0.3830376222194442
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202117,
+      "base_last_week": 202110,
+      "base_games": 406,
+      "calibration_first_week": 202111,
+      "calibration_last_week": 202116,
+      "calibration_games": 90,
+      "calibration_decisive_games": 90,
+      "calibration_intercept": 0.11813612997149758,
+      "calibration_slope": 1.0103939090951628
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202118,
+      "base_last_week": 202111,
+      "base_games": 421,
+      "calibration_first_week": 202112,
+      "calibration_last_week": 202117,
+      "calibration_games": 91,
+      "calibration_decisive_games": 91,
+      "calibration_intercept": 0.4023984005400035,
+      "calibration_slope": 0.6691811933017089
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202118,
+      "base_last_week": 202111,
+      "base_games": 421,
+      "calibration_first_week": 202112,
+      "calibration_last_week": 202117,
+      "calibration_games": 91,
+      "calibration_decisive_games": 91,
+      "calibration_intercept": 0.3085386348406889,
+      "calibration_slope": 1.05073037395085
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202201,
+      "base_last_week": 202112,
+      "base_games": 436,
+      "calibration_first_week": 202113,
+      "calibration_last_week": 202118,
+      "calibration_games": 92,
+      "calibration_decisive_games": 92,
+      "calibration_intercept": 0.27849970754684616,
+      "calibration_slope": 0.562311613098114
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202201,
+      "base_last_week": 202112,
+      "base_games": 436,
+      "calibration_first_week": 202113,
+      "calibration_last_week": 202118,
+      "calibration_games": 92,
+      "calibration_decisive_games": 92,
+      "calibration_intercept": 0.25003357324137576,
+      "calibration_slope": 1.2901313970216095
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202202,
+      "base_last_week": 202113,
+      "base_games": 450,
+      "calibration_first_week": 202114,
+      "calibration_last_week": 202201,
+      "calibration_games": 94,
+      "calibration_decisive_games": 93,
+      "calibration_intercept": 0.2257044141768255,
+      "calibration_slope": 0.5301259576370824
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202202,
+      "base_last_week": 202113,
+      "base_games": 450,
+      "calibration_first_week": 202114,
+      "calibration_last_week": 202201,
+      "calibration_games": 94,
+      "calibration_decisive_games": 93,
+      "calibration_intercept": 0.20264913997869421,
+      "calibration_slope": 1.0274357252063273
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202203,
+      "base_last_week": 202114,
+      "base_games": 464,
+      "calibration_first_week": 202115,
+      "calibration_last_week": 202202,
+      "calibration_games": 96,
+      "calibration_decisive_games": 95,
+      "calibration_intercept": 0.33591618369341664,
+      "calibration_slope": 0.44619608564277136
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202203,
+      "base_last_week": 202114,
+      "base_games": 464,
+      "calibration_first_week": 202115,
+      "calibration_last_week": 202202,
+      "calibration_games": 96,
+      "calibration_decisive_games": 95,
+      "calibration_intercept": 0.3057643272809023,
+      "calibration_slope": 1.0351208573500235
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202204,
+      "base_last_week": 202115,
+      "base_games": 480,
+      "calibration_first_week": 202116,
+      "calibration_last_week": 202203,
+      "calibration_games": 96,
+      "calibration_decisive_games": 95,
+      "calibration_intercept": 0.3401764512964638,
+      "calibration_slope": 0.42733195049408346
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202204,
+      "base_last_week": 202115,
+      "base_games": 480,
+      "calibration_first_week": 202116,
+      "calibration_last_week": 202203,
+      "calibration_games": 96,
+      "calibration_decisive_games": 95,
+      "calibration_intercept": 0.2960127196063168,
+      "calibration_slope": 0.7843870805493321
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202205,
+      "base_last_week": 202116,
+      "base_games": 496,
+      "calibration_first_week": 202117,
+      "calibration_last_week": 202204,
+      "calibration_games": 96,
+      "calibration_decisive_games": 95,
+      "calibration_intercept": 0.26307381080349607,
+      "calibration_slope": 0.46455710945226875
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202205,
+      "base_last_week": 202116,
+      "base_games": 496,
+      "calibration_first_week": 202117,
+      "calibration_last_week": 202204,
+      "calibration_games": 96,
+      "calibration_decisive_games": 95,
+      "calibration_intercept": 0.22532049114149943,
+      "calibration_slope": 0.7011825746493772
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202206,
+      "base_last_week": 202117,
+      "base_games": 512,
+      "calibration_first_week": 202118,
+      "calibration_last_week": 202205,
+      "calibration_games": 96,
+      "calibration_decisive_games": 95,
+      "calibration_intercept": 0.08895811525985432,
+      "calibration_slope": 0.2081508616568433
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202206,
+      "base_last_week": 202117,
+      "base_games": 512,
+      "calibration_first_week": 202118,
+      "calibration_last_week": 202205,
+      "calibration_games": 96,
+      "calibration_decisive_games": 95,
+      "calibration_intercept": 0.0993514588812379,
+      "calibration_slope": 0.6224290303802517
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202207,
+      "base_last_week": 202118,
+      "base_games": 528,
+      "calibration_first_week": 202201,
+      "calibration_last_week": 202206,
+      "calibration_games": 94,
+      "calibration_decisive_games": 93,
+      "calibration_intercept": 0.11001988468043351,
+      "calibration_slope": 0.26911113291972566
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202207,
+      "base_last_week": 202118,
+      "base_games": 528,
+      "calibration_first_week": 202201,
+      "calibration_last_week": 202206,
+      "calibration_games": 94,
+      "calibration_decisive_games": 93,
+      "calibration_intercept": 0.11360038444027365,
+      "calibration_slope": 0.6110862454964344
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202208,
+      "base_last_week": 202201,
+      "base_games": 544,
+      "calibration_first_week": 202202,
+      "calibration_last_week": 202207,
+      "calibration_games": 92,
+      "calibration_decisive_games": 92,
+      "calibration_intercept": 0.2582982511702135,
+      "calibration_slope": 0.1289962241540199
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202208,
+      "base_last_week": 202201,
+      "base_games": 544,
+      "calibration_first_week": 202202,
+      "calibration_last_week": 202207,
+      "calibration_games": 92,
+      "calibration_decisive_games": 92,
+      "calibration_intercept": 0.2703230887709422,
+      "calibration_slope": 0.5298400295679487
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202209,
+      "base_last_week": 202202,
+      "base_games": 560,
+      "calibration_first_week": 202203,
+      "calibration_last_week": 202208,
+      "calibration_games": 91,
+      "calibration_decisive_games": 91,
+      "calibration_intercept": 0.13045129901910318,
+      "calibration_slope": 0.33875149652424114
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202209,
+      "base_last_week": 202202,
+      "base_games": 560,
+      "calibration_first_week": 202203,
+      "calibration_last_week": 202208,
+      "calibration_games": 91,
+      "calibration_decisive_games": 91,
+      "calibration_intercept": 0.16973484006048467,
+      "calibration_slope": 0.5931353849667785
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202210,
+      "base_last_week": 202203,
+      "base_games": 576,
+      "calibration_first_week": 202204,
+      "calibration_last_week": 202209,
+      "calibration_games": 88,
+      "calibration_decisive_games": 88,
+      "calibration_intercept": 0.16606047575672736,
+      "calibration_slope": 0.5711026246913491
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202210,
+      "base_last_week": 202203,
+      "base_games": 576,
+      "calibration_first_week": 202204,
+      "calibration_last_week": 202209,
+      "calibration_games": 88,
+      "calibration_decisive_games": 88,
+      "calibration_intercept": 0.21028206592045667,
+      "calibration_slope": 1.0760649746975952
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202211,
+      "base_last_week": 202204,
+      "base_games": 592,
+      "calibration_first_week": 202205,
+      "calibration_last_week": 202210,
+      "calibration_games": 86,
+      "calibration_decisive_games": 86,
+      "calibration_intercept": 0.25307224062447164,
+      "calibration_slope": 0.3067055646927495
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202211,
+      "base_last_week": 202204,
+      "base_games": 592,
+      "calibration_first_week": 202205,
+      "calibration_last_week": 202210,
+      "calibration_games": 86,
+      "calibration_decisive_games": 86,
+      "calibration_intercept": 0.26332454655105864,
+      "calibration_slope": 0.6116721322429153
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202212,
+      "base_last_week": 202205,
+      "base_games": 608,
+      "calibration_first_week": 202206,
+      "calibration_last_week": 202211,
+      "calibration_games": 84,
+      "calibration_decisive_games": 84,
+      "calibration_intercept": 0.17049138610017886,
+      "calibration_slope": 0.5734261366872997
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202212,
+      "base_last_week": 202205,
+      "base_games": 608,
+      "calibration_first_week": 202206,
+      "calibration_last_week": 202211,
+      "calibration_games": 84,
+      "calibration_decisive_games": 84,
+      "calibration_intercept": 0.19204010025584986,
+      "calibration_slope": 0.7463929556533868
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202213,
+      "base_last_week": 202206,
+      "base_games": 622,
+      "calibration_first_week": 202207,
+      "calibration_last_week": 202212,
+      "calibration_games": 86,
+      "calibration_decisive_games": 86,
+      "calibration_intercept": 0.2237463585247407,
+      "calibration_slope": 0.8415840696644954
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202213,
+      "base_last_week": 202206,
+      "base_games": 622,
+      "calibration_first_week": 202207,
+      "calibration_last_week": 202212,
+      "calibration_games": 86,
+      "calibration_decisive_games": 86,
+      "calibration_intercept": 0.2480241956700825,
+      "calibration_slope": 0.8528975986831147
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202214,
+      "base_last_week": 202207,
+      "base_games": 636,
+      "calibration_first_week": 202208,
+      "calibration_last_week": 202213,
+      "calibration_games": 87,
+      "calibration_decisive_games": 86,
+      "calibration_intercept": 0.13243758641073564,
+      "calibration_slope": 1.087478066298951
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202214,
+      "base_last_week": 202207,
+      "base_games": 636,
+      "calibration_first_week": 202208,
+      "calibration_last_week": 202213,
+      "calibration_games": 87,
+      "calibration_decisive_games": 86,
+      "calibration_intercept": 0.17659059282869274,
+      "calibration_slope": 1.1129423948073984
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202215,
+      "base_last_week": 202208,
+      "base_games": 651,
+      "calibration_first_week": 202209,
+      "calibration_last_week": 202214,
+      "calibration_games": 85,
+      "calibration_decisive_games": 84,
+      "calibration_intercept": 0.20079023118839937,
+      "calibration_slope": 0.9043419034824083
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202215,
+      "base_last_week": 202208,
+      "base_games": 651,
+      "calibration_first_week": 202209,
+      "calibration_last_week": 202214,
+      "calibration_games": 85,
+      "calibration_decisive_games": 84,
+      "calibration_intercept": 0.22493206348173403,
+      "calibration_slope": 1.0031265422642717
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202216,
+      "base_last_week": 202209,
+      "base_games": 664,
+      "calibration_first_week": 202210,
+      "calibration_last_week": 202215,
+      "calibration_games": 88,
+      "calibration_decisive_games": 87,
+      "calibration_intercept": 0.23861516045951545,
+      "calibration_slope": 0.644380332621201
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202216,
+      "base_last_week": 202209,
+      "base_games": 664,
+      "calibration_first_week": 202210,
+      "calibration_last_week": 202215,
+      "calibration_games": 88,
+      "calibration_decisive_games": 87,
+      "calibration_intercept": 0.2285460178506921,
+      "calibration_slope": 0.9114585145107406
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202217,
+      "base_last_week": 202210,
+      "base_games": 678,
+      "calibration_first_week": 202211,
+      "calibration_last_week": 202216,
+      "calibration_games": 90,
+      "calibration_decisive_games": 89,
+      "calibration_intercept": 0.1401986201301756,
+      "calibration_slope": 0.8725147684789117
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202217,
+      "base_last_week": 202210,
+      "base_games": 678,
+      "calibration_first_week": 202211,
+      "calibration_last_week": 202216,
+      "calibration_games": 90,
+      "calibration_decisive_games": 89,
+      "calibration_intercept": 0.14996442376539615,
+      "calibration_slope": 1.3572072056054492
+    },
+    {
+      "family": "logreg",
+      "prediction_week": 202218,
+      "base_last_week": 202211,
+      "base_games": 692,
+      "calibration_first_week": 202212,
+      "calibration_last_week": 202217,
+      "calibration_games": 91,
+      "calibration_decisive_games": 90,
+      "calibration_intercept": 0.274026738198341,
+      "calibration_slope": 0.788300778700856
+    },
+    {
+      "family": "lightgbm",
+      "prediction_week": 202218,
+      "base_last_week": 202211,
+      "base_games": 692,
+      "calibration_first_week": 202212,
+      "calibration_last_week": 202217,
+      "calibration_games": 91,
+      "calibration_decisive_games": 90,
+      "calibration_intercept": 0.29662923704888705,
+      "calibration_slope": 1.1755641584114174
+    }
+  ],
+  "source_manifest": {
+    "schedules": {
+      "rows": 838,
+      "columns": [
+        "game_id",
+        "season",
+        "game_type",
+        "week",
+        "gameday",
+        "weekday",
+        "gametime",
+        "away_team",
+        "away_score",
+        "home_team",
+        "home_score",
+        "location",
+        "result",
+        "total",
+        "overtime",
+        "old_game_id",
+        "gsis",
+        "nfl_detail_id",
+        "pfr",
+        "pff",
+        "espn",
+        "ftn",
+        "away_rest",
+        "home_rest",
+        "away_moneyline",
+        "home_moneyline",
+        "spread_line",
+        "away_spread_odds",
+        "home_spread_odds",
+        "total_line",
+        "under_odds",
+        "over_odds",
+        "div_game",
+        "roof",
+        "surface",
+        "temp",
+        "wind",
+        "away_qb_id",
+        "home_qb_id",
+        "away_qb_name",
+        "home_qb_name",
+        "away_coach",
+        "home_coach",
+        "referee",
+        "stadium_id",
+        "stadium"
+      ],
+      "sha256": "a3dbb1876c193d965ac3c2e167e9c3d72ff01d947e01568cca5bffdf67ba3e02"
+    },
+    "pbp_2020": {
+      "rows": 47705,
+      "columns": [
+        "game_id",
+        "season",
+        "season_type",
+        "week",
+        "game_date",
+        "home_team",
+        "away_team",
+        "posteam",
+        "defteam",
+        "epa",
+        "yards_gained",
+        "pass_attempt",
+        "rush_attempt",
+        "qb_dropback",
+        "qb_scramble",
+        "play_type",
+        "vegas_wp",
+        "vegas_home_wp",
+        "spread_line",
+        "home_wp",
+        "play_id",
+        "qtr",
+        "game_seconds_remaining"
+      ],
+      "sha256": "a5f0f77ae306884b85c172dcce9455ae38421a370931a1e8cb99b04a39c8e9fb"
+    },
+    "pbp_2021": {
+      "rows": 49922,
+      "columns": [
+        "game_id",
+        "season",
+        "season_type",
+        "week",
+        "game_date",
+        "home_team",
+        "away_team",
+        "posteam",
+        "defteam",
+        "epa",
+        "yards_gained",
+        "pass_attempt",
+        "rush_attempt",
+        "qb_dropback",
+        "qb_scramble",
+        "play_type",
+        "vegas_wp",
+        "vegas_home_wp",
+        "spread_line",
+        "home_wp",
+        "play_id",
+        "qtr",
+        "game_seconds_remaining"
+      ],
+      "sha256": "19458971ec56eb7d81e4923176bbb979c96dd25f0dbb0dff30d9f972f96b241b"
+    },
+    "pbp_2022": {
+      "rows": 49434,
+      "columns": [
+        "game_id",
+        "season",
+        "season_type",
+        "week",
+        "game_date",
+        "home_team",
+        "away_team",
+        "posteam",
+        "defteam",
+        "epa",
+        "yards_gained",
+        "pass_attempt",
+        "rush_attempt",
+        "qb_dropback",
+        "qb_scramble",
+        "play_type",
+        "vegas_wp",
+        "vegas_home_wp",
+        "spread_line",
+        "home_wp",
+        "play_id",
+        "qtr",
+        "game_seconds_remaining"
+      ],
+      "sha256": "394b5780cf432caf6baaa0b9b46ca2f64d775239c17346ac2501db2d36d8e102"
+    },
+    "ngs_passing": {
+      "rows": 1792,
+      "columns": [
+        "season",
+        "season_type",
+        "week",
+        "player_display_name",
+        "player_position",
+        "team_abbr",
+        "avg_time_to_throw",
+        "avg_completed_air_yards",
+        "avg_intended_air_yards",
+        "avg_air_yards_differential",
+        "aggressiveness",
+        "max_completed_air_distance",
+        "avg_air_yards_to_sticks",
+        "attempts",
+        "pass_yards",
+        "pass_touchdowns",
+        "interceptions",
+        "passer_rating",
+        "completions",
+        "completion_percentage",
+        "expected_completion_percentage",
+        "completion_percentage_above_expectation",
+        "avg_air_distance",
+        "max_air_distance",
+        "player_gsis_id",
+        "player_first_name",
+        "player_last_name",
+        "player_jersey_number",
+        "player_short_name"
+      ],
+      "sha256": "9436253d0e53372f7d4e8f5695cf0c49032fcd7fdf8832c82f7d0a5f44a87b48"
+    },
+    "ngs_rushing": {
+      "rows": 1831,
+      "columns": [
+        "season",
+        "season_type",
+        "week",
+        "player_display_name",
+        "player_position",
+        "team_abbr",
+        "efficiency",
+        "percent_attempts_gte_eight_defenders",
+        "avg_time_to_los",
+        "rush_attempts",
+        "rush_yards",
+        "avg_rush_yards",
+        "rush_touchdowns",
+        "player_gsis_id",
+        "player_first_name",
+        "player_last_name",
+        "player_jersey_number",
+        "player_short_name",
+        "expected_rush_yards",
+        "rush_yards_over_expected",
+        "rush_yards_over_expected_per_att",
+        "rush_pct_over_expected"
+      ],
+      "sha256": "4f06b3cc17a0d1197e812c801f9d7a6a8cdcd34932306730a6b612b308511e03"
+    },
+    "ngs_receiving": {
+      "rows": 4561,
+      "columns": [
+        "season",
+        "season_type",
+        "week",
+        "player_display_name",
+        "player_position",
+        "team_abbr",
+        "avg_cushion",
+        "avg_separation",
+        "avg_intended_air_yards",
+        "percent_share_of_intended_air_yards",
+        "receptions",
+        "targets",
+        "catch_percentage",
+        "yards",
+        "rec_touchdowns",
+        "avg_yac",
+        "avg_expected_yac",
+        "avg_yac_above_expectation",
+        "player_gsis_id",
+        "player_first_name",
+        "player_last_name",
+        "player_jersey_number",
+        "player_short_name"
+      ],
+      "sha256": "1bd624e6279dbc09b3f430eabb59850a7908afa2d976c3c5b1c20518a71aa5c9"
+    },
+    "injuries": {
+      "rows": 11269,
+      "columns": [
+        "season",
+        "game_type",
+        "team",
+        "week",
+        "gsis_id",
+        "position",
+        "full_name",
+        "first_name",
+        "last_name",
+        "report_primary_injury",
+        "report_secondary_injury",
+        "report_status",
+        "practice_primary_injury",
+        "practice_secondary_injury",
+        "practice_status",
+        "date_modified"
+      ],
+      "sha256": "554746c5a50aac9542eb4dde6811ce9d1b15bd18560ce7d567fa1974d48b4456"
+    },
+    "snaps": {
+      "rows": 52849,
+      "columns": [
+        "game_id",
+        "pfr_game_id",
+        "season",
+        "game_type",
+        "week",
+        "player",
+        "pfr_player_id",
+        "position",
+        "team",
+        "opponent",
+        "offense_snaps",
+        "offense_pct",
+        "defense_snaps",
+        "defense_pct",
+        "st_snaps",
+        "st_pct"
+      ],
+      "sha256": "f66494b229271711caba1c437310f83238f2a375df6694191f64cf149cf8076d"
+    },
+    "depth": {
+      "rows": 75267,
+      "columns": [
+        "season",
+        "club_code",
+        "week",
+        "game_type",
+        "depth_team",
+        "last_name",
+        "first_name",
+        "football_name",
+        "formation",
+        "gsis_id",
+        "jersey_number",
+        "position",
+        "elias_id",
+        "depth_position",
+        "full_name"
+      ],
+      "sha256": "575f221e1063f46ac3e794dcdda4e8c3eafe328b9b7f5c81924857a02445efd9"
+    },
+    "ids": {
+      "rows": 12531,
+      "columns": [
+        "mfl_id",
+        "pfr_id",
+        "name",
+        "position",
+        "draft_ovr",
+        "height",
+        "draft_round",
+        "sportradar_id",
+        "nfl_id",
+        "pff_id",
+        "stats_id",
+        "cbs_id",
+        "draft_pick",
+        "gsis_id",
+        "age",
+        "espn_id",
+        "fantasy_data_id",
+        "weight",
+        "college",
+        "fleaflicker_id",
+        "twitter_username",
+        "draft_year",
+        "ktc_id",
+        "swish_id",
+        "team",
+        "merge_name",
+        "yahoo_id",
+        "birthdate",
+        "fantasypros_id",
+        "sleeper_id",
+        "cfbref_id",
+        "rotoworld_id",
+        "db_season",
+        "stats_global_id",
+        "rotowire_id"
+      ],
+      "sha256": "c68bd97ca2529be5c0c67ff5a08e0c4caff42f3f8dc4f18546996cdb9fa2016a"
+    },
+    "errors": {},
+    "source_urls": {
+      "schedules": "http://www.habitatring.com/games.csv",
+      "schedule_fallback": "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv",
+      "pbp": "https://github.com/nflverse/nflverse-data/releases/download/pbp/play_by_play_{year}.parquet",
+      "injuries": "https://github.com/nflverse/nflverse-data/releases/download/injuries/injuries_{year}.parquet",
+      "snaps": "https://github.com/nflverse/nflverse-data/releases/download/snap_counts/snap_counts_{year}.parquet",
+      "depth": "https://github.com/nflverse/nflverse-data/releases/download/depth_charts/depth_charts_{year}.parquet",
+      "ngs": "https://github.com/nflverse/nflverse-data/releases/download/nextgen_stats/ngs_{kind}.parquet",
+      "ids": "https://raw.githubusercontent.com/dynastyprocess/data/master/files/db_playerids.csv"
+    },
+    "schedule_import": "nfl_data_py.import_schedules"
+  },
+  "closing_line_validation": {
+    "regular_games": 799,
+    "pbp_spread_covered": 799,
+    "spread_exact_matches": 799,
+    "spread_mismatches": 0,
+    "spread_max_difference": 0.0,
+    "vegas_line_column_present": false,
+    "pregame_wp_games": 799,
+    "pregame_wp_vs_moneyline_mae": 0.020811504697809975,
+    "pregame_wp_vs_moneyline_correlation": 0.9945230773510962
+  },
+  "versions": {
+    "nfl_data_py": "0.3.3",
+    "pandas": "2.2.3",
+    "numpy": "2.4.6",
+    "scipy": "1.17.1",
+    "scikit-learn": "1.9.1",
+    "lightgbm": "4.7.0",
+    "pyarrow": "26.0.0"
+  },
+  "python_version": "3.11.15",
+  "prediction_sha256": "92106f1cd35e66d70fefdf561872de2fbefd778d7b48e4f8e64423b74e73ba44"
+}

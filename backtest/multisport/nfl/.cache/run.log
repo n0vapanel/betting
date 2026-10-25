@@ -1,0 +1,31 @@
+week 202115: base=378, calibration=86, test=16
+week 202116: base=392, calibration=88, test=16
+week 202117: base=406, calibration=90, test=16
+week 202118: base=421, calibration=91, test=16
+week 202201: base=436, calibration=92, test=16
+week 202202: base=450, calibration=94, test=16
+week 202203: base=464, calibration=96, test=16
+week 202204: base=480, calibration=96, test=16
+week 202205: base=496, calibration=96, test=16
+week 202206: base=512, calibration=96, test=14
+week 202207: base=528, calibration=94, test=14
+week 202208: base=544, calibration=92, test=15
+week 202209: base=560, calibration=91, test=13
+week 202210: base=576, calibration=88, test=14
+week 202211: base=592, calibration=86, test=14
+week 202212: base=608, calibration=84, test=16
+week 202213: base=622, calibration=86, test=15
+week 202214: base=636, calibration=87, test=13
+week 202215: base=651, calibration=85, test=16
+week 202216: base=664, calibration=88, test=16
+week 202217: base=678, calibration=90, test=15
+week 202218: base=692, calibration=91, test=16
+Test games: 335
+Model: lightgbm; accuracy: 64.56% (333 decisive)
+Flat $1 ROI: 2.66%
+Best gate (pre-test selected): lean_eps_05; ROI: -1.21%; bets: 242
+/Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/nfl/nfl_predictions.csv
+/Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/nfl/NFL_BACKTEST_REPORT.md
+/Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/nfl/README_nfl.md
+
+EXIT_CODE=0

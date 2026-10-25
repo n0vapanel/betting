@@ -1,0 +1,65 @@
+rows=7169 | core feats=42 | all feats=55
+loaded cache: ['hp_core', 'hp_all', 'wf_all', 'wf_core', 'frozen_all', 'frozen_core', 'wf_odd_core', 'wf_odd_all']
+[cache hit] hp_core
+[cache hit] hp_all
+
+=== walk-forward ALL feats (primary window years) ===
+[cache hit] wf_all
+
+=== walk-forward CORE feats (extended window years) ===
+[cache hit] wf_core
+[cache hit] frozen_all
+[cache hit] frozen_core
+
+=== odds-augmented variant ===
+[cache hit] wf_odd_core
+[cache hit] wf_odd_all
+
+primary test n=559 (2020-01..2021-03-20, all feats, walk-forward)
+acc: {'lr': 0.5975, 'lgb': 0.7996, 'xgb': 0.7764, 'ens': 0.7746, 'ens_gb': 0.7943, 'market_fav': 0.6351}
+auc: {'lr': 0.5909, 'lgb': 0.8782, 'xgb': 0.875, 'ens': 0.8635, 'ens_gb': 0.8827, 'market': 0.6642}
+brier: {'lr': 0.2362, 'lgb': 0.1533, 'xgb': 0.1452, 'ens': 0.165, 'ens_gb': 0.1475, 'market': 0.2231}
+
+extended test n=2843 (2020..2026, core feats, walk-forward)
+acc: {'lr': 0.6345, 'lgb': 0.7981, 'xgb': 0.7992, 'ens': 0.802, 'ens_gb': 0.8037, 'market_fav': 0.6785}
+auc: {'lr': 0.6645, 'lgb': 0.892, 'xgb': 0.8872, 'ens': 0.8904, 'ens_gb': 0.8923, 'market': 0.7294}
+brier: {'lr': 0.2249, 'lgb': 0.1276, 'xgb': 0.1302, 'ens': 0.1368, 'ens_gb': 0.1273, 'market': 0.2072}
+
+=== betting PRIMARY (walk-forward ens) ===
+  eps=0.0: n= 559 win_rate=0.626 flat_ROI=+0.3528 profit=+197.2
+  eps=0.02: n= 519 win_rate=0.626 flat_ROI=+0.3783 profit=+196.3
+  eps=0.05: n= 446 win_rate=0.635 flat_ROI=+0.4420 profit=+197.1
+  best gate eps=0.05 -> qKelly bank=118458769.93 stakeROI=0.6915954600965217 n=446
+
+=== betting EXTENDED (walk-forward ens) ===
+  eps=0.0: n=2843 win_rate=0.704 flat_ROI=+0.4032 profit=+1146.4
+  eps=0.02: n=2697 win_rate=0.714 flat_ROI=+0.4327 profit=+1166.9
+  eps=0.05: n=2467 win_rate=0.726 flat_ROI=+0.4781 profit=+1179.5
+  best gate eps=0.05 -> qKelly bank=484339461205556135216746111959040.00 stakeROI=0.4733575124066191 n=2466
+
+=== betting EXTENDED ens_gb (lgb+xgb) ===
+  eps=0.0: n=2842 win_rate=0.730 flat_ROI=+0.4343 profit=+1234.2
+  eps=0.02: n=2752 win_rate=0.737 flat_ROI=+0.4509 profit=+1240.8
+  eps=0.05: n=2614 win_rate=0.749 flat_ROI=+0.4785 profit=+1250.8
+  best gate eps=0.05 -> qKelly bank=40097509593326622942592250218020864.00 stakeROI=0.44519807711762016 n=2612
+
+=== EXTENDED per-year (walk-forward ens) ===
+  2020: n= 451 acc=0.792 auc=0.877 flatROI(eps0)=+0.412 (n_bets=451)
+  2021: n= 493 acc=0.781 auc=0.864 flatROI(eps0)=+0.407 (n_bets=493)
+  2022: n= 487 acc=0.809 auc=0.886 flatROI(eps0)=+0.367 (n_bets=487)
+  2023: n= 416 acc=0.791 auc=0.893 flatROI(eps0)=+0.370 (n_bets=416)
+  2024: n= 383 acc=0.794 auc=0.901 flatROI(eps0)=+0.407 (n_bets=383)
+  2025: n= 499 acc=0.826 auc=0.924 flatROI(eps0)=+0.480 (n_bets=499)
+  2026: n= 114 acc=0.868 auc=0.921 flatROI(eps0)=+0.276 (n_bets=114)
+
+bootstrap (2000 resamples):
+  [primary] flat ROI eps0: +0.3530 [+0.2539, +0.4591] | acc 0.7741 [0.7388, 0.8086]
+  [extended] flat ROI eps0: +0.4027 [+0.3597, +0.4440] | acc 0.8021 [0.7875, 0.8160]
+wrote mma_v2_predictions_primary.csv (559, 18)
+wrote mma_v2_predictions_extended.csv (2843, 18)
+
+wrote metrics_v2_pooled.json + wf_artifacts.pkl
+
+KEY: primary n=559 acc=0.7746 flat_roi0=+0.3528 | extended n=2843 acc=0.8020 flat_roi0=+0.4032 | brier_p=0.1650 brier_e=0.1368
+runtime 4s
+EXIT: 0

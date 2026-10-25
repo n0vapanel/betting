@@ -1,0 +1,30 @@
+test_american_odds_and_no_vig_probability_properties (test_nfl_backtest.NFLBacktestTests.test_american_odds_and_no_vig_probability_properties) ... FAIL
+
+======================================================================
+FAIL: test_american_odds_and_no_vig_probability_properties (test_nfl_backtest.NFLBacktestTests.test_american_odds_and_no_vig_probability_properties)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/nfl/test_nfl_backtest.py", line 84, in test_american_odds_and_no_vig_probability_properties
+    np.testing.assert_allclose(nb.american_decimal([-200, 100, 150]), [1.5, 2, 2.5])
+  File "/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/numpy/testing/_private/utils.py", line 1768, in assert_allclose
+    assert_array_compare(compare, actual, desired, err_msg=str(err_msg),
+  File "/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/numpy/testing/_private/utils.py", line 983, in assert_array_compare
+    raise AssertionError(msg)
+AssertionError: 
+Not equal to tolerance rtol=1e-07, atol=0
+
+Mismatched elements: 3 / 3 (100%)
+Mismatch at indices:
+ [0]: 1.0 (ACTUAL), 1.5 (DESIRED)
+ [1]: 1.0 (ACTUAL), 2.0 (DESIRED)
+ [2]: 1.0 (ACTUAL), 2.5 (DESIRED)
+Max absolute difference among violations: 1.5
+Max relative difference among violations: 0.6
+ ACTUAL: array([1., 1., 1.])
+ DESIRED: array([1.5, 2. , 2.5])
+
+----------------------------------------------------------------------
+Ran 1 test in 0.018s
+
+FAILED (failures=1)
+EXIT_CODE=1

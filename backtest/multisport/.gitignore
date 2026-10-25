@@ -6,3 +6,10 @@
 **/atp_*.csv
 **/*.feather
 **/__pycache__/
+**/boxscores/
+**/hr_inj_*.html
+**/*.jsonl
+
+**/data/
+**/models/
+

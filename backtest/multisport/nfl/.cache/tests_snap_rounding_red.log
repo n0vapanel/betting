@@ -1,0 +1,15 @@
+test_vendor_snap_rounding_does_not_exceed_full_participation (test_nfl_backtest.NFLBacktestTests.test_vendor_snap_rounding_does_not_exceed_full_participation) ... FAIL
+
+======================================================================
+FAIL: test_vendor_snap_rounding_does_not_exceed_full_participation (test_nfl_backtest.NFLBacktestTests.test_vendor_snap_rounding_does_not_exceed_full_participation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/nfl/test_nfl_backtest.py", line 160, in test_vendor_snap_rounding_does_not_exceed_full_participation
+    self.assertAlmostEqual(impact, 1.0 + 0.25 * 0.95 + 0.5 * 0.6)
+AssertionError: 1.5475 != 1.5375 within 7 places (0.010000000000000009 difference)
+
+----------------------------------------------------------------------
+Ran 1 test in 0.071s
+
+FAILED (failures=1)
+EXIT_CODE=1

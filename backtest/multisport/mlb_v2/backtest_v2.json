@@ -1,0 +1,293 @@
+{
+ "mode": "v2",
+ "config": {
+  "lr_c": 0.03,
+  "lgb_num_leaves": 63,
+  "lgb_lr": 0.02,
+  "w_lgb": 0.4,
+  "cal": "isotonic",
+  "tune_notes": "Tune on 2021 full season, TimeSeriesSplit(5) OOF brier."
+ },
+ "cv1": {
+  "cal": "isotonic",
+  "n_oof": 1475,
+  "n_train": 1773,
+  "oof_brier": 0.24834645989490903,
+  "oof_brier_lr": 0.2458118716591632,
+  "oof_brier_lgb": 0.2713364866396166,
+  "oof_logloss": 0.6913659864569527
+ },
+ "cv2": {
+  "cal": "isotonic",
+  "n_oof": 2020,
+  "n_train": 2429,
+  "oof_brier": 0.2488009970779674,
+  "oof_brier_lr": 0.24763448484942815,
+  "oof_brier_lgb": 0.26809899920516905,
+  "oof_logloss": 0.6924726545044508
+ },
+ "val_eval": {
+  "label": "validation (odds subset)",
+  "n_games": 573,
+  "accuracy": 0.5497382198952879,
+  "flat_roi": -0.09004138354253295,
+  "flat_pnl": -51.59371276987138,
+  "brier": 0.24448476904067784,
+  "market_brier": 0.1954811543719833,
+  "log_loss": 0.6821042695208909,
+  "market_accuracy": 0.7068062827225131
+ },
+ "test_eval": {
+  "label": "test (odds subset)",
+  "n_games": 1099,
+  "accuracy": 0.5605095541401274,
+  "flat_roi": -0.032976923317535205,
+  "flat_pnl": -36.24163872597119,
+  "brier": 0.24553689310830634,
+  "market_brier": 0.23843719745083936,
+  "log_loss": 0.6842147704801625,
+  "market_accuracy": 0.5996360327570519
+ },
+ "test_eval_all": {
+  "label": "test (all games)",
+  "n_games": 1141,
+  "accuracy": 0.5617879053461875,
+  "flat_roi": -0.04666226005781874,
+  "flat_pnl": -53.241638725971185,
+  "brier": 0.24558222979165362,
+  "market_brier": NaN,
+  "log_loss": 0.684314286177159,
+  "market_accuracy": 0.5985977212971078
+ },
+ "market_eval": {
+  "label": "market (odds subset)",
+  "n_games": 1099,
+  "accuracy": 0.5996360327570519,
+  "flat_roi": -0.013719659636975494,
+  "flat_pnl": -15.077905941036068,
+  "brier": 0.23843719745083936,
+  "market_brier": 0.23843719745083936,
+  "log_loss": 0.6695764391455179,
+  "market_accuracy": 0.5996360327570519
+ },
+ "gate_choice": {
+  "variant": "winner",
+  "eps": 0.02,
+  "n_bets": 247,
+  "win_rate": 0.3522267206477733,
+  "roi": -0.24753169903750968,
+  "pnl": -61.14032966226489,
+  "selection_period": "2021-08-16..2021-09-30",
+  "minimum_bets": 30,
+  "fallback": false
+ },
+ "val_gates": [
+  {
+   "variant": "lean",
+   "eps": 0.0,
+   "n_bets": 573,
+   "win_rate": 0.3106457242582897,
+   "roi": -0.26711332163746826,
+   "pnl": -153.0559332982693
+  },
+  {
+   "variant": "lean",
+   "eps": 0.01,
+   "n_bets": 542,
+   "win_rate": 0.3081180811808118,
+   "roi": -0.26542202611808663,
+   "pnl": -143.85873815600294
+  },
+  {
+   "variant": "lean",
+   "eps": 0.02,
+   "n_bets": 515,
+   "win_rate": 0.3048543689320388,
+   "roi": -0.27028521319556337,
+   "pnl": -139.19688479571514
+  },
+  {
+   "variant": "lean",
+   "eps": 0.03,
+   "n_bets": 474,
+   "win_rate": 0.2869198312236287,
+   "roi": -0.3003982274976422,
+   "pnl": -142.3887598338824
+  },
+  {
+   "variant": "lean",
+   "eps": 0.05,
+   "n_bets": 407,
+   "win_rate": 0.25061425061425063,
+   "roi": -0.3693432222521611,
+   "pnl": -150.32269145662957
+  },
+  {
+   "variant": "winner",
+   "eps": 0.0,
+   "n_bets": 278,
+   "win_rate": 0.35611510791366907,
+   "roi": -0.2540715041899967,
+   "pnl": -70.63187816481908
+  },
+  {
+   "variant": "winner",
+   "eps": 0.01,
+   "n_bets": 263,
+   "win_rate": 0.34980988593155893,
+   "roi": -0.2593714183367024,
+   "pnl": -68.21468302255273
+  },
+  {
+   "variant": "winner",
+   "eps": 0.02,
+   "n_bets": 247,
+   "win_rate": 0.3522267206477733,
+   "roi": -0.24753169903750968,
+   "pnl": -61.14032966226489
+  },
+  {
+   "variant": "winner",
+   "eps": 0.03,
+   "n_bets": 224,
+   "win_rate": 0.33482142857142855,
+   "roi": -0.2722977888412151,
+   "pnl": -60.99470470043217
+  },
+  {
+   "variant": "winner",
+   "eps": 0.05,
+   "n_bets": 195,
+   "win_rate": 0.29743589743589743,
+   "roi": -0.33036480165733,
+   "pnl": -64.42113632317935
+  }
+ ],
+ "test_gates": [
+  {
+   "variant": "lean",
+   "eps": 0.0,
+   "n_bets": 1099,
+   "win_rate": 0.4604185623293904,
+   "roi": -0.023331307192124347,
+   "pnl": -25.641106604144657
+  },
+  {
+   "variant": "lean",
+   "eps": 0.01,
+   "n_bets": 971,
+   "win_rate": 0.4593202883625129,
+   "roi": -0.009830088266572438,
+   "pnl": -9.545015706841838
+  },
+  {
+   "variant": "lean",
+   "eps": 0.02,
+   "n_bets": 858,
+   "win_rate": 0.4347319347319347,
+   "roi": -0.05293879474720667,
+   "pnl": -45.42148589310332
+  },
+  {
+   "variant": "lean",
+   "eps": 0.03,
+   "n_bets": 761,
+   "win_rate": 0.4283837056504599,
+   "roi": -0.05588927879130528,
+   "pnl": -42.531741160183316
+  },
+  {
+   "variant": "lean",
+   "eps": 0.05,
+   "n_bets": 566,
+   "win_rate": 0.4098939929328622,
+   "roi": -0.06657136448086456,
+   "pnl": -37.67939229616935
+  },
+  {
+   "variant": "winner",
+   "eps": 0.0,
+   "n_bets": 605,
+   "win_rate": 0.5190082644628099,
+   "roi": -0.020296711086695687,
+   "pnl": -12.27951020745089
+  },
+  {
+   "variant": "winner",
+   "eps": 0.01,
+   "n_bets": 539,
+   "win_rate": 0.5064935064935064,
+   "roi": -0.027696956596889984,
+   "pnl": -14.928659605723702
+  },
+  {
+   "variant": "winner",
+   "eps": 0.02,
+   "n_bets": 488,
+   "win_rate": 0.4918032786885246,
+   "roi": -0.042616988885858444,
+   "pnl": -20.79709057629892
+  },
+  {
+   "variant": "winner",
+   "eps": 0.03,
+   "n_bets": 445,
+   "win_rate": 0.4786516853932584,
+   "roi": -0.054815931786588334,
+   "pnl": -24.393089645031807
+  },
+  {
+   "variant": "winner",
+   "eps": 0.05,
+   "n_bets": 348,
+   "win_rate": 0.4482758620689655,
+   "roi": -0.08004375180891574,
+   "pnl": -27.855225629502677
+  }
+ ],
+ "kelly": {
+  "bankroll_multiple": 0.2797959913958595,
+  "net_return": -0.7202040086041406,
+  "total_staked": 7.491092249624733,
+  "roi_on_staked": -0.09614138827888806,
+  "n_staked": 470,
+  "n_gate_bets": 488,
+  "max_daily_drawdown": 0.8219253585810737,
+  "policy": "Quarter Kelly, 0-5% per bet; simultaneous games use start-of-Eastern-date bankroll; no within-day recycling."
+ },
+ "bootstrap": {
+  "accuracy": [
+   0.534964541163877,
+   0.5867396416774379
+  ],
+  "flat_roi": [
+   -0.07873369892021977,
+   0.013233519071735528
+  ],
+  "brier": [
+   0.24078225413522975,
+   0.25064485562683614
+  ],
+  "market_brier": [
+   0.23210095946738565,
+   0.2454500577243141
+  ],
+  "brier_minus_market": [
+   0.0018948604733286794,
+   0.012080956203569313
+  ],
+  "gate_roi": [
+   -0.12307244988963958,
+   0.03647374092168237
+  ],
+  "gate_win_rate": [
+   0.45126799305824733,
+   0.5341426610173503
+  ],
+  "n_resamples": 1000,
+  "n_dates": 85,
+  "method": "Percentile bootstrap of whole Eastern calendar dates; fixed fitted model and fixed gate."
+ },
+ "n_features_lo": 38,
+ "n_features_lg": 113
+}

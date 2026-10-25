@@ -1,0 +1,308 @@
+{
+ "dataset": "mdabbert/ultimate-ufc-dataset + rajeevw/ufcdata (features)",
+ "n_train_2020_model": 4073,
+ "primary": {
+  "n": 559,
+  "eval": {
+   "lr": {
+    "acc": 0.5974955277280859,
+    "auc": 0.5908538863976084,
+    "brier": 0.2362222959687839
+   },
+   "lgb": {
+    "acc": 0.7996422182468694,
+    "auc": 0.8781964018791374,
+    "brier": 0.15331000225847688
+   },
+   "xgb": {
+    "acc": 0.776386404293381,
+    "auc": 0.8749933269271835,
+    "brier": 0.14520729940287477
+   },
+   "ens": {
+    "acc": 0.774597495527728,
+    "auc": 0.8634622571001496,
+    "brier": 0.16499544183512985
+   },
+   "ens_gb": {
+    "acc": 0.7942754919499105,
+    "auc": 0.8827140721759555,
+    "brier": 0.14747943712057315
+   },
+   "market_fav": {
+    "acc": 0.6350626118067979
+   }
+  },
+  "market": {
+   "brier": 0.22308586459055485,
+   "auc": 0.6641575912876362
+  },
+  "gates": {
+   "0.0": {
+    "n": 559,
+    "win_rate": 0.6261180679785331,
+    "roi": 0.35278349593990493,
+    "profit": 197.20597423040687
+   },
+   "0.02": {
+    "n": 519,
+    "win_rate": 0.626204238921002,
+    "roi": 0.3783018008926936,
+    "profit": 196.33863466330797
+   },
+   "0.05": {
+    "n": 446,
+    "win_rate": 0.6345291479820628,
+    "roi": 0.441999588064642,
+    "profit": 197.13181627683034
+   }
+  },
+  "best_gate_eps": 0.05
+ },
+ "extended": {
+  "n": 2843,
+  "eval": {
+   "lr": {
+    "acc": 0.6345409778403095,
+    "auc": 0.6645071323327019,
+    "brier": 0.22493910927863542
+   },
+   "lgb": {
+    "acc": 0.7981005979599015,
+    "auc": 0.8920032969835334,
+    "brier": 0.12762521836906718
+   },
+   "xgb": {
+    "acc": 0.7991558213155118,
+    "auc": 0.8871989908680236,
+    "brier": 0.1302479148850932
+   },
+   "ens": {
+    "acc": 0.8019697502638058,
+    "auc": 0.8903537932514046,
+    "brier": 0.13683205660546602
+   },
+   "ens_gb": {
+    "acc": 0.8037284558564897,
+    "auc": 0.8922818404818573,
+    "brier": 0.1273170565102752
+   },
+   "market_fav": {
+    "acc": 0.6785086176574041
+   },
+   "market": {
+    "brier": 0.20724511629689246,
+    "auc": 0.7293986597529185
+   }
+  },
+  "gates": {
+   "0.0": {
+    "n": 2843,
+    "win_rate": 0.7038339781920506,
+    "roi": 0.40323465142179576,
+    "profit": 1146.3961139921653
+   },
+   "0.02": {
+    "n": 2697,
+    "win_rate": 0.71412680756396,
+    "roi": 0.43267733956486887,
+    "profit": 1166.9307848064514
+   },
+   "0.05": {
+    "n": 2467,
+    "win_rate": 0.7259829752736117,
+    "roi": 0.4781285188680822,
+    "profit": 1179.5430560475588
+   }
+  },
+  "best_gate_eps": 0.05,
+  "per_year": [
+   {
+    "year": 2020,
+    "n": 451,
+    "acc": 0.7915742793791575,
+    "auc": 0.8770838542969076,
+    "flat_roi_eps0": 0.4122654016485365,
+    "n_bets": 451
+   },
+   {
+    "year": 2021,
+    "n": 493,
+    "acc": 0.7809330628803245,
+    "auc": 0.8637380618446537,
+    "flat_roi_eps0": 0.4071713719528105,
+    "n_bets": 493
+   },
+   {
+    "year": 2022,
+    "n": 487,
+    "acc": 0.8090349075975359,
+    "auc": 0.885993057016621,
+    "flat_roi_eps0": 0.3673398703352941,
+    "n_bets": 487
+   },
+   {
+    "year": 2023,
+    "n": 416,
+    "acc": 0.7908653846153846,
+    "auc": 0.8931517859253482,
+    "flat_roi_eps0": 0.3696987268449158,
+    "n_bets": 416
+   },
+   {
+    "year": 2024,
+    "n": 383,
+    "acc": 0.793733681462141,
+    "auc": 0.9009387351778656,
+    "flat_roi_eps0": 0.4069133292648119,
+    "n_bets": 383
+   },
+   {
+    "year": 2025,
+    "n": 499,
+    "acc": 0.8256513026052105,
+    "auc": 0.9243991283702474,
+    "flat_roi_eps0": 0.4803088411862242,
+    "n_bets": 499
+   },
+   {
+    "year": 2026,
+    "n": 114,
+    "acc": 0.868421052631579,
+    "auc": 0.9207905384375973,
+    "flat_roi_eps0": 0.2764721701299805,
+    "n_bets": 114
+   }
+  ]
+ },
+ "frozen_v2": {
+  "primary_acc": 0.7710196779964222,
+  "primary_auc": 0.8636891415759129,
+  "primary_brier": 0.1663152893047498,
+  "primary_roi_eps0": 0.3498822550391215,
+  "core_ext_acc": 0.7921209989447766,
+  "core_ext_auc": 0.8860139792911385,
+  "core_ext_brier": 0.1422242832062981,
+  "core_ext_roi_eps0": 0.3742973892387137
+ },
+ "odds_variant": {
+  "primary_acc": 0.7871198568872988,
+  "primary_auc": 0.8682068118727312,
+  "primary_brier": 0.15243055523816443,
+  "extended_acc": 0.823425958494548,
+  "extended_auc": 0.9082731719855571,
+  "extended_brier": 0.12553247671816703
+ },
+ "hparams": {
+  "core": {
+   "lr": {
+    "fn": "functools.partial(<function make_lr at 0x114279d00>, 0.03)",
+    "cfg": {
+     "C": 0.03
+    }
+   },
+   "lgb": {
+    "fn": "functools.partial(<function make_lgb at 0x114279e40>, 31, 0.03)",
+    "cfg": {
+     "leaves": 31,
+     "lr": 0.03
+    },
+    "cv_loss": 0.44204990154051177
+   },
+   "xgb": {
+    "fn": "functools.partial(<function make_xgb at 0x114279ee0>, 5, 0.06)",
+    "cfg": {
+     "depth": 5,
+     "lr": 0.06
+    },
+    "cv_loss": 0.4460550745328267
+   }
+  },
+  "all": {
+   "lr": {
+    "fn": "functools.partial(<function make_lr at 0x114279d00>, 0.03)",
+    "cfg": {
+     "C": 0.03
+    }
+   },
+   "lgb": {
+    "fn": "functools.partial(<function make_lgb at 0x114279e40>, 31, 0.03)",
+    "cfg": {
+     "leaves": 31,
+     "lr": 0.03
+    },
+    "cv_loss": 0.427908234699701
+   },
+   "xgb": {
+    "fn": "functools.partial(<function make_xgb at 0x114279ee0>, 5, 0.06)",
+    "cfg": {
+     "depth": 5,
+     "lr": 0.06
+    },
+    "cv_loss": 0.4254181683063507
+   }
+  }
+ },
+ "features": {
+  "core": [
+   "d_elo",
+   "d_win_pct",
+   "d_streak",
+   "d_longest_streak",
+   "d_exp",
+   "d_days_since",
+   "d_age",
+   "d_reach",
+   "d_height",
+   "d_weight",
+   "d_rank",
+   "d_career_days",
+   "d_age_debut",
+   "d_recent3_winpct",
+   "d_opp_elo",
+   "d_opp_winpct",
+   "d_sp",
+   "same_stance",
+   "is_female",
+   "is_title",
+   "is_5rd",
+   "wc_Bantamweight",
+   "wc_Catch Weight",
+   "wc_Featherweight",
+   "wc_Flyweight",
+   "wc_Heavyweight",
+   "wc_Light Heavyweight",
+   "wc_Lightweight",
+   "wc_Middleweight",
+   "wc_Welterweight",
+   "wc_Women's Bantamweight",
+   "wc_Women's Featherweight",
+   "wc_Women's Flyweight",
+   "wc_Women's Strawweight",
+   "ct_usa",
+   "ct_brazil",
+   "ct_canada",
+   "ct_united_kingdom",
+   "ct_united_arab_emirates",
+   "ct_australia",
+   "ct_mexico",
+   "empty_arena"
+  ],
+  "strike": [
+   "d_slpm",
+   "d_str_acc",
+   "d_td_acc",
+   "d_td_def",
+   "d_sub_per_f",
+   "d_kd_per_f",
+   "d_ctrl_share",
+   "d_slpm_r3",
+   "d_str_acc_r3",
+   "d_opp_slpm",
+   "d_opp_str_acc",
+   "d_opp_td_acc",
+   "d_opp_sub"
+  ]
+ },
+ "runtime_sec": 4.067305088043213
+}

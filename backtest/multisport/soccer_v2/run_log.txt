@@ -1,0 +1,58 @@
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+/Users/x/.hermes/cache/scratch/msports-venv/lib/python3.11/site-packages/lightgbm/sklearn.py:1106: LGBMDeprecationWarning: The argument 'eval_set' is deprecated, use 'eval_X' and 'eval_y' instead.
+  eval_set = _validate_eval_set_Xy(eval_set=eval_set, eval_X=eval_X, eval_y=eval_y)
+[cache] loaded 9027 rows, 96 features
+matches after features: 9027 | features: 96
+train 8456 (2017-08-04 - 2022-02-28)  test 571 (2022-03-01 - 2022-05-22)
+League
+Bundesliga     90
+EPL           124
+LaLiga        122
+Ligue1        120
+SerieA        115
+train after feature-dropna: 7924 | test imputed-rows: 0
+
+=== 1X2 ===
+LogReg C=0.05 (TSS-5 CV logloss 0.9911)
+LGBM best_iteration=78
+
+=== O/U 2.5 ===
+LogReg C=0.05 (TSS-5 CV logloss 0.6796)
+LGBM best_iteration=56
+Home goals: MAE model 0.945 | naive team 0.984 | global 1.050
+Away goals: MAE model 0.907 | naive team 0.936 | global 0.997
+Home shots: MAE model 3.613 | naive team 4.005 | global 4.130
+Away shots: MAE model 3.346 | naive team 3.693 | global 3.853
+
+CSV written: /Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/soccer_v2/soccer_v2_predictions.csv (571 rows)
+Report written: /Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/soccer_v2/SOCCER_V2_REPORT.md
+
+===== KEY NUMBERS =====
+{
+  "n_train": 7924,
+  "n_test": 571,
+  "n_features": 96,
+  "acc_1x2_ens": 0.5517,
+  "acc_1x2_market": 0.5482,
+  "flat_roi_1x2_eps0": 0.0106,
+  "flat_roi_1x2_eps002": 0.1015,
+  "flat_roi_1x2_eps005": 0.1471,
+  "n_bets_1x2_eps0": 173,
+  "ci_1x2": [
+    -0.1352,
+    0.1492
+  ],
+  "acc_ou_ens": 0.5972,
+  "flat_roi_ou_eps0": 0.04,
+  "n_bets_ou_eps0": 290,
+  "ci_ou": [
+    -0.0275,
+    0.1012
+  ],
+  "brier_home_model": 0.2146,
+  "brier_home_market": 0.2112,
+  "kelly1_growth": 0.4053,
+  "kelly2_growth": 1.7349
+}
+JSON_OUT: {"report_path": "/Users/x/Desktop/x/Coding Projects/betting bot/backtest/multisport/soccer_v2/SOCCER_V2_REPORT.md", "n_test_matches": 571, "flat_roi_1x2": 0.010578034682080914, "accuracy_1x2": 0.5516637478108581}
