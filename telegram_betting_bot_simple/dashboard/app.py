@@ -47,6 +47,18 @@ class Login(BaseModel):
     password: str = Field(max_length=256)
 
 
+# The browser re-checks the page and its files on every load (a quick 304 when unchanged),
+# so after an update it never keeps running old code against the new API
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+class Static(StaticFiles):
+    def file_response(self, *args: Any, **kwargs: Any) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers.update(NO_CACHE)
+        return response
+
+
 def session_key(password: str) -> bytes:
     """Sessions are signed with a key derived from the password, so changing it signs everyone out."""
     return hmac.new(password.encode(), b"sportsbet-ai session", hashlib.sha256).digest()
@@ -81,7 +93,7 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
 
     @app.get("/")
     def index() -> FileResponse:
-        return FileResponse(STATIC / "index.html")
+        return FileResponse(STATIC / "index.html", headers=NO_CACHE)
 
     @app.post("/api/login")
     async def login(body: Login, request: Request, response: Response) -> Dict[str, bool]:
@@ -138,5 +150,5 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
             raise HTTPException(502, str(exc)) from None
 
     # Page, stylesheet and script only; no data is served from here
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    app.mount("/static", Static(directory=STATIC), name="static")
     return app

@@ -17,7 +17,11 @@ def client(visitor):
     return visitor
 
 def test_the_api_needs_a_session_from_the_sign_in_form(visitor) -> None:
-    assert visitor.get("/").status_code == 200  # the page holds no data and shows its own sign-in form
+    page = visitor.get("/")
+    assert page.status_code == 200  # the page holds no data and shows its own sign-in form
+    # Re-checked on every load, so an update never leaves a browser running old code
+    assert page.headers["cache-control"] == "no-cache"
+    assert visitor.get("/static/app.js").headers["cache-control"] == "no-cache"
     for path in ("/api/leagues", "/api/games?league=basketball_nba"):
         response = visitor.get(path)
         assert response.status_code == 401
