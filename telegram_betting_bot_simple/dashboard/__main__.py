@@ -50,8 +50,14 @@ def main() -> None:
         threading.Thread(target=grade_forever, args=(service,), name="grader", daemon=True).start()
         if service.analysts is not None:
             threading.Thread(target=analyze_forever, args=(service,), name="analysts", daemon=True).start()
-    app = create_app(service, config.dashboard_password)
-    uvicorn.run(app, host="0.0.0.0", port=config.dashboard_port, access_log=False)
+    # The bot token checks Telegram Mini App sign-ins, and only the listed Telegram users get in.
+    # Behind Caddy, DASHBOARD_HOST=127.0.0.1 keeps the plain-HTTP port off the internet; uvicorn
+    # trusts Caddy's X-Forwarded-Proto from 127.0.0.1, so cookies are still marked Secure
+    if config.mini_app_url and not config.telegram_user_ids:
+        logging.warning("TELEGRAM_ALLOWED_IDS is empty, so nobody can open the app from Telegram yet")
+    app = create_app(service, config.dashboard_password, bot_token=config.telegram_token,
+                     telegram_ids=config.telegram_user_ids)
+    uvicorn.run(app, host=config.dashboard_host, port=config.dashboard_port, access_log=False)
 
 
 if __name__ == "__main__":

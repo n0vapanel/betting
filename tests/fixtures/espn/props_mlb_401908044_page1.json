@@ -1,0 +1,126 @@
+{
+ "count": 7,
+ "pageIndex": 1,
+ "pageSize": 4,
+ "pageCount": 2,
+ "items": [
+  {
+   "type": {
+    "id": "46",
+    "name": "Total Strikeouts"
+   },
+   "lastUpdated": "2026-10-25T06:54Z",
+   "current": {
+    "target": {
+     "value": 4.5,
+     "displayValue": "4.5"
+    }
+   },
+   "open": {
+    "target": {
+     "value": 5.5,
+     "displayValue": "5.5"
+    }
+   },
+   "athlete": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/seasons/2026/athletes/39825?lang=en&region=us"
+   },
+   "odds": {
+    "american": {
+     "value": "-143",
+     "open": "+113"
+    },
+    "decimal": {
+     "value": "1.69",
+     "open": "2.13"
+    },
+    "total": {
+     "value": "4.5",
+     "open": "5.5"
+    }
+   }
+  },
+  {
+   "type": {
+    "id": "46",
+    "name": "Total Strikeouts"
+   },
+   "lastUpdated": "2026-10-25T06:54Z",
+   "current": {
+    "target": {
+     "value": 4.5,
+     "displayValue": "4.5"
+    }
+   },
+   "open": {
+    "target": {
+     "value": 5.5,
+     "displayValue": "5.5"
+    }
+   },
+   "athlete": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/seasons/2026/athletes/39825?lang=en&region=us"
+   },
+   "odds": {
+    "american": {
+     "value": "+112",
+     "open": "-144"
+    },
+    "decimal": {
+     "value": "2.12",
+     "open": "1.69"
+    },
+    "total": {
+     "value": "4.5",
+     "open": "5.5"
+    }
+   }
+  },
+  {
+   "type": {
+    "id": "47",
+    "name": "To Record Win"
+   },
+   "lastUpdated": "2026-10-25T06:48Z",
+   "current": {},
+   "open": {},
+   "athlete": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/seasons/2026/athletes/39825?lang=en&region=us"
+   },
+   "odds": {
+    "american": {
+     "value": "+242",
+     "open": "+254"
+    },
+    "decimal": {
+     "value": "3.42",
+     "open": "3.54"
+    },
+    "total": {}
+   }
+  },
+  {
+   "type": {
+    "id": "47",
+    "name": "To Record Win"
+   },
+   "lastUpdated": "2026-10-25T06:48Z",
+   "current": {},
+   "open": {},
+   "athlete": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/seasons/2026/athletes/39825?lang=en&region=us"
+   },
+   "odds": {
+    "american": {
+     "value": "-351",
+     "open": "-371"
+    },
+    "decimal": {
+     "value": "1.28",
+     "open": "1.26"
+    },
+    "total": {}
+   }
+  }
+ ]
+}

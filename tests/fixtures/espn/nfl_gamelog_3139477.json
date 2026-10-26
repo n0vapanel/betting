@@ -1,0 +1,191 @@
+{
+ "labels": [
+  "CMP",
+  "ATT",
+  "YDS",
+  "CMP%",
+  "AVG",
+  "TD",
+  "INT",
+  "LNG",
+  "SACK",
+  "RTG",
+  "QBR",
+  "CAR",
+  "YDS",
+  "AVG",
+  "TD",
+  "LNG"
+ ],
+ "names": [
+  "completions",
+  "passingAttempts",
+  "passingYards",
+  "completionPct",
+  "yardsPerPassAttempt",
+  "passingTouchdowns",
+  "interceptions",
+  "longPassing",
+  "sacks",
+  "QBRating",
+  "adjQBR",
+  "rushingAttempts",
+  "rushingYards",
+  "yardsPerRushAttempt",
+  "rushingTouchdowns",
+  "longRushing"
+ ],
+ "displayNames": [
+  "Completions",
+  "Passing Attempts",
+  "Passing Yards",
+  "Completion Percentage",
+  "Yards Per Pass Attempt",
+  "Passing Touchdowns",
+  "Interceptions",
+  "Longest Pass",
+  "Total Sacks",
+  "Passer Rating",
+  "Adjusted QBR",
+  "Rushing Attempts",
+  "Rushing Yards",
+  "Yards Per Rush Attempt",
+  "Rushing Touchdowns",
+  "Long Rushing"
+ ],
+ "categories": [
+  {
+   "name": "passing",
+   "displayName": "Passing",
+   "count": 11
+  },
+  {
+   "name": "rushing",
+   "displayName": "Rushing",
+   "count": 5
+  }
+ ],
+ "filters": [
+  {
+   "name": "season",
+   "value": "2026",
+   "options": [
+    {
+     "value": "2026",
+     "displayValue": "2026"
+    }
+   ]
+  }
+ ],
+ "seasonTypes": [
+  {
+   "displayName": "2026 Regular Season",
+   "categories": [
+    {
+     "displayName": "Regular Season Stats",
+     "type": "event",
+     "events": [
+      {
+       "eventId": "401873006",
+       "stats": [
+        "23",
+        "30",
+        "272",
+        "76.7",
+        "9.1",
+        "0",
+        "1",
+        "31",
+        "0",
+        "89.9",
+        "69.6",
+        "5",
+        "16",
+        "3.2",
+        "0",
+        "10"
+       ]
+      },
+      {
+       "eventId": "401872976",
+       "stats": [
+        "15",
+        "30",
+        "225",
+        "50.0",
+        "7.5",
+        "2",
+        "0",
+        "55",
+        "2",
+        "97.2",
+        "56.8",
+        "2",
+        "0",
+        "0.0",
+        "0",
+        "1"
+       ]
+      },
+      {
+       "eventId": "401872952",
+       "stats": [
+        "20",
+        "24",
+        "246",
+        "83.3",
+        "10.3",
+        "2",
+        "1",
+        "48",
+        "0",
+        "119.8",
+        "61.0",
+        "1",
+        "1",
+        "1.0",
+        "0",
+        "1"
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "events": {
+  "401873006": {
+   "id": "401873006",
+   "atVs": "vs",
+   "gameDate": "2026-10-18T20:25:00.000+00:00",
+   "score": "22-6",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "LAC",
+    "displayName": "Los Angeles Chargers"
+   }
+  },
+  "401872976": {
+   "id": "401872976",
+   "atVs": "@",
+   "gameDate": "2026-10-04T20:25:00.000+00:00",
+   "score": "30-27",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "LV",
+    "displayName": "Las Vegas Raiders"
+   }
+  },
+  "401872952": {
+   "id": "401872952",
+   "atVs": "@",
+   "gameDate": "2026-09-27T17:00:00.000+00:00",
+   "score": "24-10",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "MIA",
+    "displayName": "Miami Dolphins"
+   }
+  }
+ }
+}

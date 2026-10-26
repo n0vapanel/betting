@@ -1,0 +1,23 @@
+{
+ "athlete": {
+  "id": "3895074",
+  "displayName": "Connor McDavid",
+  "jersey": "97",
+  "headshot": {
+   "href": "https://a.espncdn.com/i/headshots/nhl/players/full/3895074.png"
+  },
+  "position": {
+   "abbreviation": "C",
+   "displayName": "Center"
+  },
+  "team": {
+   "id": "6",
+   "abbreviation": "EDM",
+   "displayName": "Edmonton Oilers"
+  },
+  "status": {
+   "name": "Active",
+   "type": "active"
+  }
+ }
+}

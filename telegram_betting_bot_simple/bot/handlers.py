@@ -7,8 +7,9 @@ mode a pick shows that bet's payout; in Multi mode picks go on a slip
 (marked ✓) whose combined odds come from the best single bookmaker.
 On NBA games 🔮 lets anyone make a call (winner and how sure they are),
 scored after the game next to the AI's score; /start also leads to the
-AI's Safe/Risky/Crazy bets, your calls and the leaderboard. Each screen
-edits the same message.
+AI's Safe/Risky/Crazy bets, your calls and the leaderboard, and (when
+PUBLIC_URL is set) to the web app opened as a Telegram Mini App. Each
+screen edits the same message.
 
 Buttons carry what they need (league, game id prefix, pick), so menus
 keep working after a restart, and prices are always re-read from the
@@ -28,8 +29,9 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    WebAppInfo,
 )
-from telegram.constants import ParseMode
+from telegram.constants import ChatType, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import (
     Application,
@@ -264,13 +266,27 @@ async def _no_service(update: Update) -> None:
                         "to the bot's .env and restart it.", [])
 
 
+def _app_rows(update: Update, context: ContextTypes.DEFAULT_TYPE) -> List[List[InlineKeyboardButton]]:
+    """An "Open app" button for the Mini App when PUBLIC_URL is set.
+
+    Telegram only allows Mini App buttons in private chats (a group would refuse the whole message).
+    """
+    config = context.application.bot_data.get("config")
+    url = getattr(config, "mini_app_url", None)
+    chat = getattr(update, "effective_chat", None)
+    if not url or chat is None or chat.type != ChatType.PRIVATE:
+        return []
+    return [[InlineKeyboardButton("📱 Open app", web_app=WebAppInfo(url))]]
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """The home screen: browse games (Single or Multi), AI bets, your calls and the leaderboard."""
-    rows = [[InlineKeyboardButton("🎯 Single game", callback_data="mode:single"),
-             InlineKeyboardButton("🧩 Multi (parlay)", callback_data="mode:multi")],
-            [InlineKeyboardButton("🎲 AI bets: Safe · Risky · Crazy", callback_data="bets")],
-            [InlineKeyboardButton("🔮 My calls", callback_data="mycalls"),
-             InlineKeyboardButton("🏆 Leaderboard", callback_data="board")]]
+    rows = _app_rows(update, context)
+    rows += [[InlineKeyboardButton("🎯 Single game", callback_data="mode:single"),
+              InlineKeyboardButton("🧩 Multi (parlay)", callback_data="mode:multi")],
+             [InlineKeyboardButton("🎲 AI bets: Safe · Risky · Crazy", callback_data="bets")],
+             [InlineKeyboardButton("🔮 My calls", callback_data="mycalls"),
+              InlineKeyboardButton("🏆 Leaderboard", callback_data="board")]]
     if _picks(context):
         rows.append([InlineKeyboardButton(f"🧾 Bet slip ({len(_picks(context))})", callback_data="slip")])
     await _show(update, (

@@ -10,6 +10,11 @@
 # The bot only makes outbound connections; the dashboard listens on one port
 # (DASHBOARD_PORT, default 8787) behind a password.
 #
+# With a domain name (DOMAIN=bets.example.com, see below) the dashboard is served
+# over HTTPS by Caddy, which gets and renews the certificate by itself. Telegram
+# only opens HTTPS pages as Mini Apps, so this is what puts an "Open app" button
+# in the bot. The dashboard then listens on 127.0.0.1 only, behind Caddy.
+#
 # Usage, as root on the VPS:
 #   curl -fsSL https://raw.githubusercontent.com/n0vapanel/betting/main/deploy/setup_vps.sh -o setup_vps.sh
 #   bash setup_vps.sh
@@ -24,6 +29,19 @@
 # space so the keys stay out of the shell history:
 #    TELEGRAM_BOT_TOKEN=... TELEGRAM_CHANNEL_ID=... THE_ODDS_API_KEY=... bash setup_vps.sh
 # Also: API_SPORTS_KEY, DASHBOARD_PASSWORD, BRANCH (default main), REPO_URL.
+#
+# HTTPS and the Telegram Mini App (optional): point a domain's DNS A record at this
+# server, then run
+#    DOMAIN=bets.example.com bash setup_vps.sh
+# The domain is saved, so later runs keep serving it. DOMAIN=off goes back to the
+# plain http://<server>:8787 address.
+#
+# The app is private: anyone on Telegram can find the bot, so only the Telegram
+# users listed in TELEGRAM_ALLOWED_IDS can open it there (the dashboard password
+# still works in a browser). The first run lists you, when bot notifications go to
+# your private chat. Everyone else is shown their Telegram id; to let friends in,
+# list everyone (this replaces the saved list):
+#    TELEGRAM_ALLOWED_IDS=11111111,22222222 bash setup_vps.sh
 #
 # AI analysts (optional; each call costs money on that API account):
 #   ANTHROPIC_API_KEY=sk-ant-...  Claude (console.anthropic.com)
@@ -43,6 +61,9 @@ VENV="$BASE/venv"
 ENV_FILE="$APP/.env"
 SERVICE="bettingbot"
 DASHBOARD="bettingdash"
+CADDYFILE="/etc/caddy/Caddyfile"
+# The bot's own Caddy site, imported from the main Caddyfile so other sites served by Caddy stay as they are
+CADDY_SITE="/etc/caddy/bettingbot.caddy"
 # Secrets may be pre-set in the environment: keep them away from apt, git and pip.
 export -n TELEGRAM_BOT_TOKEN TELEGRAM_CHANNEL_ID API_SPORTS_KEY THE_ODDS_API_KEY NEWS_API_KEY DASHBOARD_PASSWORD \
   ANTHROPIC_API_KEY DEEPSEEK_API_KEY
@@ -61,7 +82,10 @@ declare -A PATTERNS=(
   [AI_EFFORT]='^(low|medium|high|xhigh|max)$'
   [ANTHROPIC_MODEL]='^claude-[a-z0-9.-]{3,60}$'
   [DEEPSEEK_MODEL]='^deepseek-[a-z0-9.-]{2,60}$'
+  [TELEGRAM_ALLOWED_IDS]='^[0-9]{1,20}(,[0-9]{1,20})*$'
 )
+# DOMAIN is checked and saved on its own, since it can also be "off"
+DOMAIN_PATTERN='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$'
 PRESET=()
 for var in "${!PATTERNS[@]}"; do
   if [ -n "${!var:-}" ]; then PRESET+=("$var"); fi
@@ -88,13 +112,34 @@ ask() {
   printf -v "$var" '%s' "$value"
 }
 
+# set_env VAR VALUE: save VAR=VALUE in the .env file, replacing an earlier value
+set_env() {
+  sed -i "/^$1=/d" "$ENV_FILE"
+  echo "$1=$2" >> "$ENV_FILE"
+}
+
 main() {
   [ "$(id -u)" -eq 0 ] || { echo "Run this as root (or with sudo)."; exit 1; }
   command -v systemctl >/dev/null || { echo "This needs a Linux server that uses systemd (Ubuntu, Debian, Fedora...)."; exit 1; }
   # The bot user must be able to read what root creates here, even if root's umask is stricter
   umask 022
+  # A domain given on an earlier run is saved in .env and keeps being served; DOMAIN=off stops that.
+  # Defaulted first: under "set -u" an unset DOMAIN (a first install) would stop the script
+  DOMAIN="${DOMAIN:-}"
+  if [ -z "$DOMAIN" ] && [ -f "$ENV_FILE" ]; then
+    DOMAIN="$(grep -E '^DOMAIN=' "$ENV_FILE" | tail -1 | cut -d= -f2 || true)"
+  fi
+  DOMAIN="${DOMAIN,,}"
+  local domain_off=""
+  if [ "$DOMAIN" = "off" ]; then
+    domain_off=1
+    DOMAIN=""
+  fi
+  if [ -n "$DOMAIN" ] && ! [[ "$DOMAIN" =~ $DOMAIN_PATTERN ]]; then
+    echo "DOMAIN looks wrong: give just the name, e.g. DOMAIN=bets.example.com (or DOMAIN=off)"; exit 1
+  fi
 
-  echo "[1/7] Installing system packages (git, Python)..."
+  echo "[1/8] Installing system packages (git, Python${DOMAIN:+, Caddy})..."
   if command -v apt-get >/dev/null; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
@@ -109,14 +154,20 @@ main() {
   fi
   python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' \
     || { echo "The bot needs Python 3.10 or newer; this server has $(python3 --version 2>&1)."; exit 1; }
+  # Before any settings change, so a server where Caddy can't be installed or can't have ports 80
+  # and 443 is left as it was
+  if [ -n "$DOMAIN" ]; then
+    check_web_ports
+    install_caddy
+  fi
 
-  echo "[2/7] Creating the $BOT_USER user..."
+  echo "[2/8] Creating the $BOT_USER user..."
   id "$BOT_USER" >/dev/null 2>&1 \
     || useradd --system --home-dir "$BASE" --no-create-home --shell /usr/sbin/nologin "$BOT_USER"
   mkdir -p "$BASE"
   chmod 755 "$BASE"
 
-  echo "[3/7] Getting the bot code ($BRANCH)..."
+  echo "[3/8] Getting the bot code ($BRANCH)..."
   if [ -d "$APP/.git" ]; then
     git -C "$APP" fetch --quiet origin "$BRANCH"
     git -C "$APP" checkout --quiet --force -B "$BRANCH" "origin/$BRANCH"
@@ -124,7 +175,7 @@ main() {
     git clone --quiet --branch "$BRANCH" "$REPO_URL" "$APP"
   fi
 
-  echo "[4/7] Installing Python packages (can take a minute)..."
+  echo "[4/8] Installing Python packages (can take a minute)..."
   # Install as the bot user so package install scripts never run as root. The service
   # still can't modify its own packages: ProtectSystem=strict makes them read-only.
   install -d -o "$BOT_USER" -g "$BOT_USER" "$VENV"
@@ -132,7 +183,7 @@ main() {
   runuser -u "$BOT_USER" -- env HOME="$BASE" "$VENV/bin/pip" install --quiet --no-cache-dir \
     --disable-pip-version-check -r "$APP/requirements.txt"
 
-  echo "[5/7] Settings..."
+  echo "[5/8] Settings..."
   if [ -f "$ENV_FILE" ]; then
     echo "  Keeping your existing settings in $ENV_FILE"
   else
@@ -168,17 +219,35 @@ EOF
   local var
   for var in ${PRESET[@]+"${PRESET[@]}"}; do
     [[ "${!var}" =~ ${PATTERNS[$var]} ]] || { echo "  $var looks wrong."; exit 1; }
-    sed -i "/^$var=/d" "$ENV_FILE"
-    echo "$var=${!var}" >> "$ENV_FILE"
+    set_env "$var" "${!var}"
   done
   if [ ${#PRESET[@]} -gt 0 ]; then echo "  Saved from the command line: ${PRESET[*]}"; fi
+  # Behind Caddy: the bot links to the HTTPS address, and the dashboard only listens to Caddy
+  if [ -n "$DOMAIN" ]; then
+    set_env DOMAIN "$DOMAIN"
+    set_env PUBLIC_URL "https://$DOMAIN"
+    set_env DASHBOARD_HOST "127.0.0.1"
+  elif [ -n "$domain_off" ]; then
+    sed -i -E '/^(DOMAIN|PUBLIC_URL|DASHBOARD_HOST)=/d' "$ENV_FILE"
+    echo "  HTTPS turned off: the dashboard goes back to its own port."
+  fi
+  # Who may open the app from Telegram. A private chat's id is that person's Telegram id, so when
+  # notifications go to the owner's own chat, the owner is on the list from the start
+  if ! grep -q '^TELEGRAM_ALLOWED_IDS=' "$ENV_FILE"; then
+    local chat
+    chat="$(grep -E '^TELEGRAM_CHANNEL_ID=' "$ENV_FILE" | tail -1 | cut -d= -f2 || true)"
+    if [[ "$chat" =~ ^[0-9]{5,20}$ ]]; then
+      set_env TELEGRAM_ALLOWED_IDS "$chat"
+      echo "  Only you (Telegram id $chat) can open the app from Telegram for now; see TELEGRAM_ALLOWED_IDS."
+    fi
+  fi
   chown "root:$BOT_USER" "$ENV_FILE"
   chmod 640 "$ENV_FILE"
   local port
   port="$(grep -E '^DASHBOARD_PORT=' "$ENV_FILE" | tail -1 | cut -d= -f2)"
   port="${port:-8787}"
 
-  echo "[6/7] Starting the bot as a background service..."
+  echo "[6/8] Starting the bot as a background service..."
   write_unit "$SERVICE" "Telegram betting bot" "telegram_betting_bot_simple.main"
   start_unit "$SERVICE" || exit 1
   echo "  The bot is running."
@@ -192,30 +261,67 @@ EOF
     echo "  Couldn't message your chat: open your bot in Telegram, press Start, then run this again."
   fi
 
-  echo "[7/7] Starting the dashboard on port $port..."
+  echo "[7/8] Starting the dashboard on port $port..."
   write_unit "$DASHBOARD" "Betting dashboard (web)" "telegram_betting_bot_simple.dashboard"
   start_unit "$DASHBOARD" || exit 1
-  if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "^Status: active"; then
+  # Behind Caddy the port stays closed: only Caddy (on this server) talks to it
+  if [ -n "$DOMAIN" ]; then
+    :
+  elif ufw_active; then
     ufw allow "$port/tcp" comment "betting dashboard" >/dev/null && echo "  Opened port $port in the ufw firewall."
-  elif command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
+  elif firewalld_active; then
     firewall-cmd --quiet --permanent --add-port="$port/tcp" && firewall-cmd --quiet --reload \
       && echo "  Opened port $port in firewalld."
   fi
   echo "  The dashboard is running."
 
+  if [ -n "$DOMAIN" ]; then
+    echo "[8/8] Serving the dashboard over HTTPS at $DOMAIN (Caddy)..."
+    setup_caddy "$port"
+  elif [ -n "$domain_off" ]; then
+    echo "[8/8] HTTPS: turned off (DOMAIN=off)."
+    remove_caddy_site
+  else
+    echo "[8/8] HTTPS: skipped (no DOMAIN given)."
+  fi
+
   local address
   address="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  cat <<EOF
+  if [ -n "$DOMAIN" ]; then
+    local allowed
+    allowed="$(grep -E '^TELEGRAM_ALLOWED_IDS=' "$ENV_FILE" | tail -1 | cut -d= -f2 || true)"
+    cat <<EOF
+
+Done.
+  Telegram: open your bot, send /start and tap "📱 Open app" (or the menu button).
+  Dashboard: https://$DOMAIN  (sign in with the dashboard password)
+  Telegram users who can open the app: ${allowed:-nobody yet}. Anyone else is shown their
+  Telegram id; to let them in, list everyone: TELEGRAM_ALLOWED_IDS=id1,id2 bash setup_vps.sh
+EOF
+  else
+    cat <<EOF
 
 Done.
   Telegram: open your bot and send /start.
   Dashboard: http://${address:-YOUR-SERVER-IP}:$port  (sign in with the dashboard password)
 EOF
+  fi
   if [ -n "$generated" ]; then
     echo "  Your dashboard password is: $generated  (it's also in $ENV_FILE)"
   fi
-  cat <<EOF
+  if [ -n "$DOMAIN" ]; then
+    cat <<EOF
+  If the page doesn't load: check that $DOMAIN's DNS A record points at ${address:-this server} and
+  allow ports 80 and 443 in your hosting provider's firewall. Caddy keeps retrying the certificate.
+EOF
+  else
+    cat <<EOF
   If the page doesn't load, allow port $port in your hosting provider's firewall.
+  For HTTPS and the Telegram app button, point a domain at this server and run:
+    DOMAIN=bets.example.com bash setup_vps.sh
+EOF
+  fi
+  cat <<EOF
 
 Useful commands:
   journalctl -u $SERVICE -f        bot logs (Ctrl+C stops watching; the bot keeps running)
@@ -224,6 +330,143 @@ Useful commands:
   nano $ENV_FILE      change keys and passwords
   bash setup_vps.sh                  update to the latest code from GitHub
 EOF
+  if [ -n "$DOMAIN" ]; then echo "  journalctl -u caddy -f           HTTPS (Caddy) logs"; fi
+}
+
+ufw_active() {
+  command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "^Status: active"
+}
+
+firewalld_active() {
+  command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1
+}
+
+# check_web_ports: stop, before anything is changed, if a program other than Caddy listens on port
+# 80 or 443 (e.g. nginx or Apache on a shared server): Caddy couldn't start or get a certificate
+check_web_ports() {
+  command -v ss >/dev/null || return 0
+  local others names
+  others="$(ss -Hltnp '( sport = :80 or sport = :443 )' 2>/dev/null | grep -v '"caddy"' || true)"
+  [ -z "$others" ] && return 0
+  names="$(printf '%s\n' "$others" | grep -o '(("[^"]*"' | cut -d'"' -f2 | sort -u | paste -sd, - | sed 's/,/, /g' || true)"
+  echo "  HTTPS needs ports 80 and 443 for Caddy, but they are in use by ${names:-another program}."
+  echo "  Nothing was changed. Free those ports (or run this without DOMAIN), then run this again."
+  exit 1
+}
+
+# install_caddy: Caddy from its official packages (https://caddyserver.com/docs/install)
+install_caddy() {
+  if command -v caddy >/dev/null; then
+    echo "  Caddy is already installed."
+    return
+  fi
+  if ! install_caddy_package; then
+    echo "  Couldn't install Caddy (for HTTPS); nothing else was changed."
+    echo "  Install it by hand (https://caddyserver.com/docs/install), then run this again."
+    exit 1
+  fi
+  echo "  Installed Caddy."
+}
+
+# install_caddy_package: the apt repository on Ubuntu/Debian, COPR on Fedora/RHEL. Each step is
+# chained with && because "set -e" is off inside a function called as a condition
+install_caddy_package() {
+  if command -v apt-get >/dev/null; then
+    apt-get install -y -qq --no-upgrade debian-keyring debian-archive-keyring apt-transport-https curl gnupg >/dev/null \
+      && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+        | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+      && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+        > /etc/apt/sources.list.d/caddy-stable.list \
+      && chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list \
+      && apt-get update -qq \
+      && apt-get install -y -qq caddy >/dev/null
+  elif command -v dnf >/dev/null; then
+    dnf install -y -q 'dnf-command(copr)' && dnf copr enable -y -q @caddy/caddy && dnf install -y -q caddy
+  elif command -v yum >/dev/null; then
+    yum install -y -q yum-plugin-copr && yum copr enable -y -q @caddy/caddy && yum install -y -q caddy
+  else
+    return 1
+  fi
+}
+
+# stock_caddyfile FILE: true if FILE is the example page Caddy's package ships (":80", static files)
+stock_caddyfile() {
+  [ "$(grep -vE '^[[:space:]]*(#|$)' "$1" | tr -d '[:space:]')" = ':80{root*/usr/share/caddyfile_server}' ]
+}
+
+# setup_caddy PORT: serve DOMAIN over HTTPS, passing requests to the dashboard on 127.0.0.1:PORT
+setup_caddy() {
+  local port="$1"
+  # Caddy's packages make this folder; a Caddy installed by hand may not have it
+  mkdir -p "$(dirname "$CADDY_SITE")"
+  cat > "$CADDY_SITE" <<CADDY
+# Written by setup_vps.sh: the betting dashboard over HTTPS. Caddy gets and renews the certificate.
+$DOMAIN {
+	encode gzip
+	reverse_proxy 127.0.0.1:$port
+}
+CADDY
+  if [ ! -f "$CADDYFILE" ] || stock_caddyfile "$CADDYFILE"; then
+    if [ -f "$CADDYFILE" ]; then cp "$CADDYFILE" "$CADDYFILE.orig"; fi
+    echo "import $CADDY_SITE" > "$CADDYFILE"
+  elif ! grep -qxF "import $CADDY_SITE" "$CADDYFILE"; then
+    # Caddy already serves other sites from this server: add ours next to them
+    printf '\nimport %s\n' "$CADDY_SITE" >> "$CADDYFILE"
+    echo "  Added the dashboard to your existing $CADDYFILE."
+  fi
+  if ! caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1; then
+    echo "  Caddy doesn't accept $CADDYFILE:"
+    # "|| true": with pipefail, caddy's own failure would stop the script before the clean-up below
+    caddy validate --config "$CADDYFILE" --adapter caddyfile 2>&1 | tail -5 || true
+    # Take our site back out, so the next Caddy restart doesn't fail on it
+    remove_caddy_site >/dev/null
+    echo "  Fix that and run this again, or go back to the plain address: DOMAIN=off bash setup_vps.sh"
+    exit 1
+  fi
+  getent hosts "$DOMAIN" >/dev/null \
+    || echo "  $DOMAIN doesn't resolve yet: add a DNS A record pointing at this server."
+
+  # Caddy needs 80 (certificate checks, redirect to HTTPS) and 443; the dashboard's own port closes
+  if ufw_active; then
+    ufw allow 80/tcp comment "caddy http" >/dev/null
+    ufw allow 443/tcp comment "caddy https" >/dev/null
+    ufw delete allow "$port/tcp" >/dev/null 2>&1 || true
+    echo "  Opened ports 80 and 443 and closed port $port in the ufw firewall."
+  elif firewalld_active; then
+    firewall-cmd --quiet --permanent --add-service=http --add-service=https
+    firewall-cmd --quiet --permanent --remove-port="$port/tcp" >/dev/null 2>&1 || true
+    firewall-cmd --quiet --reload
+    echo "  Opened ports 80 and 443 and closed port $port in firewalld."
+  fi
+  # SELinux (Fedora/RHEL) lets web servers such as Caddy connect to web ports only, not the dashboard's
+  if command -v getenforce >/dev/null && [ "$(getenforce 2>/dev/null)" = "Enforcing" ]; then
+    setsebool -P httpd_can_network_connect 1 || echo "  Couldn't let Caddy through SELinux (setsebool failed)."
+  fi
+  systemctl enable --quiet caddy
+  if ! systemctl reload-or-restart caddy; then
+    echo "  Caddy didn't start (is another web server using ports 80 or 443?). Last log lines:"
+    journalctl -u caddy -n 20 --no-pager
+    echo "  To go back to the plain address: DOMAIN=off bash setup_vps.sh"
+    exit 1
+  fi
+  echo "  Caddy serves https://$DOMAIN"
+}
+
+# remove_caddy_site: stop serving the dashboard through Caddy. Caddy and any other sites it serves stay
+remove_caddy_site() {
+  [ -f "$CADDY_SITE" ] || return 0
+  if [ -f "$CADDYFILE" ]; then
+    sed -i "\|^import $CADDY_SITE\$|d" "$CADDYFILE"
+    # Only our site was there: put back the example page Caddy came with
+    if [ -f "$CADDYFILE.orig" ] && ! grep -qvE '^[[:space:]]*$' "$CADDYFILE"; then
+      mv "$CADDYFILE.orig" "$CADDYFILE"
+    fi
+  fi
+  rm -f "$CADDY_SITE"
+  if systemctl is-active --quiet caddy; then
+    systemctl reload caddy || echo "  Caddy didn't reload; it keeps serving the dashboard until it restarts."
+  fi
+  echo "  Caddy no longer serves the dashboard."
 }
 
 # write_unit NAME DESCRIPTION MODULE: a sandboxed systemd service running "python -m MODULE"

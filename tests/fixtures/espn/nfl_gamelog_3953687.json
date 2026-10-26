@@ -1,0 +1,134 @@
+{
+ "labels": [
+  "1-19\t",
+  "20-29\t",
+  "30-39",
+  "40-49\t",
+  "50+",
+  "LNG",
+  "FG%",
+  "FG",
+  "AVG",
+  "XP",
+  "PTS"
+ ],
+ "names": [
+  "fieldGoalsMade1_19-fieldGoalAttempts1_19",
+  "fieldGoalsMade20_29-fieldGoalAttempts20_29",
+  "fieldGoalsMade30_39-fieldGoalAttempts30_39",
+  "fieldGoalsMade40_49-fieldGoalAttempts40_49",
+  "fieldGoalsMade50-fieldGoalAttempts50",
+  "longFieldGoalMade",
+  "fieldGoalPct",
+  "fieldGoalsMade-fieldGoalAttempts",
+  "fieldGoalsMadeYardsAverage",
+  "extraPointsMade-extraPointAttempts",
+  "totalKickingPoints"
+ ],
+ "displayNames": [
+  "FGM 1-19 yards",
+  "FGM 20-29 yards",
+  "FGM 30-39 yards",
+  "FGM 40-49 yards",
+  "FGM 50+ yards",
+  "Long Field Goal Made",
+  "Field Goal Percentage",
+  "Field goals made",
+  "Average field goal length",
+  "Extra Points Made",
+  "Total Kicking Points"
+ ],
+ "categories": [
+  {
+   "name": "fieldgoals",
+   "displayName": "fieldgoals",
+   "count": 9
+  },
+  {
+   "name": "pats",
+   "displayName": "pats",
+   "count": 2
+  }
+ ],
+ "filters": [
+  {
+   "name": "season",
+   "value": "2026",
+   "options": [
+    {
+     "value": "2026",
+     "displayValue": "2026"
+    }
+   ]
+  }
+ ],
+ "seasonTypes": [
+  {
+   "displayName": "2026 Regular Season",
+   "categories": [
+    {
+     "displayName": "Regular Season Stats",
+     "type": "event",
+     "events": [
+      {
+       "eventId": "401873007",
+       "stats": [
+        "0-0",
+        "0-0",
+        "0-0",
+        "0-0",
+        "0-0",
+        "0",
+        "0.0",
+        "0-0",
+        "-",
+        "1-1",
+        "1"
+       ]
+      },
+      {
+       "eventId": "401872980",
+       "stats": [
+        "0-0",
+        "0-0",
+        "0-0",
+        "1-1",
+        "0-0",
+        "41",
+        "100.0",
+        "1-1",
+        "41",
+        "1-1",
+        "4"
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "events": {
+  "401872980": {
+   "id": "401872980",
+   "atVs": "vs",
+   "gameDate": "2026-10-09T00:15:00.000+00:00",
+   "score": "24-16",
+   "gameResult": "L",
+   "opponent": {
+    "abbreviation": "TB",
+    "displayName": "Tampa Bay Buccaneers"
+   }
+  },
+  "401873007": {
+   "id": "401873007",
+   "atVs": "@",
+   "gameDate": "2026-10-19T00:20:00.000+00:00",
+   "score": "23-13",
+   "gameResult": "L",
+   "opponent": {
+    "abbreviation": "GB",
+    "displayName": "Green Bay Packers"
+   }
+  }
+ }
+}

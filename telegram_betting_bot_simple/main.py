@@ -1,16 +1,43 @@
 # telegram_betting_bot_simple/main.py
+"""Start the Telegram bot: python -m telegram_betting_bot_simple.main
+
+When PUBLIC_URL points at the dashboard over HTTPS, the bot's menu button (left of the message box)
+opens it as a Telegram Mini App, so friends (those in TELEGRAM_ALLOWED_IDS) get the full app without a
+password. Without it the menu button goes back to Telegram's plain one, so a button left over from an
+earlier address doesn't lead to a dead page.
+"""
 from __future__ import annotations
 
 import logging
 import os
+from telegram import MenuButtonDefault, MenuButtonWebApp, WebAppInfo
+from telegram.error import TelegramError
 from telegram.ext import Application, PersistenceInput, PicklePersistence
 
 from .config import Config, load_config
 from .bot.handlers import setup_handlers
 
+async def set_menu_button(application: Application) -> None:
+    """Point the bot's menu button at the Mini App, or back to the plain one (runs once the bot has connected).
+
+    Telegram keeps the button between restarts, so it is reset when PUBLIC_URL is removed or changed.
+    """
+    config: Config = application.bot_data["config"]
+    if config.mini_app_url:
+        button = MenuButtonWebApp("Open app", WebAppInfo(config.mini_app_url))
+    else:
+        if config.public_url:
+            logging.warning("PUBLIC_URL must start with https:// for Telegram to open it; no app button")
+        button = MenuButtonDefault()
+    try:
+        await application.bot.set_chat_menu_button(menu_button=button)
+    except TelegramError as exc:
+        # The bot works without it, so a refusal (e.g. a URL Telegram won't open) only gets logged
+        logging.warning("Couldn't set the bot's menu button: %s", exc)
+
 def build_application(config: Config) -> Application:
     """The bot with its handlers and the shared games service."""
-    builder = Application.builder().token(config.telegram_token)
+    builder = Application.builder().token(config.telegram_token).post_init(set_menu_button)
     if config.state_dir:
         # Keeps each user's mode, slip and stake across restarts. Not bot_data: it holds the live
         # games service, which is rebuilt on every start (a saved copy would replace it on startup)
