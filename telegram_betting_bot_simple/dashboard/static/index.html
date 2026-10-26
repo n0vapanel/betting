@@ -2,44 +2,47 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f3f5f9" media="(prefers-color-scheme: light)">
+  <meta name="description" content="Real chances for tonight's games, honest prices for any slip, and an AI analyst to ask.">
   <title>SportsBet AI</title>
-  <link rel="stylesheet" href="/static/styles.css?v=5">
+  <link rel="stylesheet" href="/static/styles.css?v=6">
+  <!-- Telegram's Mini App script: gives window.Telegram.WebApp (initData, theme, buttons) inside Telegram -->
+  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+  <script type="module" src="/static/app.js?v=6"></script>
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand"><span class="logo">◆</span>SportsBet <b>AI</b><span class="beta">beta</span></div>
-    <nav class="views" id="views" aria-label="Sections">
-      <button data-view="games">Games</button>
-      <button data-view="bets">AI Bets</button>
-      <button data-view="calls">My Calls</button>
-      <button data-view="leaders">Leaderboard</button>
-      <button data-view="record">AI Record</button>
-    </nav>
-    <div class="controls">
-      <div class="seg" id="format-seg" title="Odds format">
-        <button data-format="american">US</button><button data-format="decimal">Dec</button>
-      </div>
-      <span class="pill" id="quota" title="Requests left this month on The Odds API">Odds API: –</span>
-      <button class="link" id="sign-out">Sign out</button>
+  <header class="app-header">
+    <div class="header-inner">
+      <button id="back" class="icon-btn" type="button" aria-label="Back" hidden></button>
+      <a id="title" class="title" href="#/today" aria-label="SportsBet AI: Today"></a>
+      <span class="grow"></span>
+      <button id="quota" class="pill" type="button" hidden></button>
+      <a class="avatar" href="#/settings" aria-label="Settings and limits"></a>
     </div>
   </header>
-
-  <div class="layout">
-    <nav class="sidebar" id="sidebar" aria-label="Sports and leagues"></nav>
-    <main class="main" id="main">
-      <section id="view-games" class="view"></section>
-      <section id="view-bets" class="view"></section>
-      <section id="view-calls" class="view"></section>
-      <section id="view-leaders" class="view"></section>
-      <section id="view-record" class="view"></section>
-      <footer class="disclaimer">
-        For information and entertainment only. Nothing is bet here: the AI's numbers are estimates, not
-        guarantees, and no model has been shown to beat the betting market reliably. Gambling involves risk;
-        only bet what you can afford to lose. 21+ (18+ where permitted). Data: The Odds API, ESPN.
-      </footer>
-    </main>
+  <div class="shell">
+    <div id="banner" class="banner" hidden></div>
+    <main id="view" class="main" tabindex="-1"></main>
+    <footer class="helpline">
+      <p><b>Gambling can be addictive</b> · Help 24/7: <a href="tel:18004262537">1-800-GAMBLER</a> / <a href="tel:08088020133">0808 8020 133</a></p>
+      <p>For information and entertainment only: nothing is bet here. The AI's numbers are estimates, not guarantees,
+        and no model has been shown to beat the betting market reliably. 21+ (18+ where permitted). Data: The Odds API, ESPN.</p>
+    </footer>
   </div>
-  <script src="/static/app.js?v=5" defer></script>
+  <div id="slipbar" class="slipbar" hidden>
+    <div class="slipbar-inner">
+      <button type="button" class="slip-open"></button>
+      <button type="button" class="slip-analyse btn btn-primary" aria-label="Analyse the slip with AI"></button>
+    </div>
+  </div>
+  <nav class="tabbar" aria-label="Main">
+    <div id="tabbar-inner" class="tabbar-inner"></div>
+  </nav>
+  <div id="gate" class="gate" hidden></div>
+  <div id="toasts" aria-live="polite"></div>
+  <noscript><p class="noscript">SportsBet AI needs JavaScript switched on.</p></noscript>
 </body>
 </html>

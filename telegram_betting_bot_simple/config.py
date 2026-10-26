@@ -44,6 +44,12 @@ class Config(BaseSettings):
     ai_effort: Literal["low", "medium", "high", "xhigh", "max"] = Field("medium", validation_alias="AI_EFFORT")
     ai_web_search: bool = Field(False, validation_alias="AI_WEB_SEARCH")
     ai_lookahead_hours: float = Field(6.0, validation_alias="AI_LOOKAHEAD_HOURS")
+    # The AI chat assistant (needs ANTHROPIC_API_KEY): US cents of Claude each person may use per day,
+    # the model that chats and calls the brain's tools, and the small model that reads each message
+    # first (what is asked, and any warning signs of problem gambling)
+    ai_chat_daily_cents: int = Field(100, ge=0, validation_alias="AI_CHAT_DAILY_CENTS")
+    ai_chat_model: str = Field("claude-opus-5-5", validation_alias="AI_CHAT_MODEL")
+    ai_router_model: str = Field("claude-haiku-5-5", validation_alias="AI_ROUTER_MODEL")
     # Writable folder for the odds store and bot state shared by the bot and dashboard;
     # systemd sets STATE_DIRECTORY for services with StateDirectory=
     state_dir: Optional[str] = Field(None, validation_alias="STATE_DIRECTORY")

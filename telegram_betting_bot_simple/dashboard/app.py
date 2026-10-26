@@ -7,7 +7,12 @@ session without a password. The app is private: only Telegram users the owner
 listed (TELEGRAM_ALLOWED_IDS) get in that way, since anyone on Telegram can
 open the bot, and the API includes paid AI calls. Every API call needs that
 session cookie (or, for Telegram clients that block cookies, the initData in a
-header), and routes learn who is asking from the current_uid dependency. Bet
+header), and routes learn who is asking from the current_uid dependency. Routes
+that keep something per person (settings, saved bets, plans, chat) use person():
+a Telegram user is "tg:<id>", and everyone on the shared password is told apart
+by the random id their browser keeps and sends as X-Player ("web:<id>"), which
+is why no route shows one person's id to another (the leaderboard marks rows
+"mine" instead). Bet
 slips send only which picks were chosen; prices and probabilities are looked
 up on the server.
 """
@@ -18,9 +23,11 @@ import asyncio
 import hmac
 import json
 import logging
+import re
 import time
+from decimal import Decimal
 from pathlib import Path
-from typing import Any, Collection, Dict, List, Literal, Optional
+from typing import Annotated, Any, Callable, Collection, Dict, FrozenSet, List, Literal, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
@@ -42,10 +49,12 @@ from .auth import (
     valid_session,
     verify_init_data,
 )
+from .lab import COOLOFF_CHOICES, Lab
 from .service import CallRejected, DashboardService, NotFound
 
 # The session helpers now live in auth.py; tests and older code still import them from here
-__all__ = ["create_app", "current_uid", "SESSION_COOKIE", "session_key", "session_token", "valid_session"]
+__all__ = ["create_app", "current_uid", "person", "own_ids", "SESSION_COOKIE", "session_key", "session_token",
+           "valid_session"]
 
 STATIC = Path(__file__).parent / "static"
 LEAGUE_KEY = r"^[a-z0-9_]{2,64}$"
@@ -56,6 +65,10 @@ TELEGRAM_SESSION_SECONDS = 7 * 24 * 3600
 # Telegram Web shows the Mini App in an iframe, where browsers may drop the cookie: the page then
 # sends its initData with every call in this header instead
 INIT_DATA_HEADER = "X-Telegram-Init-Data"
+# Password sessions are shared, so each browser sends the random id it keeps (in localStorage) here
+PLAYER_HEADER = "X-Player"
+PLAYER_ID = re.compile(r"[A-Za-z0-9-]{8,64}")
+NO_ODDS_KEY = "Add THE_ODDS_API_KEY to the .env file and restart the dashboard"
 
 
 class Pick(BaseModel):
@@ -130,6 +143,97 @@ class CallRequest(JudgeRequest):
     name: str = Field(pattern=r"^[\w .'-]{1,24}$")
 
 
+# --- version 2 request bodies: every amount and count is checked here before the Lab sees it ---------
+
+LeagueKey = Annotated[str, Field(pattern=LEAGUE_KEY)]
+Money = Annotated[Decimal, Field(ge=Decimal("0.01"), le=Decimal("100000"), decimal_places=2)]
+
+
+class Ref(BaseModel):
+    """One pick, by name only: the server looks up its price and chances (a price sent here is ignored)."""
+
+    league: LeagueKey
+    id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    market: Literal["h2h", "spreads", "totals"]
+    side: Literal["home", "away", "draw", "over", "under"]
+    point: Optional[float] = Field(None, ge=-1000, le=1000)  # the line the person saw, to flag a move
+
+
+class TicketBody(BaseModel):
+    type: Literal["single", "multi", "round_robin", "system"] = "multi"
+    stake: Money  # per bet: each single, the multi, each bet of a round robin or system bet
+    k: Optional[int] = Field(None, ge=2, le=7)
+    system: Optional[str] = Field(None, pattern=r"^[A-Za-z0-9_ ]{2,20}$")
+    legs: List[Ref] = Field(min_length=1, max_length=12)
+
+
+class BuildBody(BaseModel):
+    leagues: List[LeagueKey] = Field(default_factory=list, max_length=8)
+    stake: Money
+    target: Decimal = Field(ge=Decimal("0.01"), le=Decimal("10000000"), decimal_places=2)
+    max_legs: int = Field(3, ge=1, le=6)
+    tier: Optional[Literal["safe", "risky", "crazy"]] = None
+
+
+class RolloverBody(BaseModel):
+    start: Money
+    days: int = Field(ge=1, le=60)
+    min_odds: Decimal = Field(ge=Decimal("1.2"), le=Decimal("20"), decimal_places=2)
+    legs_per_day: int = Field(1, ge=1, le=3)
+
+
+class PlanBody(RolloverBody):
+    strategy: Literal["classic", "bank_half", "ladder", "flat"] = "ladder"
+    mode: Literal["paper", "tracked"] = "paper"
+
+
+class PlanDayBody(BaseModel):
+    legs: List[Ref] = Field(min_length=1, max_length=3)
+
+
+class MeUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=64)
+    odds_format: Optional[Literal["decimal", "american", "fractional"]] = None
+    favourite_sports: Optional[List[LeagueKey]] = Field(None, max_length=8)
+    risk_tier: Optional[Literal["safe", "risky", "crazy"]] = None
+    weekly_budget: Optional[Decimal] = Field(None, ge=0, le=Decimal("1000000"), decimal_places=2)
+    reality_check_minutes: Optional[Literal[15, 30, 60]] = None
+    confirm_age: Optional[bool] = None
+
+
+class CooloffBody(BaseModel):
+    hours: int
+
+    @model_validator(mode="after")
+    def known_length(self) -> "CooloffBody":
+        if self.hours not in COOLOFF_CHOICES:
+            raise ValueError(f"A break lasts {', '.join(map(str, COOLOFF_CHOICES))} hours")
+        return self
+
+
+class ChatRequest(BaseModel):
+    """The Ask AI request bar. Any part may be missing: the assistant asks for what it still needs."""
+
+    leagues: List[LeagueKey] = Field(default_factory=list, max_length=8)
+    stake: Optional[Money] = None
+    target: Optional[Decimal] = Field(None, ge=Decimal("0.01"), le=Decimal("10000000"), decimal_places=2)
+    max_legs: Optional[int] = Field(None, ge=1, le=6)
+    tier: Optional[Literal["safe", "risky", "crazy"]] = None
+
+
+class ChatBody(BaseModel):
+    thread_id: Optional[int] = Field(None, ge=1)
+    message: Optional[str] = Field(None, min_length=1, max_length=2000)
+    request: Optional[ChatRequest] = None
+    slip: Optional[TicketBody] = None  # "ask about my slip"
+
+    @model_validator(mode="after")
+    def something_to_answer(self) -> "ChatBody":
+        if not (self.message and self.message.strip()) and self.request is None and self.slip is None:
+            raise ValueError("Send a message, a request or a slip")
+        return self
+
+
 # The browser re-checks the page and its files on every load (a quick 304 when unchanged),
 # so after an update it never keeps running old code against the new API
 NO_CACHE = {"Cache-Control": "no-cache"}
@@ -194,6 +298,36 @@ def current_uid(request: Request) -> str:
     return uid
 
 
+def person(request: Request) -> str:
+    """Dependency for routes that keep something per person: "tg:<id>", or "web:<X-Player>" on the password.
+
+    The password is shared, so a password session alone can't say whose bets these are: the
+    browser's own random id (X-Player) does. Missing or malformed, it's a 400.
+    """
+    uid = current_uid(request)
+    if uid != WEB_UID:
+        return uid
+    player = request.headers.get(PLAYER_HEADER) or ""
+    if not PLAYER_ID.fullmatch(player):
+        raise HTTPException(400, "Missing player id")
+    return f"{WEB_UID}:{player}"
+
+
+def own_ids(request: Request) -> FrozenSet[str]:
+    """Dependency: every id the caller's own records may be under, for marking them "mine" in shared lists.
+
+    That is their person id and, when the browser sends one, "web:<X-Player>" (calls are saved under
+    the browser's id, inside Telegram too). Unlike person() a missing X-Player is no error here: the
+    list is shared and nothing in it is marked.
+    """
+    uid = current_uid(request)
+    ids = set() if uid == WEB_UID else {uid}
+    player = request.headers.get(PLAYER_HEADER) or ""
+    if PLAYER_ID.fullmatch(player):
+        ids.add(f"{WEB_UID}:{player}")
+    return frozenset(ids)
+
+
 def set_session(response: Response, request: Request, key: bytes, uid: str, seconds: int) -> None:
     response.set_cookie(
         SESSION_COOKIE, session_token(key, int(time.time()) + seconds, uid), max_age=seconds,
@@ -202,11 +336,13 @@ def set_session(response: Response, request: Request, key: bytes, uid: str, seco
 
 
 def create_app(service: Optional[DashboardService], password: str, login_delay: float = 1.0,
-               bot_token: Optional[str] = None, telegram_ids: Collection[int] = ()) -> FastAPI:
+               bot_token: Optional[str] = None, telegram_ids: Collection[int] = (),
+               lab: Optional[Lab] = None) -> FastAPI:
     """The dashboard app.
 
     Without bot_token, Telegram sign-in is off and only the password works. With it, only the
-    Telegram users in telegram_ids may sign in (none when it's empty).
+    Telegram users in telegram_ids may sign in (none when it's empty). The per-person routes use
+    ``lab``, else the service's own (services.build_service sets one up, with the AI assistant).
     """
     app = FastAPI(title="SportsBet AI", docs_url=None, redoc_url=None, openapi_url=None)
     app.add_exception_handler(RequestValidationError, invalid_request)  # type: ignore[arg-type]
@@ -219,8 +355,16 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
 
     def get_service() -> DashboardService:
         if service is None:
-            raise HTTPException(503, "Add THE_ODDS_API_KEY to the .env file and restart the dashboard")
+            raise HTTPException(503, NO_ODDS_KEY)
         return service
+
+    if lab is None and service is not None:
+        lab = getattr(service, "lab", None) or Lab(service)
+
+    def get_lab() -> Lab:
+        if lab is None:
+            raise HTTPException(503, NO_ODDS_KEY)
+        return lab
 
     signed_in = [Depends(current_uid)]
 
@@ -340,9 +484,15 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     ) -> Dict[str, Any]:
         return calls_errors(lambda: svc.ai_bets(league, source, f"web:{player}" if player else None))
 
-    @app.get("/api/leaderboard", dependencies=signed_in)
-    def leaderboard(svc: DashboardService = Depends(get_service)) -> List[Dict[str, Any]]:
-        return calls_errors(svc.leaderboard)
+    @app.get("/api/leaderboard")
+    def leaderboard(own: FrozenSet[str] = Depends(own_ids),
+                    svc: DashboardService = Depends(get_service)) -> List[Dict[str, Any]]:
+        """Everyone's scored calls by name. A player's id is what person() trusts on the shared password, so
+        it is never shown to anyone else: each row says whether it is the caller's ("mine"), and only the
+        caller's own rows keep their "player" id (for older pages that compare it)."""
+        rows = calls_errors(svc.leaderboard)
+        return [{**row, "player": row["player"] if row["player"] in own else None, "mine": row["player"] in own}
+                for row in rows]
 
     @app.post("/api/analysts/ask", dependencies=signed_in)
     def ask_analyst(body: AskRequest, svc: DashboardService = Depends(get_service)) -> Dict[str, Any]:
@@ -353,6 +503,141 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     def track_record(league: str = Query("basketball_nba", pattern=LEAGUE_KEY),
                      svc: DashboardService = Depends(get_service)) -> Dict[str, Any]:
         return calls_errors(lambda: svc.track_record(league))
+
+    # --- version 2: per person (settings, tickets, saved bets, plans, players, chat) -----------------
+
+    def lab_call(action: Callable[[], Any]) -> Any:
+        """Run a Lab call, turning its refusals into plain answers: 400 with the reason, 404, or 502 when
+        the odds feed or ESPN failed."""
+        try:
+            return action()
+        except NotFound as exc:
+            raise HTTPException(404, str(exc)) from None
+        except (CallRejected, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from None
+        except RuntimeError as exc:
+            raise HTTPException(502, str(exc)) from None
+
+    @app.get("/api/me")
+    def me(uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        return lab_call(lambda: lab.me(uid))
+
+    @app.put("/api/me")
+    def update_me(body: MeUpdate, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """Settings: only the fields sent change. Lowering the weekly budget applies now; raising it waits 24 h."""
+        return lab_call(lambda: lab.update_me(uid, body.model_dump(exclude_unset=True)))
+
+    @app.post("/api/me/cooloff")
+    def cooloff(body: CooloffBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """Take a break: picks, building and plans switch off until it ends (it can't be ended early)."""
+        return lab_call(lambda: lab.cooloff(uid, body.hours))
+
+    @app.get("/api/sports", dependencies=signed_in)
+    def sports(lab: Lab = Depends(get_lab)) -> List[Dict[str, Any]]:
+        return lab_call(lab.sports)
+
+    @app.get("/api/today")
+    def today(
+        leagues: Optional[str] = Query(None, max_length=600, pattern=r"^[a-z0-9_]{2,64}(,[a-z0-9_]{2,64}){0,7}$"),
+        day: Optional[str] = Query(None, pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
+        uid: str = Depends(person), lab: Lab = Depends(get_lab),
+    ) -> Dict[str, Any]:
+        """Games across the leagues asked for (default: the person's favourites, else the NBA)."""
+        return lab_call(lambda: lab.today(uid, leagues.split(",") if leagues else None, day))
+
+    @app.get("/api/players/search")
+    def player_search(q: str = Query(min_length=2, max_length=60),
+                      league: Optional[str] = Query(None, pattern=LEAGUE_KEY),
+                      uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> List[Dict[str, Any]]:
+        return lab_call(lambda: lab.player_search(q, league))
+
+    @app.get("/api/players/{league}/{athlete_id}")
+    def player(league: str, athlete_id: str, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        if not re.fullmatch(LEAGUE_KEY, league) or not re.fullmatch(r"[0-9]{1,12}", athlete_id):
+            raise HTTPException(404, "No such player")
+
+        def page() -> Dict[str, Any]:
+            lab.ready(uid)
+            return lab.player(league, athlete_id)
+
+        return lab_call(page)
+
+    @app.post("/api/tickets/price")
+    def price_ticket(body: TicketBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """Price a ticket from the cached odds (only the picks are sent; prices come from the server)."""
+        return lab_call(lambda: lab.price(uid, body.model_dump()))
+
+    @app.post("/api/tickets/analyse")
+    def analyse_ticket(body: TicketBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        return lab_call(lambda: lab.analyse(uid, body.model_dump()))
+
+    @app.post("/api/tickets/build")
+    def build_ticket(body: BuildBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        return lab_call(lambda: lab.build(uid, body.model_dump()))
+
+    @app.post("/api/slips")
+    def save_slip(body: TicketBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        return lab_call(lambda: lab.save_slip(uid, body.model_dump()))
+
+    @app.get("/api/slips")
+    def list_slips(status: Optional[Literal["draft", "saved", "settled", "void"]] = None,
+                   uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> List[Dict[str, Any]]:
+        return lab_call(lambda: lab.list_slips(uid, status))
+
+    @app.get("/api/slips/share/{code}")
+    def shared_slip(code: str, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        if not re.fullmatch(r"[A-Za-z0-9]{4,16}", code):
+            raise HTTPException(404, "No slip with that code")
+        return lab_call(lambda: lab.slip_by_share(code, uid))
+
+    @app.get("/api/slips/{slip_id}")
+    def get_slip(slip_id: int, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        return lab_call(lambda: lab.get_slip(uid, slip_id))
+
+    @app.delete("/api/slips/{slip_id}")
+    def delete_slip(slip_id: int, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, bool]:
+        return lab_call(lambda: lab.delete_slip(uid, slip_id))
+
+    @app.post("/api/rollover/compare")
+    def rollover_compare(body: RolloverBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """Classic, bank-half, pot-and-ladder and flat stakes side by side, before any plan is started."""
+        return lab_call(lambda: lab.rollover_compare(body.model_dump()))
+
+    @app.post("/api/plans")
+    def create_plan(body: PlanBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        return lab_call(lambda: lab.create_plan(uid, body.model_dump()))
+
+    @app.get("/api/plans")
+    def list_plans(status: Optional[Literal["active", "done", "failed", "stopped"]] = None,
+                   uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> List[Dict[str, Any]]:
+        return lab_call(lambda: lab.list_plans(uid, status))
+
+    @app.get("/api/plans/{plan_id}")
+    def get_plan(plan_id: int, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        return lab_call(lambda: lab.get_plan(uid, plan_id))
+
+    @app.post("/api/plans/{plan_id}/day")
+    def plan_day(plan_id: int, body: PlanDayBody, uid: str = Depends(person),
+                 lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """Play the plan's next day on the person's own picks (the stake comes from the plan)."""
+        return lab_call(lambda: lab.plan_day(uid, plan_id, body.model_dump()))
+
+    @app.post("/api/plans/{plan_id}/stop")
+    def stop_plan(plan_id: int, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        return lab_call(lambda: lab.stop_plan(uid, plan_id))
+
+    @app.post("/api/chat")
+    def chat(body: ChatBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """One turn with the AI assistant (it can take a while: it looks things up with the brain's tools)."""
+        return lab_call(lambda: lab.chat(uid, body.model_dump(mode="json")))
+
+    @app.get("/api/chat/threads")
+    def chat_threads(uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> List[Dict[str, Any]]:
+        return lab_call(lambda: lab.threads(uid))
+
+    @app.get("/api/chat/{thread_id}")
+    def chat_messages(thread_id: int, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> List[Dict[str, Any]]:
+        return lab_call(lambda: lab.messages(uid, thread_id))
 
     # Page, stylesheet and script only; no data is served from here
     app.mount("/static", Static(directory=STATIC), name="static")

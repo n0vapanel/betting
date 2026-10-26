@@ -77,6 +77,9 @@ class DashboardService:
         self.store = store
         # The AI analysts (Claude, DeepSeek), when an API key for one is set
         self.analysts = analysts
+        # The per-person features (dashboard/lab.py) set this; its saved bets and rollover plans are
+        # graded with everything else in grade_due
+        self.lab: Any = None
 
     # --- menus -----------------------------------------------------------
 
@@ -508,7 +511,7 @@ class DashboardService:
         return {**self.espn.game_result(row["league"], espn_id), "espn_id": espn_id}
 
     def grade_due(self) -> int:
-        """Score calls and AI predictions on games that have finished; returns how many were graded.
+        """Score calls, AI predictions and saved bets on games that have finished; returns how many were graded.
 
         Runs in whichever process gets to it first (a short lease stops the
         bot and the dashboard grading the same games at once).
@@ -575,6 +578,8 @@ class DashboardService:
                 graded += 1
             except Exception:
                 logging.exception("Couldn't grade the AI's %s ticket for %s", row["tier"], row["day"])
+        if self.lab is not None:
+            graded += self.lab.grade_due(cutoff, give_up)  # saved bets, then the plan days they belong to
         if self.analysts:
             graded += self.analysts.grade_due(self, cutoff, give_up)
         return graded

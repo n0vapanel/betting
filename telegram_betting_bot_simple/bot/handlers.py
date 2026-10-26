@@ -9,7 +9,8 @@ On NBA games 🔮 lets anyone make a call (winner and how sure they are),
 scored after the game next to the AI's score; /start also leads to the
 AI's Safe/Risky/Crazy bets, your calls and the leaderboard, and (when
 PUBLIC_URL is set) to the web app opened as a Telegram Mini App. Each
-screen edits the same message.
+screen edits the same message. Plain text messages go to the AI chat
+(bot/chat.py), which is private to the owner's friends.
 
 Buttons carry what they need (league, game id prefix, pick), so menus
 keep working after a restart, and prices are always re-read from the
@@ -46,6 +47,7 @@ from ..config import Config
 from ..data.leagues import SPORTS, pick_leagues
 from ..engine import calls
 from ..services import build_service
+from .chat import setup_chat
 
 MAX_GAMES = 10
 STAKES = (5, 10, 25, 50)
@@ -285,6 +287,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     rows += [[InlineKeyboardButton("🎯 Single game", callback_data="mode:single"),
               InlineKeyboardButton("🧩 Multi (parlay)", callback_data="mode:multi")],
              [InlineKeyboardButton("🎲 AI bets: Safe · Risky · Crazy", callback_data="bets")],
+             [InlineKeyboardButton("💬 Ask AI", callback_data="ask")],
              [InlineKeyboardButton("🔮 My calls", callback_data="mycalls"),
               InlineKeyboardButton("🏆 Leaderboard", callback_data="board")]]
     if _picks(context):
@@ -294,6 +297,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "🎯 <b>Single</b>: one game at a time, with the AI's prediction and each pick's payout.\n"
         "🧩 <b>Multi</b>: combine picks from different games into one parlay.\n"
         "🎲 <b>AI bets</b>: bets the AI builds at three risk levels.\n"
+        "💬 <b>Ask AI</b>: type any question as a message; our code works out the numbers and the AI explains them.\n"
         "🔮 <b>Calls</b>: open an NBA game and make your own call; after the game you and the AI are "
         "both scored, so you can see who reads the game better."
     ), rows)
@@ -810,6 +814,8 @@ def setup_handlers(application: Application, config: Config) -> None:
     application.add_handler(CallbackQueryHandler(my_calls, pattern=r"^mycalls$"))
     application.add_handler(CallbackQueryHandler(leaderboard, pattern=r"^board$"))
     application.add_handler(CallbackQueryHandler(show_bets, pattern=r"^bets(:(safe|risky|crazy))?$"))
+    # The AI chat: plain messages, its buttons and the Ask AI button (before the catch-all below)
+    setup_chat(application, config)
     # Any other button comes from an older version of the menu
     application.add_handler(CallbackQueryHandler(expired_menu))
     application.add_handler(CommandHandler("help", help_command))

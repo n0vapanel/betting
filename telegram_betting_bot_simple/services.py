@@ -1,23 +1,31 @@
-"""Builds the odds, ESPN and prediction services the same way for the bot and the dashboard."""
+"""Builds the odds, ESPN and prediction services the same way for the bot and the dashboard.
+
+The per-person features (dashboard/lab.py: tickets, saved bets, plans, players and the AI chat) hang off
+the games service as ``service.lab``, so the bot and the dashboard reach them the same way.
+"""
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
-from typing import Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from .ai.desk import AnalystDesk
 from .config import Config
+from .dashboard.lab import DAILY_AI_CENTS, Lab
 from .dashboard.service import DashboardService
 from .data.cache import TTLCache
 from .data.espn_client import EspnClient
+from .data.espn_players import PlayerData
 from .data.odds_service import OddsService
 from .data.store import Store
 
 
 def build_service(config: Config) -> Optional[DashboardService]:
-    """The shared games/predictions/slip service, or None without an Odds API key."""
+    """The shared games/predictions/slip service (with its Lab as ``service.lab``), or None without an
+    Odds API key."""
     if not config.odds_api_key:
         return None
     cache = TTLCache()
@@ -29,8 +37,29 @@ def build_service(config: Config) -> Optional[DashboardService]:
         config.odds_api_key, cache, config.odds_cache_minutes, config.odds_regions,
         store=store, reserve=config.odds_reserve,
     )
-    return DashboardService(odds, EspnClient(cache), ZoneInfo(config.timezone), store=store,
-                            analysts=build_analysts(config, store))
+    espn = EspnClient(cache)
+    service = DashboardService(odds, espn, ZoneInfo(config.timezone), store=store,
+                               analysts=build_analysts(config, store))
+    lab = Lab(service, store, PlayerData(espn), public_url=config.public_url,
+              daily_cents=getattr(config, "ai_chat_daily_cents", DAILY_AI_CENTS))
+    lab.assistant = build_chat_assistant(config, lab, store)
+    return service
+
+
+def build_chat_assistant(config: Config, lab: Lab, store: Store) -> Optional[Any]:
+    """The AI chat assistant, or None without ANTHROPIC_API_KEY (or if it can't start: the app works without it)."""
+    if not config.anthropic_api_key:
+        return None
+    try:
+        from .ai.assistant import build_assistant  # the SDK is only needed with a key
+    except ImportError as exc:
+        logging.warning("The AI chat assistant isn't available (%s); the app runs without it", exc)
+        return None
+    try:
+        return build_assistant(config, lab, store)
+    except Exception:
+        logging.exception("The AI chat assistant couldn't start; the app runs without it")
+        return None
 
 
 def build_analysts(config: Config, store: Store) -> Optional[AnalystDesk]:
