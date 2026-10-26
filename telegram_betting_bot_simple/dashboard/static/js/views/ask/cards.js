@@ -1,4 +1,5 @@
-// Ask AI's cards: the tickets, rollover plans and players a reply carries.
+// Ask AI's cards: the tickets, rollover plans and players a reply carries (a pasted slip's card is
+// ask/pasted.js).
 //
 // The server builds every card in code from its tool results (ai/tools.py: ticket_card, plan_card,
 // player_card), so each number here is the brain's: these functions only lay them out. A ticket card's
@@ -7,6 +8,7 @@
 import { esc, pct, chanceText, money, signedMoney, priceText, shortName, timeLabel, ago, badge, injuryBadge, notice, explain } from "../../ui.js";
 import { slip } from "../../app.js";
 import { icon } from "../../icons.js";
+import { pastedCardHtml } from "./pasted.js";
 
 // --- tickets: legs and bodies -------------------------------------------------------------------------
 
@@ -335,9 +337,10 @@ export function playerCardHtml(card) {
   </article>`;
 }
 
-/** Any card by its type ("ticket", "plan", "player"); unknown types show their title only. */
+/** Any card by its type ("ticket", "plan", "player", "pasted"); unknown types show their title only. */
 export function cardHtml(card, key, options = {}) {
   if (card?.type === "ticket" && card.ticket) return ticketCardHtml(card, key, options);
+  if (card?.type === "pasted" && card.pasted) return pastedCardHtml(card, key, options);
   if (card?.type === "plan" && card.compare) return planCardHtml(card);
   if (card?.type === "player") return playerCardHtml(card);
   return `<div class="card ask-card"><b>${esc(card?.title || "Card")}</b></div>`;

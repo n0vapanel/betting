@@ -33,9 +33,20 @@ across the Telegram Mini App, the bot and a browser ("tg:<id>" or "web:<id>"):
   so a new X-Player id can't shed any of them. Age is confirmed in each
   browser, and slips, plans, chats and calls stay each browser's own.
 
+- A pasted bet slip (engine/pasted.py reads it, or the AI does) is matched
+  here to the games and prices the app knows, leg by leg, and priced at the
+  person's own odds: a matched leg takes the board's margin-free chance (and
+  the model's), a leg on another line, in another market or not on any board
+  takes the person's price less a typical margin, and says so. The read is
+  checked against the slip (the bookmaker's stated return, odds that couldn't
+  be read, odds not in the pasted text) and the person confirms a doubtful
+  one. Only what was read is kept, in the person's own rows; never a picture.
+
 Odds quota is precious (about 500 requests a month, 3 per league fetch), so
 only the leagues a person asks for are loaded, leagues out of season are
-never fetched, and every board comes from the shared 2-hour cache.
+never fetched, and every board comes from the shared 2-hour cache. A pasted
+slip may load at most three leagues not already cached, never below the odds
+service's reserve.
 
 Money is Decimal in whole cents, rounded once; chances are floats.
 """
@@ -43,6 +54,7 @@ Money is Decimal in whole cents, rounded once; chances are floats.
 from __future__ import annotations
 
 import datetime
+import difflib
 import functools
 import logging
 import math
@@ -55,11 +67,14 @@ from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo, available_timezones
 
+from pydantic import ValidationError
+
 from ..data.espn_client import ESPN_DAY_TZ, LEAGUES as ESPN_LEAGUES, normalize_team
 from ..data.espn_players import PlayerData, hit_rates
+from ..data.leagues import POPULAR_LEAGUES
 from ..data.store import MAX_CENTS, Store
-from ..engine import bets, calls, rollover, target, tickets
-from ..engine.odds_math import decimal_to_american, format_american
+from ..engine import bets, calls, pasted, rollover, target, tickets
+from ..engine.odds_math import decimal_to_american, format_american, remove_vig
 from ..engine.tickets import TicketLeg, chance_label, one_in
 from .service import AI_LEAGUES, CallRejected, DashboardService, NotFound
 
@@ -143,23 +158,26 @@ def _money(cents: Optional[int]) -> Optional[str]:
     return None if cents is None else str(_dollars(cents))
 
 
-def _say_dollars(amount: Decimal) -> str:
-    """$10, $1,000 or $10.50 for messages."""
+def _say_dollars(amount: Decimal, currency: Optional[str] = CURRENCY) -> str:
+    """$10, $1,000 or $10.50 for messages; another currency as a pasted slip wrote it (£10, NGN 1,000, or a
+    bare 10 when the slip named none)."""
     amount = amount.quantize(CENTS)
-    if amount == amount.to_integral_value():
-        return f"{CURRENCY}{int(amount):,}"
-    return f"{CURRENCY}{amount:,.2f}"
+    number = f"{int(amount):,}" if amount == amount.to_integral_value() else f"{amount:,.2f}"
+    symbol = currency or ""
+    if len(symbol) > 1 and symbol[-1].isalpha():  # a code or letters: "NGN 1,000", "KSh 200"
+        return f"{symbol} {number}"
+    return f"{symbol}{number}"
 
 
 def _say(cents: int) -> str:
     return _say_dollars(_dollars(cents))
 
 
-def _say_signed(value: Optional[str]) -> str:
+def _say_signed(value: Optional[str], currency: Optional[str] = CURRENCY) -> str:
     """An expected result like "-$1.20" or "+$0.40" from a money string."""
     amount = Decimal(value)
     sign = "-" if amount < 0 else "+" if amount > 0 else ""
-    return f"{sign}{_say_dollars(abs(amount))}"
+    return f"{sign}{_say_dollars(abs(amount), currency)}"
 
 
 def _floor_cents(amount: Decimal) -> Decimal:
@@ -458,13 +476,181 @@ def replay(plan: Mapping[str, Any]) -> Run:
     return run
 
 
+# --- pasted slips: matching a slip's words to the boards ------------------------------------------
+
+# Pasted slips (engine/pasted.py reads them; the Lab matches and prices them at the person's own odds)
+NBA = "basketball_nba"
+GAMES_CACHE_SECONDS = 60  # DashboardService.games keeps a league's cards this long
+PASTE_LOADS = 3  # leagues not already cached that one pasted slip may load (each fetch costs odds quota)
+FETCH_COST = 3  # quota one league's odds fetch costs (moneyline, spreads and totals)
+SAME_START = 36 * 3600  # a slip's start time and a board's game this close are the same game
+NEXT_GAME = 7 * 24 * 3600  # without a start time: the next game between those teams within a week
+LIVE_SINCE = 12 * 3600  # a game that started this long ago may still be on a board, in play
+TEAM_MATCH = 0.85  # how close a slip's team name must come to a board's (paste_team_score)
+BETTER_BY = Decimal("0.02")  # the board's best price beats the person's by this much: say so
+FAR_ABOVE_BOARD = Decimal("1.25")  # the person's odds this many times the board's best: a misread? (asked)
+DEFAULT_PASTE_STAKE = Decimal("10")
+UNKNOWN_START = "2999-01-01T00:00:00Z"  # a leg whose start isn't known is never counted as started
+NO_SUCH_PASTE = "No such pasted slip"
+PASTE_STATS = {"points": "pts", "rebounds": "reb", "assists": "ast", "threes": "fg3m", "steals": "stl",
+               "blocks": "blk", "turnovers": "tov", "pra": "pra"}
+ESPN_PROP_STATS = {"pts": "pts", "reb": "reb", "ast": "ast", "fg3m": "fg3m", "stl": "stl", "blk": "blk",
+                   "tov": "tov", "pra": "pts+reb+ast"}
+STAT_WORDS = {"pts": "points", "reb": "rebounds", "ast": "assists", "fg3m": "threes", "stl": "steals",
+              "blk": "blocks", "tov": "turnovers", "pra": "points + rebounds + assists"}
+# Short names slips use that share no word with the odds feed's name
+TEAM_ALIASES = {
+    "man city": "manchester city", "man utd": "manchester united", "man united": "manchester united",
+    "spurs": "tottenham hotspur", "wolves": "wolverhampton wanderers", "psg": "paris saint germain",
+    "paris sg": "paris saint germain", "inter": "inter milan", "internazionale": "inter milan",
+    "barca": "barcelona", "atletico": "atletico madrid", "atleti": "atletico madrid", "bayern": "bayern munich",
+    "bvb": "borussia dortmund", "dortmund": "borussia dortmund", "gladbach": "borussia monchengladbach",
+    "leverkusen": "bayer leverkusen", "juve": "juventus", "newcastle": "newcastle united",
+    "west ham": "west ham united", "forest": "nottingham forest", "nottm forest": "nottingham forest",
+    "villa": "aston villa", "palace": "crystal palace", "sixers": "philadelphia 76ers",
+    "niners": "san francisco 49ers", "cavs": "cleveland cavaliers", "mavs": "dallas mavericks",
+    "wolves nba": "minnesota timberwolves", "pels": "new orleans pelicans", "blazers": "portland trail blazers",
+    "habs": "montreal canadiens", "leafs": "toronto maple leafs", "bolts": "tampa bay lightning",
+}
+# Words many teams share: never enough on their own to say which team ("City", "United", "State")
+GENERIC_TEAM_WORDS = {"city", "united", "town", "county", "rovers", "athletic", "wanderers", "albion", "real",
+                      "sporting", "club", "de", "the", "inter", "st", "saint", "state", "university", "college",
+                      "team", "utd", "and", "los", "angeles", "new", "york", "san", "fc"}
+
+
+def _word_matches(asked: str, named: str) -> Optional[str]:
+    """How one word of a slip's team name matches one of a board's: "exact", "prefix" ("Man" for
+    "Manchester", "BOS" for "Boston") or "close" (a typo), else None."""
+    if asked == named:
+        return "exact"
+    if len(asked) >= 2 and named.startswith(asked):
+        return "prefix"
+    if len(asked) >= 4 and difflib.SequenceMatcher(None, asked, named).ratio() >= 0.85:
+        return "close"
+    return None
+
+
+def _team_score(asked: str, named: str) -> float:
+    if asked == named:
+        return 1.0
+    words, names = asked.split(), named.split()
+    if any(word not in GENERIC_TEAM_WORDS for word in words):
+        kinds = [next((kind for kind in (_word_matches(word, name) for name in names) if kind), None)
+                 for word in words]
+        if all(kind == "exact" for kind in kinds):
+            return 0.95
+        if all(kinds):
+            return 0.92
+        if words[-1] == names[-1] and words[-1] not in GENERIC_TEAM_WORDS:
+            return 0.88  # the nickname ("NY Knicks", "Celtics")
+    ratio = difflib.SequenceMatcher(None, asked, named).ratio()
+    return ratio * 0.95 if ratio >= 0.9 else ratio * 0.5
+
+
+def paste_team_score(asked: Optional[str], team: Optional[str]) -> float:
+    """How well a team as a slip writes it ("BOS Celtics", "Man City", "Spurs", "Celtcs") names a board's team
+    ("Boston Celtics"), from 0 to 1; TEAM_MATCH or more is the same team."""
+    query, name = normalize_team(asked or ""), normalize_team(team or "")
+    if not query or not name:
+        return 0.0
+    options = {query, TEAM_ALIASES.get(query, query)}
+    return max(_team_score(option, name) for option in options)
+
+
+def _person_name(name: Optional[str]) -> List[str]:
+    words = normalize_team(name or "").split()
+    return [word for word in words if word not in ("jr", "sr", "ii", "iii", "iv")]
+
+
+def paste_player_score(asked: Optional[str], name: Optional[str]) -> float:
+    """How well a player as a slip writes him ("LeBron James", "L. James", "Lebron") matches ESPN's name."""
+    wanted, found = _person_name(asked), _person_name(name)
+    if not wanted or not found:
+        return 0.0
+    if wanted == found:
+        return 1.0
+    if len(wanted) >= 2 and len(wanted[0]) == 1 and wanted[-1] == found[-1] and found[0].startswith(wanted[0]):
+        return 0.9  # "L. James"
+    return difflib.SequenceMatcher(None, " ".join(wanted), " ".join(found)).ratio()
+
+
+def _is_draw(selection: Optional[str]) -> bool:
+    return (selection or "").strip().lower() in ("draw", "the draw", "tie", "x")
+
+
+def _leg_teams(leg: pasted.ExtractedLeg) -> List[str]:
+    """The team names a leg gives to find its game: both sides of its event, else the team it picked."""
+    sides = pasted.event_sides(leg.event_text)
+    if sides:
+        return [sides[0], sides[1]]
+    picked = (leg.selection or "").strip()
+    if leg.market in ("moneyline", "spread") and picked and not _is_draw(picked) and picked.lower() not in (
+            pasted.HOME_WORDS | pasted.AWAY_WORDS | {"over", "under"}):
+        return [picked]
+    return []
+
+
+def _margin_kind(leg: pasted.ExtractedLeg, league: Optional[str], card: Optional[Mapping[str, Any]]) -> str:
+    """Which typical margin estimates this leg's chance (engine/pasted.TYPICAL_MARGIN)."""
+    if leg.market == "moneyline":
+        soccer = (league or "").startswith("soccer_") or pasted.sport_prefixes(leg.sport_hint) == ("soccer_",)
+        three = soccer or _is_draw(leg.selection) or (card is not None and _three_way(card))
+        return "moneyline_3way" if three else "moneyline"
+    return leg.market if leg.market in pasted.TYPICAL_MARGIN else "other"
+
+
+def _paste_entry(status: str, note: str, kind: str, league: Optional[str] = None,
+                 card: Optional[Mapping[str, Any]] = None, now: Optional[float] = None) -> Dict[str, Any]:
+    """One leg's match as stored with the slip: the game found (if any), its chances and where they came from."""
+    start = card.get("start") if card else None
+    begun = _parse_time(start) if start else None
+    live = bool(card and (card.get("live") or (now is not None and begun is not None and begun.timestamp() <= now)))
+    return {"status": status, "note": note, "kind": kind, "league": league, "ref": None,
+            "game": f"{card['away']} @ {card['home']}" if card else None, "start": start, "live": live,
+            "group": str(card["id"]) if card else None, "market_chance": None, "ai_chance": None, "push": 0.0,
+            "chance_source": "estimated", "best_price": None, "better_price": False, "board": None}
+
+
+def _margin_words(kind: str) -> str:
+    return _pct(pasted.TYPICAL_MARGIN.get(kind, pasted.TYPICAL_MARGIN["other"]))
+
+
+def _line_words(market: str, side: str, point: Optional[float]) -> str:
+    """A line as the app writes it: "-4.5", "+3", "PK", "Over 224.5"."""
+    if point is None:
+        return "no line"
+    if market in ("totals", "total"):
+        return f"{side.title()} {point:g}"
+    return "PK" if point == 0 else f"{point:+g}"
+
+
+def _paste_label(leg: pasted.ExtractedLeg) -> str:
+    """How a pasted leg reads on the card and the ticket: "Boston Celtics -3.5", "Over 231.5",
+    "LeBron James over 27.5 points", "Draw"."""
+    selection = leg.selection or leg.raw
+    if leg.market == "spread" and leg.line is not None:
+        return f"{selection} {_line_words('spreads', '', leg.line)}"[:MAX_LABEL]
+    if leg.market == "total" and leg.line is not None:
+        return f"{(leg.over_under or selection).title()} {leg.line:g}"[:MAX_LABEL]
+    if leg.market == "player_prop" and leg.line is not None and leg.over_under:
+        stat = f" {leg.prop_stat}" if leg.prop_stat else ""
+        return f"{selection} {leg.over_under} {leg.line:g}{stat}"[:MAX_LABEL]
+    if leg.market == "moneyline" and not _is_draw(selection) and not re.search(r"\bwin$", selection, re.I):
+        return f"{selection} to win"[:MAX_LABEL]
+    return selection[:MAX_LABEL]
+
+
+MAX_LABEL = 90
+
+
 # --- the lab --------------------------------------------------------------------------------------
 
 class Lab(Gates):
     """Per-person features on top of the games service (see the module docstring).
 
     ``assistant`` is the Claude assistant (ai/assistant.py) or None; it needs
-    ``explain(uid, fact_sheet)``, ``reply(uid, thread_id, message, request, slip)`` and ``credits(uid)``.
+    ``explain(uid, fact_sheet)``, ``reply(uid, thread_id, message, request, slip)``, ``credits(uid)`` and,
+    for pasted slips, ``read_slip(uid, thread_id=, text=, image=, media_type=)``.
     """
 
     def __init__(self, service: DashboardService, store: Optional[Store] = None, players: Optional[PlayerData] = None,
@@ -1003,7 +1189,8 @@ class Lab(Gates):
                                  f"{_pct(home_win if side == 'home' else 1 - home_win)} to win.")
         return notes
 
-    def _alternatives(self, priced: Mapping[str, Any], legs: Sequence[TicketLeg]) -> List[Dict[str, Any]]:
+    def _alternatives(self, priced: Mapping[str, Any], legs: Sequence[TicketLeg],
+                      currency: Optional[str] = CURRENCY) -> List[Dict[str, Any]]:
         """Other ways to play the same picks, priced the same way: drop the weakest leg, split into singles
         (same total stake), and for 4+ legs a round robin by 2s and by 3s (same total stake)."""
         n = len(legs)
@@ -1016,26 +1203,27 @@ class Lab(Gates):
         if kind in ("multi", "single") and weakest is not None:
             rest = [leg for i, leg in enumerate(legs) if i != weakest]
             out.append(self._alternative(f"Drop the weakest leg ({legs[weakest].label})", rest, kind, unit, None,
-                                         priced))
+                                         priced, currency))
         if kind != "single":
             each = _floor_cents(total / n)
             if each >= CENTS:
-                out.append(self._alternative(f"Split into {n} singles of {_say_dollars(each)}", legs, "single", each,
-                                             None, priced))
+                out.append(self._alternative(f"Split into {n} singles of {_say_dollars(each, currency)}", legs,
+                                             "single", each, None, priced, currency))
         if kind == "multi" and 4 <= n <= tickets.MAX_COMBO_LEGS:
             for k in (2, 3):
                 count = math.comb(n, k)
                 each = _floor_cents(total / count)
                 if each >= CENTS:
-                    out.append(self._alternative(f"Round robin by {k}s: {count} bets of {_say_dollars(each)}", legs,
-                                                 "round_robin", each, k, priced))
+                    out.append(self._alternative(f"Round robin by {k}s: {count} bets of "
+                                                 f"{_say_dollars(each, currency)}", legs, "round_robin", each, k,
+                                                 priced, currency))
         return [alt for alt in out if alt["ticket"]["valid"]]
 
     def _alternative(self, title: str, legs: Sequence[TicketLeg], kind: str, stake: Decimal, k: Optional[int],
-                     base: Mapping[str, Any]) -> Dict[str, Any]:
+                     base: Mapping[str, Any], currency: Optional[str] = CURRENCY) -> Dict[str, Any]:
         ticket = self._priced(legs, kind, stake, k)
         return {"title": title, "refs": [_ref_of(view) for view in ticket["legs"]], "ticket": ticket,
-                "summary": _versus(ticket, base)}
+                "summary": _versus(ticket, base, currency)}
 
     def build(self, uid: str, body: Mapping[str, Any]) -> Dict[str, Any]:
         """"Stake X, want Y back": target.build_for_target over the chosen leagues' boards, with refs on every
@@ -1656,10 +1844,870 @@ class Lab(Gates):
             raise NotFound("No such chat")
         return [{**message, "at": _iso(message.get("ts"))} for message in self.store.messages(uid, thread_id)]
 
+    # --- pasted bet slips: read, matched to the boards, priced at the person's own odds --------------
+
+    def read_pasted(self, uid: str, extraction: Any, source: str, text: Optional[str] = None,
+                    thread_id: Optional[int] = None) -> Dict[str, Any]:
+        """Keep a slip someone pasted, as read (by the AI or by basic_parse), with each leg matched to the games
+        and prices the app knows, and return its PastedView.
+
+        The age and break gates apply (not the pause on picks: reading and the code's numbers stay open then,
+        as on the Build screen). What was read is untrusted: it is checked and cut to size here, its odds
+        and amounts are parsed by code, and at most PASTE_LOADS leagues not already cached are loaded for it.
+        """
+        user = self.ready(uid)
+        if source not in pasted.SOURCES:
+            raise CallRejected(f"source is one of {', '.join(pasted.SOURCES)}")
+        slip = self._checked_slip(extraction)
+        if thread_id is not None and self.store.thread(uid, thread_id) is None:
+            raise NotFound("That chat doesn't exist")
+        kept = pasted.clean_text(text)[:pasted.MAX_PASTE_CHARS] if text and str(text).strip() else None
+        matches = self._match_slip(user, slip)
+        try:
+            pasted_id = self.store.save_pasted(uid, source, slip.model_dump(mode="json"), matches, text=kept,
+                                               thread_id=thread_id, now=self._now())
+        except ValueError as exc:
+            raise CallRejected(str(exc)) from None
+        return self._paste_state(self.store.pasted(uid, pasted_id), refresh=False)[2]
+
+    def read_basic(self, uid: str, text: str, thread_id: Optional[int] = None) -> Dict[str, Any]:
+        """The free, code-only reader (engine/pasted.basic_parse) and read_pasted(source="basic"). Refused with
+        the format it reads when no bet is found."""
+        self.ready(uid)
+        if not isinstance(text, str) or not text.strip():
+            raise CallRejected("Paste the text of your bet slip")
+        if len(text) > pasted.MAX_PASTE_CHARS:
+            raise CallRejected(f"Paste up to {pasted.MAX_PASTE_CHARS:,} characters of the slip")
+        slip = pasted.basic_parse(text)
+        if slip is None:
+            raise CallRejected(pasted.BASIC_FORMAT_HELP)
+        return self.read_pasted(uid, slip, "basic", text=text, thread_id=thread_id)
+
+    def read_free(self, uid: str, text: str, thread_id: Optional[int] = None) -> Dict[str, Any]:
+        """POST /api/pasted: the free reader, then the code's analysis: {pasted, analysis} and, after a warning
+        sign in the pasted text, the support message ("support"). The chat's warning-sign rules run on pasted
+        text too, first: a pasted note about losses pauses picks like a chat message does."""
+        support = self._screen_paste(uid, text, thread_id)
+        view = self.read_basic(uid, text, thread_id=thread_id)
+        # No leg with odds of its own (a same-game parlay): what was read, and the view's warning says why
+        priced = any(leg["odds"] is not None for leg in view["legs"])
+        result: Dict[str, Any] = {"pasted": view, "analysis": self.analyse_pasted(uid, view["id"]) if priced else None}
+        if support:
+            result["support"] = support
+        return result
+
+    def chat_slip(self, uid: str, thread_id: Optional[int] = None, text: Optional[str] = None,
+                  image: Optional[str] = None) -> Dict[str, Any]:
+        """POST /api/chat/slip: a pasted slip (text and/or a base64 screenshot) for the AI to read and talk
+        about (assistant.read_slip). The screenshot is checked here (base64, size, a JPEG, PNG or WebP by its
+        first bytes) and is never stored."""
+        if self.assistant is None:
+            raise CallRejected(NO_CHAT)
+        text = text if isinstance(text, str) and text.strip() else None
+        if text is not None and len(text) > pasted.MAX_PASTE_CHARS:
+            raise CallRejected(f"Paste up to {pasted.MAX_PASTE_CHARS:,} characters of the slip")
+        data = media_type = None
+        if image:
+            try:
+                data, media_type = pasted.decode_image(image)
+            except ValueError as exc:
+                raise CallRejected(str(exc)) from None
+        if text is None and data is None:
+            raise CallRejected("Paste the text of your bet slip or add a screenshot of it")
+        self.user(uid)
+        return self.assistant.read_slip(uid, thread_id=thread_id, text=text, image=data, media_type=media_type)
+
+    def pasted_view(self, uid: str, pasted_id: int) -> Dict[str, Any]:
+        """A pasted slip again, its matched legs re-priced from the boards already cached (never a new load).
+        Someone else's id is a NotFound before any gate, so nothing about it shows."""
+        row = self._pasted_row(uid, pasted_id)
+        self.ready(uid)
+        return self._paste_state(row)[2]
+
+    def analyse_pasted(self, uid: str, pasted_id: int, drop: Iterable[int] = (), stake: Any = None,
+                       ticket_type: Optional[str] = None, k: Optional[int] = None,
+                       system: Optional[str] = None) -> Dict[str, Any]:
+        """A pasted slip priced at the person's own odds, all in code: the ticket (engine/tickets.price_ticket
+        with each leg's chance from the board, the model or an estimate), facts about each leg and other ways
+        to play it. ``drop`` holds 1-based legs to leave out, ``stake`` is per bet (default: the slip's own, or
+        10) and ``ticket_type`` defaults to the slip's kind of bet. Legs whose odds couldn't be read are left
+        out with a warning. While picks are paused the numbers stay, without alternatives."""
+        row = self._pasted_row(uid, pasted_id)
+        user = self.ready(uid)
+        slip, entries, view = self._paste_state(row)
+        count = len(view["legs"])
+        dropped = self._paste_drop(drop, count)
+        kept = [leg for leg in view["legs"] if leg["index"] not in dropped and leg["odds"] is not None]
+        if not any(leg["odds"] is not None for leg in view["legs"]):
+            raise CallRejected(pasted.NO_LEG_ODDS)
+        if not kept:
+            raise CallRejected("Keep at least one leg whose odds were read")
+        kind, k, system, type_note = self._paste_ticket_type(slip, len(kept), ticket_type, k, system)
+        unit, stake_note = self._paste_stake(stake, view)
+        legs = [self._paste_ticket_leg(row["id"], slip.legs[leg["index"] - 1], entries[leg["index"] - 1], leg,
+                                       slip.bookmaker) for leg in kept]
+        priced = self._priced(legs, kind, unit, k, system)
+        for leg_view, leg in zip(priced["legs"], kept):
+            leg_view["slip_index"] = leg["index"]
+            if leg_view.get("start") == UNKNOWN_START:
+                leg_view["start"] = None
+        warnings = [f"Leg {leg['index']} ({leg['label']}): its odds couldn't be read, so it is left out."
+                    for leg in view["legs"] if leg["odds"] is None and leg["index"] not in dropped]
+        priced["warnings"] = warnings + [note for note in (type_note, stake_note) if note] + list(priced["warnings"])
+        currency = view["currency"]
+        cards = self._paste_cards(entries)
+        by_index = {leg["index"]: leg_view for leg_view, leg in zip(priced["legs"], kept)}
+        notes = [{"index": leg["index"], "label": leg["label"], "in_ticket": leg["index"] in by_index,
+                  "notes": self._paste_notes(leg, entries[leg["index"] - 1], by_index.get(leg["index"]),
+                                             cards.get(str((entries[leg["index"] - 1].get("ref") or {}).get("id"))),
+                                             leg["index"] in dropped)}
+                 for leg in view["legs"]]
+        until = paused_until(user, self._now())
+        alternatives: List[Dict[str, Any]] = []
+        if until is None and priced["valid"]:
+            alternatives = self._paste_alternatives(priced, legs, kept, entries, dropped, currency)
+        result = {"pasted": view, "ticket": priced, "legs": notes, "alternatives": alternatives,
+                  "drop": sorted(dropped), "stake": _text_money(unit), "ticket_type": priced["type"], "k": priced["k"],
+                  "system": priced["system"], "currency": currency, "paused_until": _iso(until)}
+        if until is not None:
+            result["pause_note"] = (f"Picks are paused until {self._when(until)} after an earlier message about "
+                                    "losses or money worries. The odds and the maths stay open.")
+        return result
+
+    def pasted_fact_sheet(self, analysis: Mapping[str, Any]) -> Dict[str, Any]:
+        """Everything Claude may say about a pasted slip's analysis: Lab.fact_sheet of its ticket (each leg's
+        notes matched by the ticket's own leg index), in the slip's currency, plus what was read from the slip
+        (odds as written, lines, the stake and the stated return) and how each leg matched."""
+        ticket = analysis["ticket"]
+        by_slip = {item["index"]: item["notes"] for item in analysis["legs"]}
+        legs = [{"index": view["index"], "notes": by_slip.get(view.get("slip_index"), [])} for view in ticket["legs"]]
+        sheet = self.fact_sheet(ticket, legs, analysis["alternatives"])
+        view = analysis["pasted"]
+        sheet["currency"] = view.get("currency") or ""
+        sheet["pasted"] = {key: view.get(key) for key in (
+            "bookmaker", "bet_type", "stake", "total_stake", "stated_return", "computed_return", "return_basis",
+            "return_check", "needs_confirmation", "confirm_reasons", "warnings")}
+        sheet["pasted"]["legs"] = [
+            {"index": leg["index"], "label": leg["label"], "odds_as_written": leg["odds_text"], "odds": leg["odds"],
+             "line": leg["line"], "status": leg["match"]["status"], "game": leg["match"]["game"],
+             "note": leg["match"]["note"], "chance_source": leg["chance_source"],
+             "market_chance": leg["market_chance"], "ai_chance": leg["ai_chance"], "best_price": leg["best_price"],
+             "better_price": leg["better_price"]}
+            for leg in view["legs"]]
+        sheet.update(drop=list(analysis["drop"]), stake=analysis["stake"], paused=analysis.get("paused_until") is not None)
+        return sheet
+
+    # --- pasted slips: reading what was read -----------------------------------------------------------
+
+    @staticmethod
+    def _checked_slip(extraction: Any) -> pasted.Extraction:
+        """The read checked again in code (cut to size, odds and markets normalised): refused when it has no
+        leg or more than MAX_LEGS."""
+        if isinstance(extraction, pasted.Extraction):
+            extraction = extraction.model_dump()
+        if not isinstance(extraction, Mapping):
+            raise CallRejected("Nothing was read from that slip")
+        try:
+            slip = pasted.Extraction.model_validate(dict(extraction))
+        except ValidationError:
+            raise CallRejected("That slip couldn't be read: try pasting its text again") from None
+        slip.legs = [leg for leg in slip.legs if (leg.selection or leg.raw).strip()]
+        if not slip.legs:
+            raise CallRejected("No bets were found on that slip")
+        if len(slip.legs) > pasted.MAX_LEGS:
+            raise CallRejected(f"That slip has more than {pasted.MAX_LEGS} legs; the app reads up to "
+                               f"{pasted.MAX_LEGS}.")
+        return slip
+
+    def _pasted_row(self, uid: str, pasted_id: Any) -> Dict[str, Any]:
+        if isinstance(pasted_id, bool) or not isinstance(pasted_id, int):
+            raise NotFound(NO_SUCH_PASTE)
+        row = self.store.pasted(uid, pasted_id)
+        if row is None:
+            raise NotFound(NO_SUCH_PASTE)
+        return row
+
+    def _screen_paste(self, uid: str, text: Any, thread_id: Optional[int]) -> Optional[str]:
+        """The chat's warning-sign rules on pasted text (ai/assistant.py's code rules): a strong sign pauses picks
+        for a day and is logged for the owner, as in the chat; returns the support message, or None."""
+        try:
+            from ..ai.assistant import note_warning_sign, risk_flags, support_message
+        except ImportError:  # the assistant's module is part of the app; without it there are no rules to run
+            log.exception("The warning-sign rules couldn't be loaded")
+            return None
+        flags = risk_flags(str(text or "")[:pasted.MAX_PASTE_CHARS])
+        if not flags:
+            return None
+        note_warning_sign(self, uid, flags, "pasted_slip", str(text), thread_id=thread_id, now=self._now())
+        return support_message(flags)
+
+    # --- pasted slips: matching -------------------------------------------------------------------------
+
+    def _person_tz(self, user: Mapping[str, Any]) -> datetime.tzinfo:
+        name = (user.get("settings") or {}).get(TIMEZONE_SETTING)
+        try:
+            return ZoneInfo(name) if name else self.service.tz
+        except (ValueError, KeyError, OSError):
+            return self.service.tz
+
+    def _saved_odds(self) -> Dict[str, float]:
+        """When each league's odds were last saved by either process (no quota), or {} without a store."""
+        store = getattr(self.service.odds, "store", None)
+        try:
+            return dict(store.odds_fetched_at()) if store is not None and hasattr(store, "odds_fetched_at") else {}
+        except Exception:
+            log.warning("Couldn't read when the odds were saved")
+            return {}
+
+    def _quota(self) -> Tuple[Optional[int], int]:
+        odds = self.service.odds
+        try:
+            remaining = (odds.quota or {}).get("remaining")
+        except Exception:
+            remaining = None
+        return remaining, int(getattr(odds, "reserve", 50) or 0)
+
+    def _odds_cached(self, league: str, saved: Optional[Mapping[str, float]] = None) -> bool:
+        """Whether a league's odds can be shown without a fetch (no quota spent): loaded within the odds
+        service's cache time, saved that recently by the other process, or saved at all while the quota is
+        below its reserve (saved odds are served then, never fetched)."""
+        cards = getattr(self.service, "cache", None)
+        age = cards.age(("games", league)) if cards is not None else None
+        if age is not None and age < GAMES_CACHE_SECONDS:  # the games service's own copy of the board
+            return True
+        odds = self.service.odds
+        ttl = float(getattr(odds, "odds_ttl", 7200) or 7200)
+        now = time.time()  # the odds service's own clock
+        loaded = odds.odds_loaded_at(league)
+        if loaded is not None and now - loaded < ttl:
+            return True
+        fetched = (self._saved_odds() if saved is None else saved).get(league)
+        if fetched is None:
+            return False
+        remaining, reserve = self._quota()
+        return now - fetched < ttl or (remaining is not None and remaining < reserve)
+
+    def _paste_loads(self) -> int:
+        """How many uncached leagues one pasted slip may load: PASTE_LOADS, fewer when the quota would fall
+        below the odds service's reserve."""
+        remaining, reserve = self._quota()
+        if remaining is None:
+            return PASTE_LOADS
+        return max(0, min(PASTE_LOADS, (remaining - reserve) // FETCH_COST))
+
+    def _match_slip(self, user: Mapping[str, Any], slip: pasted.Extraction) -> List[Dict[str, Any]]:
+        boards = _PasteBoards(self, user, self._paste_loads())
+        tz = self._person_tz(user)
+        now = self._now()
+        matches = []
+        for leg in slip.legs:
+            odds = pasted.parse_odds(leg.odds_text)
+            try:
+                entry = self._match_leg(leg, odds, boards, now, tz)
+            except Exception:
+                log.exception("Couldn't match a pasted leg")
+                entry = self._estimate(_paste_entry("not_found", "This leg couldn't be matched just now: its chance is "
+                                                    "estimated from your odds.", _margin_kind(leg, None, None)), odds)
+            if odds is None:
+                entry["status"] = "no_odds"
+                entry["note"] = "The odds for this leg couldn't be read, so it is left out of the numbers."
+            matches.append(entry)
+        return matches
+
+    def _estimate(self, entry: Dict[str, Any], odds: Optional[Decimal]) -> Dict[str, Any]:
+        """The person's price less a typical margin as the leg's chance (engine/pasted.estimated_chance)."""
+        entry["ai_chance"] = None
+        entry["push"] = 0.0
+        entry["chance_source"] = "estimated"
+        entry["market_chance"] = pasted.estimated_chance(odds, entry["kind"]) if odds is not None else None
+        return entry
+
+    def _match_leg(self, leg: pasted.ExtractedLeg, odds: Optional[Decimal], boards: "_PasteBoards", now: float,
+                   tz: datetime.tzinfo) -> Dict[str, Any]:
+        moment = datetime.datetime.fromtimestamp(now, datetime.timezone.utc)
+        start = pasted.parse_start(leg.start_text, moment, tz)
+        if leg.market == "player_prop":
+            return self._match_prop(leg, odds, boards, now, start)
+        kind = _margin_kind(leg, None, None)
+        estimated = f"its chance is estimated from your odds less a typical {_margin_words(kind)} bookmaker margin"
+        names = _leg_teams(leg)
+        status = "unsupported" if leg.market == "other" else "not_found"
+        if not names:
+            return self._estimate(_paste_entry(status, f"The slip doesn't name this leg's game, so {estimated}.",
+                                               kind), odds)
+        leagues = boards.leagues_for(leg)
+        for league in leagues:
+            board = boards.get(league)
+            card = self._paste_card(board, names, now, start) if board is not None else None
+            if card is None:
+                continue
+            kind = _margin_kind(leg, league, card)
+            if leg.market == "other":
+                note = ("The app prices moneylines, spreads and totals only, so this market's chance is estimated "
+                        f"from your odds less a typical {_margin_words(kind)} margin.")
+                return self._estimate(_paste_entry("unsupported", note, kind, league, card, now), odds)
+            return self._match_market(leg, odds, league, card, kind, now)
+        why = boards.why_not(leagues)
+        return self._estimate(_paste_entry(status, f"Not found on the app's boards{why}, so {estimated}.", kind,
+                                           leagues[0] if len(leagues) == 1 else None), odds)
+
+    def _paste_card(self, board: Mapping[str, Any], names: Sequence[str], now: float,
+                    start: Optional[datetime.datetime]) -> Optional[Dict[str, Any]]:
+        """The board's game a leg's team names point to: both teams when the slip names the game, else the one
+        picked; within 36 hours of the slip's start time when it gives one, else the next game between them
+        within a week (one in play counts). Ties go to the earliest start."""
+        found = []
+        for card in board.get("games") or []:
+            begins = _parse_time(card.get("start"))
+            if begins is None:
+                continue
+            if start is not None:
+                if abs((begins - start).total_seconds()) > SAME_START:
+                    continue
+            elif not now - LIVE_SINCE <= begins.timestamp() <= now + NEXT_GAME:
+                continue
+            if len(names) >= 2:
+                straight = (paste_team_score(names[0], card["away"]), paste_team_score(names[1], card["home"]))
+                crossed = (paste_team_score(names[0], card["home"]), paste_team_score(names[1], card["away"]))
+                pair = max(straight, crossed, key=lambda scores: (min(scores), sum(scores)))
+                if min(pair) < TEAM_MATCH:
+                    continue
+                score = sum(pair) / 2
+            else:
+                score = max(paste_team_score(names[0], card["home"]), paste_team_score(names[0], card["away"]))
+                if score < TEAM_MATCH:
+                    continue
+            found.append((-round(score, 3), begins, card))
+        found.sort(key=lambda item: (item[0], item[1]))
+        return found[0][2] if found else None
+
+    @staticmethod
+    def _team_side(selection: str, card: Mapping[str, Any]) -> Optional[str]:
+        """Which side of the game a team picked on a slip is: "home", "away" or None when it is neither. A 1X2
+        slip's "1" and "2" (and "Home win", "W2") name the home and away sides."""
+        written = (selection or "").strip().lower()
+        if written in pasted.HOME_WORDS:
+            return "home"
+        if written in pasted.AWAY_WORDS:
+            return "away"
+        home, away = paste_team_score(selection, card["home"]), paste_team_score(selection, card["away"])
+        if max(home, away) < TEAM_MATCH:
+            return None
+        return "home" if home >= away else "away"
+
+    def _match_market(self, leg: pasted.ExtractedLeg, odds: Optional[Decimal], league: str,
+                      card: Mapping[str, Any], kind: str, now: float) -> Dict[str, Any]:
+        """The leg's outcome on its game: moneyline -> h2h home/away/draw, spread -> the same team at the same
+        point (sign and all), total -> over/under at the same point. Another line links to the game with its
+        chance estimated."""
+        game = f"{card['away']} @ {card['home']}"
+        estimated = f"its chance is estimated from your odds less a typical {_margin_words(kind)} margin"
+        if leg.market == "moneyline":
+            market, side = "h2h", ("draw" if _is_draw(leg.selection) else self._team_side(leg.selection, card))
+        elif leg.market == "spread":
+            market, side = "spreads", self._team_side(leg.selection, card)
+        else:
+            market = "totals"
+            side = leg.over_under or ("under" if (leg.selection or "").lower().startswith("u") else
+                                      "over" if (leg.selection or "").lower().startswith("o") else None)
+        if side is None:
+            note = f"Couldn't tell which side of {game} \"{leg.selection}\" is, so {estimated}."
+            return self._estimate(_paste_entry("not_found", note, kind, league, card, now), odds)
+        offer = ((card.get("markets") or {}).get(market) or {}).get(side)
+        if not offer or not offer.get("price"):
+            what = {"h2h": "a draw" if side == "draw" else "a moneyline", "spreads": "a spread",
+                    "totals": "a total"}[market]
+            note = f"The board has {game} but not {what} for it right now, so {estimated}."
+            return self._estimate(_paste_entry("not_found", note, kind, league, card, now), odds)
+        point = offer.get("point")
+        ref = {"league": league, "id": str(card["id"]), "market": market, "side": side, "point": point}
+        if market != "h2h" and (leg.line is None or point is None or abs(float(point) - leg.line) > 1e-6):
+            mine = "no line read" if leg.line is None else _line_words(market, side, leg.line)
+            note = (f"The board has {_line_words(market, side, point)}; you have {mine}, so the chance at your line "
+                    f"is estimated from your odds less a typical {_margin_words(kind)} margin.")
+            entry = _paste_entry("line_differs", note, kind, league, card, now)
+            entry["ref"] = ref
+            entry["board"] = {"label": offer.get("label"), "point": point, "book": offer.get("book"),
+                              "price": str(Decimal(str(offer["price"])).quantize(CENTS, rounding=ROUND_HALF_UP))}
+            return self._estimate(entry, odds)
+        entry = _paste_entry("matched", f"{game}, {self._when(_parse_time(card['start']).timestamp())}.", kind,
+                             league, card, now)
+        entry["ref"] = ref
+        return self._board_chances(entry, card, offer, odds)
+
+    def _board_chances(self, entry: Dict[str, Any], card: Mapping[str, Any], offer: Mapping[str, Any],
+                       odds: Optional[Decimal]) -> Dict[str, Any]:
+        """A matched leg's chances from the board (the market's margin-free chance, the model's when it has
+        one) and the best price on offer."""
+        modelled = card.get("prediction") is not None
+        fair, ai = offer.get("fair"), offer.get("ai") if modelled else None
+        if fair is None and ai is None:
+            return self._estimate(entry, odds)
+        entry["market_chance"] = fair
+        entry["ai_chance"] = ai
+        entry["push"] = (offer.get("push") or 0.0) if modelled else 0.0
+        entry["chance_source"] = "model" if ai is not None else "market"
+        best = Decimal(str(offer["price"]))
+        entry["best_price"] = {"decimal": str(best.quantize(CENTS, rounding=ROUND_HALF_UP)), "book": offer.get("book")}
+        entry["better_price"] = odds is not None and best >= odds + BETTER_BY
+        return entry
+
+    def _match_prop(self, leg: pasted.ExtractedLeg, odds: Optional[Decimal], boards: "_PasteBoards", now: float,
+                    start: Optional[datetime.datetime]) -> Dict[str, Any]:
+        """A player prop: for the NBA, the player's next game, the model's chance of the over or under at the
+        slip's line (on game day) and DraftKings' line on ESPN when it is the same line; otherwise estimated."""
+        kind = "player_prop"
+        estimated = f"its chance is estimated from your odds less a typical {_margin_words(kind)} margin"
+        league, other = _PasteBoards.named_league(leg)
+        prefixes = pasted.sport_prefixes(leg.sport_hint) or pasted.sport_prefixes(leg.raw)
+        entry = _paste_entry("prop", "", kind, league)
+        if other or league not in (None, NBA) or (league is None and prefixes and "basketball_" not in prefixes):
+            entry["note"] = f"The app models NBA players only, so {estimated}."
+            return self._estimate(entry, odds)
+        stat = PASTE_STATS.get(leg.prop_stat or "")
+        if stat is None or leg.line is None or leg.over_under is None:
+            entry["note"] = ("The model covers NBA points, rebounds, assists, threes, steals, blocks, turnovers and "
+                             f"points + rebounds + assists overs and unders, so {estimated}.")
+            return self._estimate(entry, odds)
+        try:
+            player = self._paste_player(leg.selection)
+        except Exception as exc:
+            log.warning("Player search for a pasted prop failed (%s)", type(exc).__name__)
+            entry["note"] = f"Player data isn't available right now, so {estimated}."
+            return self._estimate(entry, odds)
+        if player is None:
+            entry["note"] = f"Couldn't find {leg.selection} among NBA players, so {estimated}."
+            return self._estimate(entry, odds)
+        entry["league"] = NBA
+        entry["player"] = {"id": str(player["id"]), "name": player.get("name"), "team": player.get("team")}
+        try:
+            card = self.players.card(NBA, str(player["id"]))
+        except Exception as exc:
+            log.warning("Player card for a pasted prop failed (%s)", type(exc).__name__)
+            card = {}
+        game = card.get("next_game") or {}
+        when = _parse_time(game.get("date"))
+        if start is not None and when is not None and abs((when - start).total_seconds()) > SAME_START:
+            entry["note"] = f"The slip's game isn't {player.get('name')}'s next game, so {estimated}."
+            return self._estimate(entry, odds)
+        entry.update(game=game.get("name"), start=_iso(when.timestamp()) if when else None,
+                     live=bool(when and when.timestamp() <= now),
+                     group=f"espn:{game['event_id']}" if game.get("event_id") else None)
+        model_note = None
+        row = None
+        if card.get("name") and boards.get(NBA) is not None:
+            row, projection, model_note = self._projection(NBA, card)
+            if projection:
+                entry.update(game=projection["game"], start=projection["start"], group=str(projection["event_id"]))
+        elif card.get("name"):
+            model_note = "The NBA odds aren't loaded right now, so there's no projection."
+        if row is not None:
+            mean = _mean(row, stat)
+            over, under, push = calls.stat_probabilities(stat, mean, float(leg.line), row.get("minutes"))
+            entry["ai_chance"] = over if leg.over_under == "over" else under
+            entry["push"] = push
+            entry["projection"] = {"stat": stat, "mean": round(mean, 1), "minutes": row.get("minutes")}
+        self._prop_market(entry, card, game, stat, leg, odds)
+        if entry["ai_chance"] is None and entry["market_chance"] is None:
+            entry["note"] = f"{model_note or 'No projection or market line for this player.'} So {estimated}."
+            return self._estimate(entry, odds)
+        entry["chance_source"] = "model" if entry["ai_chance"] is not None else "market"
+        parts = []
+        if entry.get("projection"):
+            parts.append(f"The NBA model projects {entry['projection']['mean']:g} {STAT_WORDS[stat]}")
+        elif model_note:
+            parts.append(model_note.rstrip("."))
+        if entry["market_chance"] is not None:
+            parts.append("DraftKings lists the same line")
+        entry["note"] = "; ".join(parts) + "."
+        return entry
+
+    def _prop_market(self, entry: Dict[str, Any], card: Mapping[str, Any], game: Mapping[str, Any], stat: str,
+                     leg: pasted.ExtractedLeg, odds: Optional[Decimal]) -> None:
+        """The market's chance of a prop when DraftKings (on ESPN) lists the same line: its over and under
+        prices with the margin taken out."""
+        if not game.get("event_id") or not card.get("id"):
+            return
+        try:
+            found = self.players.props(NBA, str(game["event_id"]))
+        except Exception as exc:
+            log.warning("Props for a pasted leg failed (%s)", type(exc).__name__)
+            return
+        for prop in (found.get("players") or {}).get(str(card["id"]), []):
+            if prop.get("stat") != ESPN_PROP_STATS[stat] or prop.get("line") is None:
+                continue
+            if abs(float(prop["line"]) - float(leg.line)) > 1e-6 or not (prop.get("over_price") and prop.get("under_price")):
+                continue
+            over, under = remove_vig([float(prop["over_price"]), float(prop["under_price"])])
+            entry["market_chance"] = over if leg.over_under == "over" else under
+            price = Decimal(str(prop[f"{leg.over_under}_price"]))
+            entry["best_price"] = {"decimal": str(price.quantize(CENTS, rounding=ROUND_HALF_UP)),
+                                   "book": found.get("book") or "DraftKings"}
+            entry["better_price"] = odds is not None and price >= odds + BETTER_BY
+            return
+
+    def _paste_player(self, name: str) -> Optional[Dict[str, Any]]:
+        """The NBA player a slip names, by ESPN's search, when one name is a close enough match."""
+        found = self.players.search(name, NBA).get("players") or []
+        scored = [(paste_player_score(name, player.get("name")), player) for player in found if player.get("id")]
+        scored = [(score, player) for score, player in scored if score >= TEAM_MATCH]
+        return max(scored, key=lambda item: item[0])[1] if scored else None
+
+    # --- pasted slips: the view and the numbers ------------------------------------------------------------
+
+    def _paste_state(self, row: Mapping[str, Any], refresh: bool = True
+                     ) -> Tuple[pasted.Extraction, List[Dict[str, Any]], Dict[str, Any]]:
+        """(the slip as read, each leg's match, the PastedView). With ``refresh`` the matched legs take the
+        boards' current prices when their league is cached; nothing is ever loaded for a view."""
+        slip = pasted.Extraction.model_validate(row["extraction"])
+        stored = list(row.get("matches") or [])
+        now = self._now()
+        saved = self._saved_odds() if refresh else {}
+        boards: Dict[str, Optional[Dict[str, Any]]] = {}
+        entries, legs = [], []
+        for index, leg in enumerate(slip.legs, 1):
+            odds = pasted.parse_odds(leg.odds_text)
+            entry = dict(stored[index - 1]) if index - 1 < len(stored) else self._estimate(
+                _paste_entry("not_found", "Not matched.", _margin_kind(leg, None, None)), odds)
+            if refresh and entry.get("ref") and entry.get("status") in ("matched", "line_differs"):
+                entry = self._paste_refresh(entry, leg, odds, boards, saved, now)
+            entries.append(entry)
+            legs.append(self._paste_leg_view(index, leg, odds, entry, row))
+        view = {"id": row["id"], "thread_id": row.get("thread_id"), "created_at": _iso(row.get("created_at")),
+                "source": row["source"], "bookmaker": slip.bookmaker, "bet_type": slip.bet_type, "k": slip.k,
+                "system": slip.system, "legs": legs, "text": row.get("text"), "notes": slip.notes}
+        view.update(self._paste_money(slip, legs))
+        view.update(self._paste_checks(row, slip, legs, view))
+        view.pop("stake_uneven", None)
+        view.pop("stake_mismatch", None)
+        view["matched_refs"] = [leg["match"]["ref"] for leg in legs
+                                if leg["match"]["status"] == "matched" and not leg["match"]["live"]]
+        leagues = sorted({leg["match"]["ref"]["league"] for leg in legs
+                          if leg["match"]["ref"] and leg["match"]["status"] in ("matched", "line_differs")})
+        view["odds_as_of"] = {league: _iso(self.service.odds.odds_loaded_at(league)) for league in leagues}
+        return slip, entries, view
+
+    def _paste_refresh(self, entry: Dict[str, Any], leg: pasted.ExtractedLeg, odds: Optional[Decimal],
+                       boards: Dict[str, Optional[Dict[str, Any]]], saved: Mapping[str, float],
+                       now: float) -> Dict[str, Any]:
+        """A matched leg with the cached board's current price and chances (and a line that has moved since, or
+        come to the slip's line, says so). A board that isn't cached keeps the match as it was read."""
+        ref = entry["ref"]
+        league = ref["league"]
+        if league not in boards:
+            boards[league] = self._board(league)[0] if self._odds_cached(league, saved) else None
+        board = boards[league]
+        card = next((c for c in (board or {}).get("games") or [] if str(c.get("id")) == ref["id"]), None)
+        offer = (((card or {}).get("markets") or {}).get(ref["market"]) or {}).get(ref["side"])
+        if not card or not offer or not offer.get("price"):
+            return entry
+        fresh = _paste_entry(entry["status"], entry["note"], entry["kind"], league, card, now)
+        point = offer.get("point")
+        fresh["ref"] = {**ref, "point": point}
+        same = ref["market"] == "h2h" or (leg.line is not None and point is not None
+                                          and abs(float(point) - leg.line) <= 1e-6)
+        if same:
+            fresh["status"] = "matched"
+            if entry["status"] != "matched":
+                fresh["note"] = f"{fresh['game']}, {self._when(_parse_time(card['start']).timestamp())}."
+            return self._board_chances(fresh, card, offer, odds)
+        mine = "no line read" if leg.line is None else _line_words(ref["market"], ref["side"], leg.line)
+        moved = " now" if entry["status"] == "matched" else ""
+        fresh["status"] = "line_differs"
+        fresh["note"] = (f"The board{moved} has {_line_words(ref['market'], ref['side'], point)}; you have {mine}, so "
+                         f"the chance at your line is estimated from your odds less a typical "
+                         f"{_margin_words(entry['kind'])} margin.")
+        fresh["board"] = {"label": offer.get("label"), "point": point, "book": offer.get("book"),
+                          "price": str(Decimal(str(offer["price"])).quantize(CENTS, rounding=ROUND_HALF_UP))}
+        return self._estimate(fresh, odds)
+
+    @staticmethod
+    def _paste_leg_view(index: int, leg: pasted.ExtractedLeg, odds: Optional[Decimal], entry: Mapping[str, Any],
+                        row: Mapping[str, Any]) -> Dict[str, Any]:
+        source = row["source"]
+        verified = None if source == "basic" else (
+            False if source == "image" else pasted.odds_in_text(leg.odds_text, row.get("text")))
+        chance = lambda value: None if value is None else round(float(value), 4)  # noqa: E731
+        return {
+            "index": index, "raw": leg.raw, "label": _paste_label(leg), "selection": leg.selection,
+            "market": leg.market, "line": leg.line, "prop_stat": leg.prop_stat, "over_under": leg.over_under,
+            "event_text": leg.event_text, "start_text": leg.start_text, "sport_hint": leg.sport_hint,
+            "odds_text": leg.odds_text, "odds": pasted.odds_view(odds) if odds is not None else None,
+            "verified": verified,
+            "match": {"status": entry["status"], "ref": entry.get("ref"), "game": entry.get("game"),
+                      "start": entry.get("start"), "live": bool(entry.get("live")), "league": entry.get("league"),
+                      "note": entry.get("note") or ""},
+            "market_chance": chance(entry.get("market_chance")), "ai_chance": chance(entry.get("ai_chance")),
+            "push": chance(entry.get("push")) or 0.0, "chance_source": entry.get("chance_source") or "estimated",
+            "best_price": entry.get("best_price"), "better_price": bool(entry.get("better_price")),
+        }
+
+    @staticmethod
+    def _slip_type(slip: pasted.Extraction, count: int) -> Tuple[str, Optional[int], Optional[str], Optional[str]]:
+        """The slip's own kind of bet as engine/tickets prices it: (type, k, system, a note when it had to be
+        assumed). "System 2/4" is every double of four legs (a round robin by 2s)."""
+        kind, k, system, note = slip.bet_type, slip.k, None, None
+        if kind == "system":
+            system = pasted.system_key(slip.system)
+            numbers = re.search(r"(\d)\s*/\s*(\d)", slip.system or "")
+            if system is None and numbers:
+                kind, k = "round_robin", int(numbers.group(1))
+            elif system is None:
+                kind, note = ("multi" if count > 1 else "single",
+                              "The app doesn't know this system bet, so it is priced as a multi.")
+        if kind == "round_robin":
+            k = k or 2
+        if kind == "unknown":
+            kind = "multi" if count > 1 else "single"
+            if count > 1:
+                note = "The slip doesn't say what kind of bet it is, so it is priced as a multi (every leg must win)."
+        return kind, k if kind == "round_robin" else None, system if kind == "system" else None, note
+
+    def _paste_money(self, slip: pasted.Extraction, legs: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+        """The slip's money as written (stake per bet, total, the bookmaker's stated return) and the code's
+        own return at those odds and that stake."""
+        stake, stake_currency = pasted.parse_amount(slip.stake_text)
+        total, total_currency = pasted.parse_amount(slip.total_stake_text)
+        stated, stated_currency = pasted.parse_amount(slip.potential_return_text)
+        currency = slip.currency or stake_currency or total_currency or stated_currency
+        kind, k, system, _ = self._slip_type(slip, len(legs))
+        try:
+            bets = len(tickets.combinations(kind, len(legs), k, system))
+        except ValueError:
+            bets = None
+        uneven = False
+        mismatch = None
+        if stake is not None and total is not None and bets and abs(stake * bets - total) > CENTS:
+            mismatch = {"stake": stake, "bets": bets, "total": total}  # a leg missed, or each-way: asked
+        if stake is None and total is not None and bets:
+            stake = _floor_cents(total / bets)
+            uneven = stake * bets != total
+        if total is None and stake is not None and bets:
+            total = stake * bets
+        payout = profit = None
+        prices = [pasted.parse_odds(leg["odds_text"]) for leg in legs]
+        if stake is not None and bets and all(price is not None for price in prices):
+            payout = self._slip_payout(prices, kind, k, system, stake)
+            profit = payout - stake * bets if payout is not None else None
+        check, basis, computed = pasted.return_check(payout, stated), "payout", payout
+        if check == "differs" and pasted.return_check(profit, stated) == "matches":
+            check, basis, computed = "matches", "profit", profit  # US apps' "To win" is the profit
+        return {"stake": _text_money(stake), "total_stake": _text_money(total), "currency": currency,
+                "stated_return": _text_money(stated), "computed_return": _text_money(computed),
+                "return_basis": basis, "return_check": check, "stake_uneven": uneven, "stake_mismatch": mismatch}
+
+    def _slip_payout(self, prices: Sequence[Decimal], kind: str, k: Optional[int], system: Optional[str],
+                     stake: Decimal) -> Optional[Decimal]:
+        """What the slip pays if every leg wins, at the slip's odds and stake (engine/tickets' sums)."""
+        if kind == "multi" or len(prices) == 1:
+            return stake * math.prod(prices, start=Decimal(1))
+        legs = [TicketLeg(key=f"leg{i}", league="pasted", event_id=f"leg{i}", market="pasted", side="pick", point=None,
+                          price=price, label=f"Leg {i}", game="", start=UNKNOWN_START)
+                for i, price in enumerate(prices, 1)]
+        try:
+            priced = tickets.price_ticket(legs, kind, stake, k=k, system=system)
+        except ValueError:
+            return None
+        return Decimal(priced["max_payout"]) if priced.get("max_payout") is not None else None
+
+    def _paste_checks(self, row: Mapping[str, Any], slip: pasted.Extraction, legs: Sequence[Mapping[str, Any]],
+                      money: Mapping[str, Any]) -> Dict[str, Any]:
+        """When the read is doubtful the person confirms it before any analysis: the bookmaker's return isn't
+        the code's, some odds were unreadable, odds read from text aren't in that text, a matched leg's odds are
+        far longer than the board's best (a combined or boosted price?), a multi has one leg, or the stake per
+        bet doesn't add up to the total (a missed leg, or each-way). A slip with no odds on any leg (a
+        same-game parlay) has nothing to confirm or price: a warning says why."""
+        reasons, warnings = [], []
+        symbol = money["currency"]
+        if money["return_check"] == "differs":
+            stated = _say_dollars(Decimal(money["stated_return"]), symbol)
+            ours = _say_dollars(Decimal(money["computed_return"]), symbol) if money["computed_return"] else None
+            reasons.append(f"Your bookmaker says {stated}; at the odds read we get {ours}: check the odds."
+                           if ours else f"Your bookmaker says {stated}, which the odds read don't give: check them.")
+        priced = [leg for leg in legs if leg["odds"] is not None]
+        if not priced:  # nothing to price, so nothing to confirm: the reply says why (a same-game parlay)
+            warnings.append(pasted.NO_LEG_ODDS)
+        for leg in legs if priced else ():
+            if leg["odds"] is None:
+                reasons.append(f"Couldn't read the odds for leg {leg['index']} ({leg['label']}).")
+            elif row["source"] == "text" and leg["verified"] is False:
+                reasons.append(f"The odds read for leg {leg['index']} ({leg['odds_text']}) aren't in the text you "
+                               "pasted.")
+            elif self._far_above_board(leg):
+                best = leg["best_price"]
+                at = f" at {best['book']}" if best.get("book") else ""
+                reasons.append(f"Leg {leg['index']}'s odds ({leg['odds_text']}) are far longer than any price on "
+                               f"our board (best {best['decimal']}{at}): check them. Is it a combined or boosted "
+                               "price?")
+        if slip.bet_type in ("multi", "round_robin", "system") and len(legs) == 1:
+            kind = {"multi": "a multi (parlay or accumulator)", "round_robin": "a round robin",
+                    "system": "a system bet"}[slip.bet_type]
+            reasons.append(f"Your slip looks like {kind}, but only one leg was read: check that none is missing.")
+        mismatch = money.get("stake_mismatch")
+        if mismatch:
+            each, bets = mismatch["stake"], mismatch["bets"]
+            spent = (f"{_say_dollars(each, symbol)} on each of the {bets} bets read is "
+                     f"{_say_dollars(each * bets, symbol)}" if bets > 1 else
+                     f"the stake read for its one bet is {_say_dollars(each, symbol)}")
+            reasons.append(f"Your slip says {_say_dollars(mismatch['total'], symbol)} in all, but {spent}: a leg may "
+                           "be missing, or it's an each-way bet.")
+        estimated = [leg["index"] for leg in legs if leg["odds"] is not None and leg["chance_source"] == "estimated"]
+        if len(estimated) == 1:
+            warnings.append(f"Leg {estimated[0]} isn't matched to a price the app knows, so its chance is your odds "
+                            "less a typical bookmaker margin (an estimate).")
+        elif estimated:
+            which = f"{', '.join(map(str, estimated[:-1]))} and {estimated[-1]}"
+            warnings.append(f"Legs {which} aren't matched to prices the app knows, so their chances are your odds "
+                            "less a typical bookmaker margin (estimates).")
+        warnings += [f"Leg {leg['index']}'s game has started: its chances are from the board as it stands."
+                     for leg in legs if leg["match"]["live"]]
+        _, _, _, type_note = self._slip_type(slip, len(legs))
+        if type_note:
+            warnings.append(type_note)
+        if money.get("stake_uneven"):
+            warnings.append("The total stake doesn't split evenly into the slip's bets, so the stake per bet is "
+                            "rounded down to the cent.")
+        if len(legs) > tickets.MAX_LEGS:
+            warnings.append(f"A slip with more than {tickets.MAX_LEGS} legs can be read but not priced in full: "
+                            "leave some out to see the numbers.")
+        return {"needs_confirmation": bool(reasons), "confirm_reasons": reasons, "warnings": warnings}
+
+    @staticmethod
+    def _far_above_board(leg: Mapping[str, Any]) -> bool:
+        """A matched leg whose odds are far longer than the board's best price for it (FAR_ABOVE_BOARD times):
+        more likely a misread, or a whole same-game parlay's or a boosted price, than a better bookmaker."""
+        best = leg.get("best_price") or {}
+        if leg["match"]["status"] != "matched" or leg["match"]["live"] or not best.get("decimal"):
+            return False
+        odds = pasted.parse_odds(leg["odds_text"])
+        return odds is not None and odds >= Decimal(str(best["decimal"])) * FAR_ABOVE_BOARD
+
+    # --- pasted slips: the analysis ---------------------------------------------------------------------------
+
+    @staticmethod
+    def _paste_drop(drop: Any, count: int) -> set:
+        try:
+            dropped = {int(index) for index in (drop or ()) if not isinstance(index, bool)}
+        except (TypeError, ValueError):
+            raise CallRejected("drop lists the legs to leave out by number, from 1") from None
+        if any(not 1 <= index <= count for index in dropped):
+            raise CallRejected(f"This slip's legs are numbered 1 to {count}")
+        return dropped
+
+    def _paste_ticket_type(self, slip: pasted.Extraction, count: int, ticket_type: Optional[str], k: Any,
+                           system: Optional[str]) -> Tuple[str, Optional[int], Optional[str], Optional[str]]:
+        if ticket_type is None:
+            kind, slip_k, slip_system, note = self._slip_type(slip, count)
+            return kind, k if k is not None else slip_k, system or slip_system, note
+        if ticket_type not in tickets.TICKET_TYPES:
+            raise CallRejected(f"A ticket is one of {', '.join(tickets.TICKET_TYPES)}")
+        if k is not None and (isinstance(k, bool) or not isinstance(k, int)):
+            raise CallRejected("k is a round robin's picks per bet, e.g. 2")
+        return ticket_type, k, system, None
+
+    @staticmethod
+    def _paste_stake(stake: Any, view: Mapping[str, Any]) -> Tuple[Decimal, Optional[str]]:
+        """The stake per bet: the one asked for, else the slip's own, else 10 (said so)."""
+        if stake is not None:
+            return _amount(stake, "stake", MAX_STAKE), None
+        if view.get("stake") is not None:
+            own = Decimal(view["stake"])
+            if CENTS <= own <= Decimal(MAX_CENTS) / 100:
+                return own, None
+        symbol = view.get("currency")
+        return DEFAULT_PASTE_STAKE, (f"No stake was read from the slip, so it is priced at "
+                                     f"{_say_dollars(DEFAULT_PASTE_STAKE, symbol)} a bet.")
+
+    @staticmethod
+    def _paste_ticket_leg(pasted_id: int, leg: pasted.ExtractedLeg, entry: Mapping[str, Any],
+                          view: Mapping[str, Any], bookmaker: Optional[str]) -> TicketLeg:
+        """A pasted leg for engine/tickets at the person's own odds, with its chance from the board, the model
+        or the estimate. Legs from the same game share a group, so a same-game ticket is flagged."""
+        ref = entry.get("ref") if entry.get("status") == "matched" else None
+        price = pasted.parse_odds(leg.odds_text)
+        index = view["index"]
+        if ref:
+            key = _leg_key(ref["league"], ref["id"], ref["market"], ref["side"], ref.get("point"))
+            league, event_id, market, side, point = ref["league"], ref["id"], ref["market"], ref["side"], ref.get("point")
+        else:
+            key = f"pasted:{pasted_id}:{index}"
+            league = entry.get("league") or "pasted"
+            event_id = (entry.get("ref") or {}).get("id") or f"pasted-{pasted_id}-{index}"
+            market = {"moneyline": "h2h", "spread": "spreads", "total": "totals"}.get(
+                leg.market, f"player_{PASTE_STATS.get(leg.prop_stat or '', 'prop')}" if leg.market == "player_prop"
+                else "other")
+            side, point = leg.over_under or "pick", leg.line
+        ai = entry.get("ai_chance")
+        push = float(entry.get("push") or 0.0)
+        if ai is not None:
+            push = min(push, 1.0 - float(ai))
+        return TicketLeg(key=key, league=league, event_id=str(event_id), market=market, side=side, point=point,
+                         price=price, label=view["label"], game=entry.get("game") or leg.event_text or "",
+                         start=entry.get("start") or UNKNOWN_START, ai_prob=ai, market_prob=entry.get("market_chance"),
+                         push_prob=push, book=bookmaker, group=entry.get("group") or str(event_id))
+
+    def _paste_cards(self, entries: Sequence[Mapping[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """The game cards of matched legs from boards already cached (injuries, the model's factors), by id."""
+        saved = self._saved_odds()
+        cards: Dict[str, Dict[str, Any]] = {}
+        for league in sorted({(entry.get("ref") or {}).get("league") for entry in entries if entry.get("ref")}):
+            board = self._board(league)[0] if self._odds_cached(league, saved) else None
+            for card in (board or {}).get("games") or []:
+                cards[str(card["id"])] = card
+        return cards
+
+    def _paste_notes(self, leg: Mapping[str, Any], entry: Mapping[str, Any], priced: Optional[Mapping[str, Any]],
+                     card: Optional[Mapping[str, Any]], dropped: bool) -> List[str]:
+        """Plain facts about one pasted leg, as Lab._notes for the Build screen, plus a better price elsewhere,
+        a line that differs from the board's and an estimated chance."""
+        if leg["odds"] is None:
+            return ["The odds for this leg couldn't be read, so it is left out of the numbers."]
+        notes = ["Left out: you turned this leg off."] if dropped else []
+        status = entry.get("status")
+        if status == "matched" and priced is not None:
+            notes += self._notes(priced, card)
+        elif entry.get("note"):
+            notes.append(entry["note"])
+        chance = leg["ai_chance"] if leg["ai_chance"] is not None else leg["market_chance"]
+        if status != "matched" and chance is not None:
+            whose = {"model": "the model's", "market": "the market's"}.get(leg["chance_source"], "an estimated")
+            notes.append(f"Wins about {_chance_words(chance)} by {whose} chance.")
+        best = leg.get("best_price")
+        if leg["better_price"] and best:
+            where = f" at {best['book']}" if best.get("book") else ""
+            notes.append(f"Better price: {best['decimal']}{where} (you have {leg['odds']['decimal']}).")
+        if leg["match"]["live"] and status != "matched":
+            notes.append("This game has started: the board's prices and chances are as it stands, not as they were "
+                         "when you bet.")
+        return notes
+
+    def _paste_alternatives(self, priced: Mapping[str, Any], legs: Sequence[TicketLeg],
+                            kept: Sequence[Mapping[str, Any]], entries: Sequence[Mapping[str, Any]],
+                            dropped: set, currency: Optional[str]) -> List[Dict[str, Any]]:
+        """Lab._alternatives at the person's odds, each also saying which of the slip's legs it keeps ("legs"),
+        which to leave out to get it ("drop"), and the refs of those it can load into Build."""
+        index_of: Dict[str, int] = {}
+        for leg, view in zip(legs, kept):
+            index_of.setdefault(leg.key, view["index"])
+        everything = {view["index"] for view in kept}
+        out = []
+        for alt in self._alternatives(priced, legs, currency):
+            indexes = [index_of.get(view["key"]) for view in alt["ticket"]["legs"]]
+            alt["legs"] = indexes
+            alt["drop"] = sorted((everything - set(indexes)) | dropped)
+            alt["refs"] = [entries[index - 1]["ref"] for index in indexes
+                           if index and entries[index - 1].get("status") == "matched"]
+            for leg_view, index in zip(alt["ticket"]["legs"], indexes):
+                leg_view["slip_index"] = index
+                if leg_view.get("start") == UNKNOWN_START:
+                    leg_view["start"] = None
+            out.append(alt)
+        return out
+
 
 # --- module helpers that need the classes above ------------------------------------------------------
 
-def _versus(alt: Mapping[str, Any], base: Mapping[str, Any]) -> str:
+def _versus(alt: Mapping[str, Any], base: Mapping[str, Any], currency: Optional[str] = CURRENCY) -> str:
     """One line comparing an alternative with the person's ticket: chance of a profit and the expected result,
     both by the AI's chances when every leg has one, else by the market's."""
     basis = "ai" if alt["chance"]["profit"]["ai"] is not None and base["chance"]["profit"]["ai"] is not None else "market"
@@ -1669,7 +2717,7 @@ def _versus(alt: Mapping[str, Any], base: Mapping[str, Any]) -> str:
         parts.append(f"chance of a profit {_chance_words(p_alt)}, against {_chance_words(p_base)} for your ticket")
     e_alt, e_base = alt["expected"][basis], base["expected"][basis]
     if e_alt is not None and e_base is not None:
-        parts.append(f"expected result {_say_signed(e_alt)} against {_say_signed(e_base)}")
+        parts.append(f"expected result {_say_signed(e_alt, currency)} against {_say_signed(e_base, currency)}")
     if not parts:
         return ""
     text = "; ".join(parts)
@@ -1688,3 +2736,98 @@ def _quantile(stat: str, mean: float, minutes: Optional[float], share: float) ->
         if calls.stat_probabilities(stat, mean, k + 0.5, minutes)[1] >= share:
             return k
     return int(mean * 4) + 40
+
+
+class _PasteBoards:
+    """The boards one pasted slip may look at: any league already cached (no quota), and at most ``loads``
+    more loaded (each fetch costs odds quota), never a league out of season. Each is looked up once a slip.
+    Without a league on the slip, cached boards come first (the person's favourites among them first), then
+    the person's favourites (the NBA when they have none)."""
+
+    def __init__(self, lab: Lab, user: Mapping[str, Any], loads: int) -> None:
+        self.lab = lab
+        self.loads = loads
+        self.boards: Dict[str, Optional[Dict[str, Any]]] = {}
+        self.missed: Dict[str, str] = {}  # league -> why its board wasn't looked at: season, quota or error
+        self.season = lab._season()
+        self.saved = lab._saved_odds()
+        self.favourites = [key for key in user.get("favourite_sports") or [] if isinstance(key, str)] \
+            or list(DEFAULT_LEAGUES)
+        self._cached: Optional[List[str]] = None
+
+    def _in_season(self, league: str) -> bool:
+        return self.season is None or not self.lab._out_of_season(self.season.get(league))
+
+    def cached(self) -> List[str]:
+        """Leagues in season whose boards can be read without a fetch: favourites first, then popular ones."""
+        if self._cached is None:
+            keys = set(self.season or {}) | set(self.saved) | set(self.favourites)
+            ranked = sorted(keys, key=lambda key: (key not in self.favourites,
+                                                   POPULAR_LEAGUES.index(key) if key in POPULAR_LEAGUES
+                                                   else len(POPULAR_LEAGUES), key))
+            self._cached = [key for key in ranked if LEAGUE_KEY.fullmatch(key) and self._in_season(key)
+                            and self.lab._odds_cached(key, self.saved)]
+        return self._cached
+
+    @staticmethod
+    def named_league(leg: pasted.ExtractedLeg) -> Tuple[Optional[str], bool]:
+        """(the league the leg's sport hint, else its own text, names; whether it names another league of that
+        name the app doesn't cover, such as "Brazil Serie A" or "NBA G League")."""
+        for text in (leg.sport_hint, leg.raw):
+            league, other = pasted.league_of(text)
+            if league or other:
+                return league, other
+        return None, False
+
+    def leagues_for(self, leg: pasted.ExtractedLeg) -> List[str]:
+        """The leagues to look for a leg's game in, in order: the one the slip names, else cached boards, then
+        the person's favourites (only that sport's when the slip names a sport, its popular leagues if none).
+        None for a league the app doesn't cover ("NBA G League", "Brazil Serie A"): its teams' namesakes in
+        the big leagues ("Maine Celtics", "Botafogo") must not match, and no quota is spent looking."""
+        league, other = self.named_league(leg)
+        if other:
+            return []
+        if league:
+            return [league]
+        prefixes = pasted.sport_prefixes(leg.sport_hint) or pasted.sport_prefixes(leg.raw)
+        cached = [key for key in self.cached() if not prefixes or key.startswith(prefixes)]
+        rest = [key for key in self.favourites if (not prefixes or key.startswith(prefixes)) and key not in cached]
+        if prefixes and not rest:
+            rest = [key for prefix in prefixes for key in POPULAR_LEAGUES if key.startswith(prefix) and key not in cached]
+        return cached + rest
+
+    def get(self, league: str) -> Optional[Dict[str, Any]]:
+        """A league's board, loading it only while this slip may still load one; None when it can't be had."""
+        if league in self.boards:
+            return self.boards[league]
+        if not LEAGUE_KEY.fullmatch(league) or not self._in_season(league):
+            self.missed[league] = "season"
+            self.boards[league] = None
+            return None
+        if not self.lab._odds_cached(league, self.saved):
+            if self.loads <= 0:
+                self.missed[league] = "quota"
+                return None
+            self.loads -= 1
+        board, _ = self.lab._board(league)
+        if board is None:
+            self.missed[league] = "error"
+        self.boards[league] = board
+        return board
+
+    def why_not(self, leagues: Sequence[str]) -> str:
+        """Why a game wasn't found, when boards were missing (" (...)"), else ""."""
+        reasons = [self.missed.get(league) for league in leagues]
+        if "quota" in reasons:
+            whose = "some leagues'" if len(leagues) > 1 else "its league's"
+            return f" ({whose} odds weren't loaded, to save the monthly odds allowance)"
+        if not reasons or None in reasons:
+            return ""  # every board that could be looked at was
+        if "error" in reasons:
+            return " (its league's odds couldn't be loaded just now)"
+        return " (that league isn't in season)"
+
+
+def _text_money(amount: Optional[Decimal]) -> Optional[str]:
+    """Money as the API's strings ("10.00"), or None."""
+    return None if amount is None else str(amount.quantize(CENTS, rounding=ROUND_HALF_UP))

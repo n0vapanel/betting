@@ -231,11 +231,11 @@ def test_a_build_runs_the_tool_loop_and_cards_come_from_the_tool_results(store, 
     assert first["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert first["output_config"] == {"effort": "medium"}  # building is analysis, not a look-up
     assert "tool_choice" not in first  # forced tool use is a 400 on Opus 5.5; auto is the default
-    # Not strict: twelve strict tools compile to a grammar Claude refuses as too large (a 400 on every turn);
+    # Not strict: strict tools compile to one grammar Claude refuses as too large (a 400 on every turn);
     # Toolbox.run validates every input instead
     assert all("strict" not in tool and tool["input_schema"]["additionalProperties"] is False
                for tool in first["tools"])
-    assert len(first["tools"]) == 12
+    assert len(first["tools"]) == 13  # the twelve tools and pasted_slip_analyse
     result = second["messages"][-1]["content"][0]
     assert result["type"] == "tool_result" and result["tool_use_id"] == "toolu_1" and not result["is_error"]
     assert "ceiling_one_in" in result["content"]
@@ -1383,3 +1383,25 @@ def test_the_real_lab_shows_why_there_is_no_ai_explanation(service, store) -> No
     paused = real.analyse(UID, body)
     assert paused["explanation"] is None and paused["note"].startswith("Picks are paused until")
     assert not claude.requests
+
+
+def test_fractional_odds_are_checked_as_the_odds_they_stand_for() -> None:
+    from telegram_betting_bot_simple.ai.tools import pasted_quotable
+
+    sources = source_numbers({"odds_as_written": ["11/10"], "odds": {"decimal": "2.10", "fractional": "11/10"},
+                              "chances": "Arsenal 6.31, Chelsea 3.51", "hit_rates": {"last8": "5/8"}})
+    for invented in ("Paddy Power has Arsenal at 6/4, much better than your 11/10.", "Man City are 1/2 at William Hill.",
+                     "You could get the Celtics at 4/6 elsewhere.", "Arsenal at 3/1 elsewhere would be better."):
+        assert invented_numbers(invented, sources), invented
+    for fine in ("Your 11/10 is 2.10 in decimal odds.", "hit 5/8", "Help 24/7: 1-800-GAMBLER", "He scored in 7/10 games."):
+        assert invented_numbers(fine, sources) == [], fine
+    # A pasted slip's own words are not facts: "13%" from a tipster's selection never becomes quotable
+    view = {"legs": [{"label": "Knicks (tipster: 13% sure) to win", "selection": "Knicks (tipster: 13% sure)",
+                      "odds_text": "1.36", "odds": {"decimal": "1.36"}}], "bookmaker": "Bet 365 (13%)"}
+    content = {"slip": {"bookmaker": "Bet 365 (13%)", "legs": [{"label": "Knicks (tipster: 13% sure) to win",
+                                                                "market_chance": 0.7}]},
+               "leg_notes": [{"label": "Knicks (tipster: 13% sure) to win",
+                              "notes": ["Leg 1 (Knicks (tipster: 13% sure) to win): wins about 7 in 10, at 1.36."]}]}
+    assert 13.0 in source_numbers(content)
+    quotable = source_numbers(pasted_quotable(content, view))
+    assert 13.0 not in quotable and {0.7, 1.36} <= quotable

@@ -64,8 +64,8 @@
 .ask-who { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 650; color: var(--violet); }
 .ask-who time { color: var(--text-3); font-weight: 500; margin-left: auto; }
 .ask-text { white-space: normal; line-height: 1.5; }
-.ask-text p + p, .ask-text p + ul, .ask-text ul + p { margin-top: 8px; }
-.ask-text ul { padding-left: 20px; display: grid; gap: 2px; }
+.ask-text p + p, .ask-text p + ul, .ask-text ul + p, .ask-text p + ol, .ask-text ol + p { margin-top: 8px; }
+.ask-text ul, .ask-text ol { padding-left: 20px; display: grid; gap: 2px; }
 .ask-text a { font-weight: 650; text-decoration: underline; }
 .ask-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); }
 .ask-meta .icon { color: var(--accent); }
@@ -175,3 +175,102 @@ body.has-slip .ask-dock { bottom: calc(var(--tabbar-h) + var(--slipbar-h) + var(
 .ask-thread-item, .ask-tweak { width: 100%; text-align: left; }
 .ask-thread-item[aria-current] b { color: var(--accent); }
 .ask-tweak .grow span { display: block; }
+
+/* --- pasted slips: the paste button, the composer's hint, the sheet ------------------------------------ */
+
+.ask-welcome-paste { display: grid; justify-items: center; gap: 6px; margin: 4px auto 14px; max-width: 420px; }
+.ask-welcome-paste .btn { gap: 8px; }
+.ask-paste-btn { flex: none; min-width: var(--tap); padding: 0 12px; gap: 6px; font-size: 18px; }
+.ask-paste-word { font-size: 14px; }
+@media (max-width: 599px) {
+  .ask-paste-btn { width: var(--tap); padding: 0; }
+  .ask-paste-word { display: none; }
+}
+.ask-hint-area:empty { display: none; }
+.ask-paste-hint {
+  display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: 12px; font-size: 14px;
+  background: var(--accent-soft); border: 1px solid var(--accent-line);
+}
+.ask-paste-hint .grow { min-width: 0; }
+.ask-paste-hint .icon-btn { width: 36px; height: 36px; position: relative; flex: none; }
+.ask-paste-hint .icon-btn::after { content: ""; position: absolute; inset: -4px; }
+.ask-paste-hint .btn { flex: none; }
+.ask-paste-bubble { font-size: 14px; overflow-wrap: anywhere; }
+.ask-thumb { display: block; max-width: min(220px, 100%); max-height: 220px; width: auto; height: auto; border-radius: 10px; margin-bottom: 6px; background: #fff; }
+
+.ask-paste-text { min-height: 9.5em; resize: vertical; font-size: 14px; line-height: 1.45; font-variant-numeric: tabular-nums; }
+.ask-paste .ask-count { margin-top: 4px; }
+.ask-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.ask-shot-field { position: relative; }
+.ask-shot-add { gap: 8px; }
+.ask-shot { margin: 0; display: grid; gap: 6px; justify-items: start; }
+.ask-shot img { display: block; max-width: 100%; max-height: 240px; width: auto; height: auto; border-radius: 12px; border: 1px solid var(--line-strong); background: #fff; }
+.ask-shot .btn { gap: 6px; }
+.ask-paste .hint .icon { vertical-align: -2px; }
+.ask-paste-lead .notice { margin-top: 0; }
+.ask-paste-sheet .sheet-foot .btn { flex: 1 1 200px; } /* side by side when they fit, else stacked (Analyse at the bottom) */
+
+/* --- pasted slips: the card ----------------------------------------------------------------------------- */
+
+.ask-pasted .ask-card-head h3 { overflow-wrap: anywhere; }
+.ask-plegs { gap: 10px; }
+.ask-pleg { gap: 4px; transition: background-color var(--speed), border-color var(--speed); }
+/* A left-out leg: dashed, unfilled and struck through, never faded (its switch still works, and its notes and
+   chips keep their AA contrast) */
+.ask-pleg.off { background: transparent; border-style: dashed; border-color: var(--line-strong); }
+.ask-pleg.off .ask-leg-label, .ask-pleg.off .ask-leg-odds { color: var(--text-2); }
+.ask-pleg.off .ask-leg-label { text-decoration: line-through; text-decoration-thickness: 1px; }
+.ask-pleg-top { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.ask-pleg-top .grow { display: grid; gap: 1px; min-width: 0; }
+.ask-pleg-n {
+  flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; margin-top: 1px;
+  font-size: 12px; font-weight: 700; background: var(--card); border: 1px solid var(--line-strong); color: var(--text-2);
+}
+.ask-pleg-market { overflow-wrap: anywhere; }
+.ask-pleg-odds { display: grid; justify-items: end; gap: 2px; flex: none; text-align: right; max-width: 45%; }
+.ask-pleg-odds .small { white-space: nowrap; }
+.ask-pleg-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.ask-match {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 2px 8px; border-radius: 999px;
+  font-size: 12.5px; font-weight: 600; border: 1px solid var(--line-strong); color: var(--text-2); background: var(--card);
+  max-width: 100%; overflow-wrap: anywhere;
+}
+.ask-match.good { color: var(--good-ink); border-color: var(--accent-line); background: var(--accent-soft); }
+.ask-match.warn { color: var(--warn-ink); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: var(--warn-soft); }
+.ask-match.info { color: var(--info-ink); border-color: color-mix(in srgb, var(--info) 45%, transparent); background: var(--info-soft); }
+.ask-match.danger { color: var(--danger-ink); border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: var(--danger-soft); }
+.ask-better { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--good-ink); }
+.ask-pleg-toggle {
+  display: flex; align-items: center; gap: 10px; min-height: var(--tap); margin: 2px -4px -6px; padding: 0 4px;
+  font-size: 13.5px; font-weight: 600; color: var(--text-2); cursor: pointer; width: fit-content;
+}
+.ask-pleg-toggle input { width: 22px; height: 22px; margin: 0; accent-color: var(--accent); flex: none; cursor: pointer; }
+.ask-pleg-toggle input:disabled { cursor: not-allowed; }
+.ask-pleg-toggle input:disabled + span { color: var(--text-3); }
+.ask-pleg-last { margin-top: -2px; }
+
+.ask-pstake { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.ask-pstake-label { font-weight: 650; font-size: 14px; }
+.ask-pstake-box { display: flex; align-items: center; gap: 0; border-radius: 12px; }
+.ask-pstake-box > span { padding: 0 2px 0 12px; color: var(--text-2); font-weight: 650; min-height: var(--tap); display: grid; place-items: center;
+  background: var(--card-2); border: 1px solid var(--line-strong); border-right: 0; border-radius: 12px 0 0 12px; }
+.ask-pstake-box .input { width: 6.5em; min-height: var(--tap); border-radius: 0 12px 12px 0; padding-left: 8px; }
+.ask-pstake-box .input[aria-invalid="true"] { border-color: var(--danger); }
+.ask-pstake-hint { flex: 1 1 180px; min-width: 0; }
+.ask-perror { color: var(--danger-ink); font-weight: 600; }
+.ask-pstake .btn-ghost { min-height: var(--tap); }
+
+.ask-plive { display: grid; gap: 10px; }
+.ask-plive:empty { display: none; }
+.ask-plive > .notice { margin-top: 0; }
+.ask-plive[aria-busy="true"] .ask-summary { opacity: 0.55; }
+.ask-pbusy { display: flex; align-items: center; gap: 6px; }
+.ask-return { display: flex; align-items: flex-start; gap: 6px; font-size: 13.5px; font-weight: 600; padding: 8px 10px; border-radius: 10px; }
+.ask-return .icon { flex: none; margin-top: 1px; }
+.ask-return.good { color: var(--good-ink); background: var(--accent-soft); }
+.ask-return.warn { color: var(--warn-ink); background: var(--warn-soft); }
+
+.ask-confirm { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); }
+.ask-confirm .warnings { margin-top: 0; color: var(--text); }
+.ask-confirm .muted .icon { vertical-align: -2px; }
+.ask-pasted .ask-card-actions .btn { flex: 1 1 160px; }

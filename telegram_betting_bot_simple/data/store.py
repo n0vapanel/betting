@@ -15,6 +15,9 @@ saved slips whose legs keep the exact price they were built on, rollover
 plans recorded one day at a time, chat threads, each person's daily AI
 spend, and responsible-gambling flags for the owner to review. Money is in
 whole cents and prices are exact decimal strings, never floats.
+
+Pasted bet slips keep only what was read from them (and the pasted text),
+never a screenshot, each in its owner's own rows: the newest 200 a person.
 """
 
 from __future__ import annotations
@@ -269,6 +272,17 @@ CREATE TABLE IF NOT EXISTS rg_events (
     reviewed_at REAL               -- when the owner looked at it (NCPG: within 48-72 hours)
 );
 CREATE INDEX IF NOT EXISTS rg_events_by_user ON rg_events (user, ts);
+CREATE TABLE IF NOT EXISTS pasted_slips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,  -- never reused, so an old id can't come to name a newer slip
+    user TEXT NOT NULL,
+    thread_id INTEGER,             -- the chat it was pasted into, if any
+    created_at REAL NOT NULL,
+    source TEXT NOT NULL,          -- text (the AI read pasted text), image (a screenshot) or basic (code read it)
+    text TEXT,                     -- the pasted text, at most 6,000 characters (screenshots are never kept)
+    extraction TEXT NOT NULL,      -- JSON: what was read, as engine/pasted.Extraction
+    matches TEXT NOT NULL          -- JSON: each leg's game and price on the boards when it was read
+);
+CREATE INDEX IF NOT EXISTS pasted_slips_by_user ON pasted_slips (user, created_at);
 """
 
 USER_FIELDS = ("id", "name", "created_at", "age_confirmed_at", "odds_format", "currency", "favourite_sports",
@@ -284,7 +298,12 @@ PLAN_DAY_FIELDS = ("plan_id", "day", "slip_id", "stake_cents", "result", "banked
 THREAD_FIELDS = ("id", "user", "created_at", "title", "summary")
 MESSAGE_FIELDS = ("thread_id", "idx", "role", "content", "ts", "tokens", "cost")
 RG_FIELDS = ("id", "user", "ts", "kind", "detail", "action", "reviewed_at")
-ACCOUNT_JSON_FIELDS = {"favourite_sports", "settings", "payload", "result", "content", "detail"}
+PASTED_FIELDS = ("id", "user", "thread_id", "created_at", "source", "text", "extraction", "matches")
+ACCOUNT_JSON_FIELDS = {"favourite_sports", "settings", "payload", "result", "content", "detail", "extraction",
+                       "matches"}
+PASTED_SOURCES = ("text", "image", "basic")  # as engine.pasted.SOURCES
+MAX_PASTED = 200  # pasted slips kept per person; older ones are deleted
+MAX_PASTED_TEXT = 6000  # engine.pasted.MAX_PASTE_CHARS
 
 BUDGET_RAISE_DELAY = 24 * 3600  # seconds: lowering a limit protects at once, raising one waits a day
 COOLOFF_HOURS = (24, 24 * 92)   # a time-out lasts from 24 hours to about 3 months
@@ -577,6 +596,11 @@ class Store:
                 "SELECT fetched_at, payload FROM odds_snapshots WHERE sport_key = ?", (sport_key,)
             ).fetchone()
         return (row[0], json.loads(row[1])) if row else None
+
+    def odds_fetched_at(self) -> Dict[str, float]:
+        """When each league's saved odds were fetched (epoch seconds), without reading the odds themselves."""
+        with closing(self._connect()) as db:
+            return {key: float(fetched) for key, fetched in db.execute("SELECT sport_key, fetched_at FROM odds_snapshots")}
 
     def save_odds_snapshot(self, sport_key: str, games: List[Dict[str, Any]], fetched_at: float) -> None:
         with closing(self._connect()) as db:
@@ -1495,6 +1519,47 @@ class Store:
         """The call is over (or failed): the person may start another. Only that call's own hold is removed."""
         with closing(self._connect()) as db:
             db.execute("DELETE FROM ai_holds WHERE user = ? AND token = ?", (user, token))
+
+    # --- pasted bet slips: what was read from each, and where its legs matched -------------------------
+
+    def save_pasted(self, user: str, source: str, extraction: Mapping[str, Any], matches: Sequence[Any],
+                    text: Optional[str] = None, thread_id: Optional[int] = None, now: Optional[float] = None) -> int:
+        """Keep a pasted slip as read (``extraction``) and matched (``matches``, one entry per leg), with the
+        pasted text (cut to 6,000 characters); returns its id. Only the person's newest MAX_PASTED are kept."""
+        if not isinstance(user, str) or not user or user.startswith(RESERVED_PREFIX):
+            raise ValueError("A pasted slip needs a person's id")
+        if source not in PASTED_SOURCES:
+            raise ValueError(f"source must be one of {', '.join(PASTED_SOURCES)}")
+        if not isinstance(extraction, Mapping) or not isinstance(matches, (list, tuple)):
+            raise ValueError("A pasted slip needs what was read and its matches")
+        if thread_id is not None:
+            _count(thread_id, "thread_id", 1, MAX_CENTS)
+        if text is not None and not isinstance(text, str):
+            raise ValueError("The pasted text must be text")
+        with closing(self._connect()) as db, _transaction(db):
+            cursor = db.execute(
+                "INSERT INTO pasted_slips (user, thread_id, created_at, source, text, extraction, matches) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (user, thread_id, _now(now), source, text[:MAX_PASTED_TEXT] if text else None,
+                 _dumps(dict(extraction)), _dumps(list(matches))),
+            )
+            db.execute("DELETE FROM pasted_slips WHERE user = ? AND id NOT IN (SELECT id FROM pasted_slips "
+                       "WHERE user = ? ORDER BY created_at DESC, id DESC LIMIT ?)", (user, user, MAX_PASTED))
+        return int(cursor.lastrowid)
+
+    def pasted(self, user: str, pasted_id: int) -> Optional[Dict[str, Any]]:
+        """One of the person's pasted slips; None if there is none with that id or it isn't theirs."""
+        with closing(self._connect()) as db:
+            values = db.execute(f"SELECT {', '.join(PASTED_FIELDS)} FROM pasted_slips WHERE id = ? AND user = ?",
+                                (pasted_id, user)).fetchone()
+        return _record(PASTED_FIELDS, values) if values else None
+
+    def pasted_for_thread(self, user: str, thread_id: int) -> List[Dict[str, Any]]:
+        """The person's slips pasted into one chat, oldest first (newest last)."""
+        with closing(self._connect()) as db:
+            rows = db.execute(f"SELECT {', '.join(PASTED_FIELDS)} FROM pasted_slips WHERE user = ? AND thread_id = ? "
+                              "ORDER BY created_at, id", (user, thread_id)).fetchall()
+        return [_record(PASTED_FIELDS, values) for values in rows]
 
     # --- responsible gambling: warning signs code acted on, for the owner to review ----------------
 

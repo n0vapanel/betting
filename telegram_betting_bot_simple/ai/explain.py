@@ -130,13 +130,18 @@ def response_text(response: Any) -> str:
 
 # --- the numbers check -------------------------------------------------------------------------
 
-# A number as written: optional currency and sign, digits (with thousands commas), decimals, percent
+# A number as written: optional currency and sign, digits (with thousands commas), decimals, percent. A pasted
+# slip may be in rand, shillings or naira ("R50", "KSh 200", "₦1,000"): written that way, a number is money too
+# (and checked: glued to letters, it would otherwise pass as part of a name)
 _NUMBER = re.compile(
-    r"(?P<cur>[$£€])?(?P<sign>[-+−])?(?P<cur2>[$£€])?"
+    r"(?P<cur>[$£€₦₹₵]|\b(?:R|KSh|Ksh)\s?(?=[-+−]?\d))?(?P<sign>[-+−])?(?P<cur2>[$£€₦₹₵])?"
     r"(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)"
     r"(?P<pct>\s?%|\s?per ?cent\b)?"
 )
 _ONE_IN = re.compile(r"\b1(?:\s+|-)in(?:\s+|-)(?P<num>\d{1,3}(?:,\d{3})+|\d+)\b")
+# Fractional odds ("6/4", "11/10", "4 / 6") are one figure, the decimal odds they stand for (6/4 is 2.50): its
+# two halves alone would each pass for any small number nearby
+_FRACTION = re.compile(r"(?<![\w/.,])(?P<top>\d{1,4})\s*/\s*(?P<bottom>\d{1,4})(?![\d/]|\.\d)")
 # Text that holds digits but no betting numbers: clock times, dates, helplines, age limits
 _NOT_NUMBERS = [
     re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:[ap]\.?m\.?\b)?", re.I),
@@ -213,6 +218,7 @@ class Figure:
     sign: int = 0  # +1 or -1 when written with a sign ("+$0.26", "-2.60"), else 0
     gain: bool = False  # said to be a gain: "a profit of $0.26", "make about $3"
     loss: bool = False  # said to be a loss: "lose $2.60", "costs $3"
+    fraction: bool = False  # fractional odds ("6/4"), as the decimal odds they stand for
 
     @property
     def signed(self) -> float:
@@ -266,13 +272,30 @@ def _checked_small(text: str, start: int, end: int) -> bool:
     return bool(_TO_BEFORE.search(before)) and not _COUNT_NOUN.match(text, end)
 
 
-def _figures(text: str, skip_trivial: bool) -> List[Figure]:
+def _fraction_odds(match: "re.Match[str]") -> Optional[float]:
+    """The decimal odds fractional odds stand for (5/2 is 3.5), or None for a zero."""
+    top, bottom = int(match.group("top")), int(match.group("bottom"))
+    return 1 + top / bottom if top and bottom else None
+
+
+def _figures(text: str, skip_trivial: bool, fractions: bool = True) -> List[Figure]:
+    """The figures in a text. With ``fractions``, fractional odds are read as one figure, their decimal odds
+    to 2 places ("6/4" is 2.50), unless a count follows ("7/10 games" is a record, not odds)."""
     figures: List[Figure] = []
     for match in _ONE_IN.finditer(text):
         number = match.group("num")
         figures.append(Figure(match.group(0), float(number.replace(",", "")), 0, False, False, one_in=True))
     # "1 in 12": the 12 was checked above and the 1 is just words
     text = _ONE_IN.sub(" ", text)
+    if fractions:
+        def odds(match: "re.Match[str]") -> str:
+            value = _fraction_odds(match)
+            if value is None:
+                return match.group(0)
+            if not _COUNT_NOUN.match(text, match.end()):
+                figures.append(Figure(match.group(0), value, 2, False, False, fraction=True))
+            return " "
+        text = _FRACTION.sub(odds, text)
     for match in _NUMBER.finditer(text):
         start, end = match.span()
         before = text[start - 1] if start else " "
@@ -314,11 +337,22 @@ def numbers_in(text: str, exempt: Optional["re.Pattern[str]"] = None) -> List[Fi
     return _figures(text, skip_trivial=True)
 
 
-def source_numbers(*objects: Any) -> Set[float]:
+class Sources(set):
+    """The numbers a reply may quote (a set of floats), and apart from them the decimal odds of the fractions
+    written in the sources ("5/2" is 3.5): only a fraction in the reply may be traced to those, so "11/10" on a
+    slip never lets a bare "2" through."""
+
+    def __init__(self, *args: Any) -> None:
+        super().__init__(*args)
+        self.fractions: Set[float] = set()
+
+
+def source_numbers(*objects: Any) -> Sources:
     """Every number in tool results or a fact sheet (values and numbers inside strings), with its sign: a
     number in a string counts as negative when written so ("-2.60") or said to be a loss ("cost $3"). A line's
-    ``point`` counts with both signs: Boston +4.5 is the Lakers -4.5."""
-    found: Set[float] = set()
+    ``point`` counts with both signs: Boston +4.5 is the Lakers -4.5. Fractions in strings count by their halves
+    as before, and their decimal odds go in ``fractions`` (see Sources)."""
+    found = Sources()
 
     def walk(value: Any) -> None:
         if isinstance(value, bool) or value is None:
@@ -328,7 +362,9 @@ def source_numbers(*objects: Any) -> Set[float]:
             if math.isfinite(number):
                 found.add(number)
         elif isinstance(value, str):
-            found.update(figure.signed for figure in _figures(value, skip_trivial=False))
+            # Each half of "5/2" counts as before; the decimal odds it stands for (3.5) only for a fraction
+            found.update(figure.signed for figure in _figures(value, skip_trivial=False, fractions=False))
+            found.fractions.update(odds for odds in map(_fraction_odds, _FRACTION.finditer(value)) if odds is not None)
         elif isinstance(value, dict):
             point = value.get("point")
             if isinstance(point, (int, float, Decimal)) and not isinstance(point, bool):
@@ -363,6 +399,8 @@ def _traced(figure: Figure, sources: Iterable[float]) -> bool:
     slack = 0.5 * 10 ** -figure.decimals + 1e-9
     whole = figure.decimals == 0 and not figure.percent and figure.value >= 100
     zeros = len(str(int(figure.value))) - len(str(int(figure.value)).rstrip("0")) if whole else 0
+    if figure.fraction:  # fractional odds: the code's decimal odds, or a fraction written in the sources
+        sources = [*sources, *getattr(sources, "fractions", ())]
     for signed in sources:
         if not _sign_fits(figure, signed):
             continue

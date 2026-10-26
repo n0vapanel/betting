@@ -26,11 +26,18 @@ more, and the next answers "quota" with a hint to ask which sport they mean.
 The tool list is byte-for-byte the same on every request so the prompt cache
 holds; while picks are paused for someone, the pricing and building tools
 answer "picks_paused" instead of being removed.
+
+A bet slip the person pasted (read by ai/slip_reader.py, matched and priced
+by the Lab) is re-analysed with pasted_slip_analyse: by its id, and only one
+pasted in this chat, with legs left out by number, another stake (checked
+like every stake: the slip's own, or less) or another ticket type. Its
+results carry the slip's numbers as the person's bookmaker wrote them.
 """
 
 from __future__ import annotations
 
 import datetime
+import re
 import inspect
 import logging
 from dataclasses import dataclass
@@ -43,6 +50,7 @@ from pydantic import BaseModel, Field, ValidationError
 from ..dashboard.service import CallRejected, NotFound
 from ..data.espn_client import LEAGUES as ESPN_LEAGUES
 from ..data.leagues import POPULAR_LEAGUES
+from ..engine.pasted import system_key
 from ..engine.tickets import ai_given_no_push, chance_label, combinations, one_in
 
 LEAGUE_KEYS: Tuple[str, ...] = tuple(sorted(set(ESPN_LEAGUES) | set(POPULAR_LEAGUES)))
@@ -60,9 +68,12 @@ DEFAULT_MIN_ODDS = Decimal("2.00")
 ODDS_SOURCE = "The Odds API (best price across bookmakers, margin-free market chances)"
 BRAIN_SOURCE = "The brain: our model's chances next to the bookmakers' margin-free ones"
 ESPN_SOURCE = "ESPN"
+PASTED_SOURCE = ("The user's pasted slip at their own odds, priced by the brain: chances from the market, the model "
+                 "or estimated from their price minus a typical margin when the leg isn't on our boards")
+MAX_PASTED_LEGS = 20
 # Tools that price or build tickets: off while picks are paused after a warning sign
 PICK_TOOLS = frozenset({"odds_get_prices", "brain_price_legs", "ticket_price", "ticket_build", "ticket_analyse",
-                        "rollover_simulate", "slip_propose", "player_get_props"})
+                        "rollover_simulate", "slip_propose", "player_get_props", "pasted_slip_analyse"})
 
 
 # --- what Claude sees -------------------------------------------------------------------------------
@@ -97,7 +108,7 @@ _TICKET = {
                                                 "lucky31, heinz, lucky63, super_heinz or goliath"},
 }
 
-# Not "strict": Claude compiles strict schemas into one grammar, and twelve tools with the league list in
+# Not "strict": Claude compiles strict schemas into one grammar, and the tools with the league list in
 # every leg made it too large ("The compiled grammar is too large", a 400 on every chat turn). Toolbox.run
 # checks every input against its pydantic model instead, and a bad one comes back as an error with a hint.
 TOOLS: List[Dict[str, Any]] = [
@@ -162,6 +173,23 @@ TOOLS: List[Dict[str, Any]] = [
      "description": "The user's settings: odds format, favourite sports, risk tier, weekly budget left, "
                     "cool-off and AI credits left (read only).",
      "input_schema": _obj({})},
+    {"name": "pasted_slip_analyse",
+     "description": "Analyse a bet slip the user pasted in this chat (pasted_id from the context) at their own "
+                    "odds: chance as '1 in X', payout, what the bookmaker keeps, the expected result, notes per "
+                    "leg (better prices on our boards, lines that differ, estimated chances) and cheaper "
+                    "versions. To answer 'what if', leave legs out with drop (leg numbers from 1), or change the "
+                    "stake or the ticket type. Call it before quoting any number about a changed slip.",
+     "input_schema": _obj({
+         "pasted_id": {"type": "integer"},
+         "drop": {"type": "array", "items": {"type": "integer"}, "description": "Leg numbers to leave out (from 1)"},
+         "stake": {"type": "number", "description": "Stake per bet in the user's currency, as the user gave it; "
+                                                    "leave it out to keep the slip's own"},
+         "split": {"type": "boolean", "description": "true: stake is for the whole ticket and code divides it "
+                                                     "evenly across the bets"},
+         "ticket_type": {"type": "string", "enum": list(TICKET_TYPES)},
+         "k": {"type": "integer", "description": "round_robin only: legs per bet (2 to 7)"},
+         "system": {"type": "string", "description": "system only, e.g. trixie, patent, yankee, lucky15"},
+     }, optional=("drop", "stake", "split", "ticket_type", "k", "system"))},
 ]
 TOOL_NAMES = tuple(tool["name"] for tool in TOOLS)
 
@@ -233,11 +261,22 @@ class NoInput(BaseModel):
     pass
 
 
+class PastedInput(BaseModel):
+    pasted_id: int = Field(ge=1)
+    drop: List[int] = Field(default_factory=list, max_length=MAX_PASTED_LEGS)
+    stake: Optional[Decimal] = Field(None, gt=0, le=100000, decimal_places=2)
+    split: Optional[bool] = None
+    ticket_type: Optional[Literal[TICKET_TYPES]] = None  # type: ignore[valid-type]
+    k: Optional[int] = Field(None, ge=2, le=7)
+    system: Optional[str] = Field(None, max_length=20)
+
+
 INPUTS: Dict[str, type] = {
     "sports_find_events": EventsInput, "odds_get_prices": OddsInput, "player_get_profile": PlayerInput,
     "player_get_props": PlayerInput, "news_get": NewsInput, "brain_price_legs": LegsInput,
     "ticket_price": TicketInput, "ticket_build": BuildInput, "ticket_analyse": TicketInput,
     "rollover_simulate": RolloverInput, "slip_propose": TicketInput, "user_get_context": NoInput,
+    "pasted_slip_analyse": PastedInput,
 }
 
 
@@ -408,6 +447,177 @@ def player_card(player: Dict[str, Any], source: str) -> Dict[str, Any]:
             **{key: player.get(key) for key in keep if player.get(key) is not None}}
 
 
+# --- a pasted slip ----------------------------------------------------------------------------------------
+
+def amount_of(value: Any) -> Optional[Decimal]:
+    """An amount from a pasted slip's view ("10.00"), or None."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = Decimal(str(value).replace(",", ""))
+    except ArithmeticError:
+        return None
+    return number if number.is_finite() and number > 0 else None
+
+
+def pasted_label(leg: Mapping[str, Any]) -> str:
+    """One pasted leg in words: "Boston Celtics -4.5", "Over 224.5 (Lakers @ Celtics)", "LeBron James over 27.5
+    points", "Arsenal to win". The Lab's own label (PastedView legs[].label, what the card and the Lab's notes
+    and warnings call the leg) when the view has one, with the game after a total; else built here."""
+    market, line = leg.get("market"), leg.get("line")
+    label = " ".join(str(leg.get("label") or "").split())
+    if label:
+        game = (leg.get("match") or {}).get("game")
+        return f"{label} ({game})" if market == "total" and game and game not in label else label
+    selection = " ".join(str(leg.get("selection") or "").split()) or "?"
+    number = isinstance(line, (int, float)) and not isinstance(line, bool)
+    side = str(leg.get("over_under") or "").lower()
+    if market == "moneyline":
+        return selection if selection.lower() == "draw" else f"{selection} to win"
+    if market == "spread":
+        return f"{selection} {line:+g}" if number else selection
+    if market == "total":
+        what = side.capitalize() if side in ("over", "under") else selection
+        text = f"{what} {line:g}" if number else what
+        game = (leg.get("match") or {}).get("game")
+        return f"{text} ({game})" if game else text
+    if market == "player_prop":
+        parts = [selection] + ([side] if side in ("over", "under") else []) + ([f"{line:g}"] if number else [])
+        parts += [str(leg["prop_stat"])] if leg.get("prop_stat") else []
+        return " ".join(parts)
+    return selection
+
+
+def pasted_bets(view: Mapping[str, Any]) -> int:
+    """How many bets the pasted slip holds as read (an unknown type counts as a multi, or one single)."""
+    legs = len(view.get("legs") or [])
+    kind = view.get("bet_type") if view.get("bet_type") in TICKET_TYPES else ("multi" if legs > 1 else "single")
+    k = view.get("k") if isinstance(view.get("k"), int) and not isinstance(view.get("k"), bool) else None
+    return bet_count(kind, legs, k, system_key(view.get("system")))
+
+
+def pasted_stakes(view: Mapping[str, Any]) -> List[Decimal]:
+    """The money the person put on the pasted slip: its stake per bet, and the whole slip (the stated total,
+    or the stake times its bets). These are amounts they gave, so tools may use them (never more)."""
+    stake, total = amount_of(view.get("stake")), amount_of(view.get("total_stake"))
+    found = [amount for amount in (stake, total) if amount is not None]
+    if stake is not None and total is None:
+        found.append(stake * pasted_bets(view))
+    return found
+
+
+def slip_numbers(view: Mapping[str, Any]) -> Dict[str, Any]:
+    """The numbers on the person's own slip, as written and as code read them (odds, lines, stake, the stated
+    return): numbers a reply may quote back to them. Odds as written count only where code could read them as
+    odds ("+150", "5/2"), so other text the reader put there isn't a number Claude may state."""
+    legs = view.get("legs") or []
+    return {"odds_as_written": [leg.get("odds_text") for leg in legs if leg.get("odds")],
+            "odds": [(leg.get("odds") or {}) for leg in legs],
+            "lines": [leg.get("line") for leg in legs],
+            "stake": view.get("stake"), "total_stake": view.get("total_stake"),
+            "stated_return": view.get("stated_return"), "computed_return": view.get("computed_return")}
+
+
+def pasted_facts(view: Mapping[str, Any], chances: bool = True) -> Dict[str, Any]:
+    """A pasted slip for Claude: what was read and how each leg matched; with ``chances``, the brain's
+    chances and the best prices on the boards too. Everything pasted is short (the Lab caps it)."""
+    legs = []
+    for leg in view.get("legs") or []:
+        match = leg.get("match") or {}
+        entry: Dict[str, Any] = {
+            "leg": leg.get("index"), "label": pasted_label(leg), "market": leg.get("market"),
+            "odds_as_written": leg.get("odds_text"), "odds": (leg.get("odds") or {}).get("decimal"),
+            "match": match.get("status"), "game": match.get("game"), "live": match.get("live") or None,
+            "note": match.get("note")}
+        if chances:
+            entry.update(market_chance=_p(leg.get("market_chance")), ai_chance=_p(leg.get("ai_chance")),
+                         chance_source=leg.get("chance_source"), best_price=leg.get("best_price"),
+                         better_price=leg.get("better_price") or None)
+        legs.append(entry)
+    facts: Dict[str, Any] = {
+        "pasted_id": view.get("id"), "read_from": view.get("source"), "bookmaker": view.get("bookmaker"),
+        "bet_type": view.get("bet_type"), "k": view.get("k"), "system": view.get("system"),
+        "currency": view.get("currency"), "stake_per_bet": view.get("stake"), "total_stake": view.get("total_stake"),
+        "bookmaker_says_it_returns": view.get("stated_return"), "legs": legs, "warnings": view.get("warnings") or []}
+    if chances:
+        facts.update(code_return=view.get("computed_return"), return_check=view.get("return_check"))
+    return trim(facts, items=MAX_PASTED_LEGS)
+
+
+def pasted_ticket_facts(ticket: Mapping[str, Any]) -> Dict[str, Any]:
+    """ticket_facts for a pasted slip's ticket, with every leg named by its number on the slip (1, 2, ...).
+
+    engine/tickets numbers a ticket's legs from 0 among the legs it prices (weakest_leg too), while the slip,
+    the leg notes and pasted_slip_analyse's drop count the slip's legs from 1, left-out legs included: the Lab
+    gives each priced leg its slip_index, and Claude only ever sees that number."""
+    facts = ticket_facts(ticket)
+    numbers = [leg.get("slip_index") for leg in ticket.get("legs") or []]
+    for leg, number in zip(facts.get("legs") or [], numbers):
+        leg.pop("index", None)
+        leg["leg"] = number
+    weakest = ticket.get("weakest_leg")
+    if isinstance(weakest, int) and not isinstance(weakest, bool) and 0 <= weakest < len(numbers):
+        facts["weakest_leg"] = numbers[weakest]
+    else:
+        facts.pop("weakest_leg", None)
+    return facts
+
+
+def pasted_analysis_facts(analysis: Mapping[str, Any]) -> Dict[str, Any]:
+    """The Lab's analysis of a pasted slip, in the compact form Claude is shown. Legs are numbered as on the
+    slip everywhere (the ticket's, the weakest leg, the notes and each cheaper version's "drop", the legs to
+    leave out with pasted_slip_analyse to get it)."""
+    alternatives = [{"title": alt.get("title"), "summary": alt.get("summary"), "drop": alt.get("drop"),
+                     "ticket": pasted_ticket_facts(alt["ticket"]) if alt.get("ticket") else None}
+                    for alt in analysis.get("alternatives") or [] if isinstance(alt, Mapping)]
+    return {"slip": pasted_facts(analysis.get("pasted") or {}), "left_out": list(analysis.get("drop") or []),
+            "stake_per_bet": analysis.get("stake"), "ticket_type": analysis.get("ticket_type"),
+            "ticket": pasted_ticket_facts(analysis.get("ticket") or {}),
+            "leg_notes": trim(analysis.get("legs") or [], items=MAX_PASTED_LEGS),
+            "alternatives": trim(alternatives, items=4), "source": PASTED_SOURCE}
+
+
+# The slip's own words in a pasted slip's tool results: what the reader copied, never code's numbers
+PASTED_WORDS = ("label", "selection", "raw", "event_text", "start_text", "sport_hint", "odds_text")
+PASTED_WORD_KEYS = frozenset({"label", "bookmaker", "system", "odds_as_written", "currency"})
+
+
+def pasted_quotable(content: Any, view: Mapping[str, Any]) -> Any:
+    """A pasted slip's tool result with the slip's own words taken out, for the numbers check's sources.
+
+    Labels, the bookmaker and the like come from what was pasted ("Knicks (tipster: 13% sure)"), and the leg
+    notes, warnings and alternatives quote those labels: a number in them was never worked out by code, so a
+    reply may not state it as a fact. Those fields are dropped, and the slip's words with a digit in them are
+    cut out of every other string; the slip's own odds, lines and money are quotable through slip_numbers."""
+    texts = {str(leg.get(key)) for leg in view.get("legs") or [] if isinstance(leg, Mapping)
+             for key in PASTED_WORDS if leg.get(key)}
+    texts |= {pasted_label(leg) for leg in view.get("legs") or [] if isinstance(leg, Mapping)}
+    texts |= {str(view.get(key)) for key in ("bookmaker", "system", "notes", "text", "currency") if view.get(key)}
+    # Only words holding a number matter; a bare number ("1", "-110") is the slip's own and quotable anyway
+    cut = sorted((text for text in texts if re.search(r"\d", text) and not re.fullmatch(r"[\s+\-.,/\d]+", text)),
+                 key=len, reverse=True)
+
+    def clean(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return {key: clean(item) for key, item in value.items() if key not in PASTED_WORD_KEYS}
+        if isinstance(value, (list, tuple)):
+            return [clean(item) for item in value]
+        if isinstance(value, str):
+            for text in cut:
+                value = value.replace(text, " ")
+        return value
+
+    return clean(content)
+
+
+def pasted_card(view: Mapping[str, Any], analysis: Optional[Mapping[str, Any]], source: str,
+                title: str = "Your slip") -> Dict[str, Any]:
+    """The pasted slip's card: what was read, how it matched and the code's analysis (the app's card shows
+    them with leg toggles; the bot writes them out)."""
+    return {"type": "pasted", "source": source, "title": title, "pasted": dict(view),
+            "analysis": dict(analysis) if analysis is not None else None}
+
+
 # --- running the tools ----------------------------------------------------------------------------------
 
 STEPS: Dict[str, Callable[[Dict[str, Any]], str]] = {
@@ -423,6 +633,7 @@ STEPS: Dict[str, Callable[[Dict[str, Any]], str]] = {
     "rollover_simulate": lambda a: "Running the rollover numbers…",
     "slip_propose": lambda a: "Preparing a slip for you to check…",
     "user_get_context": lambda a: "Checking your settings…",
+    "pasted_slip_analyse": lambda a: "Re-checking your slip…",
 }
 
 
@@ -446,11 +657,16 @@ class Toolbox:
     ``leagues`` are the ones the turn may load odds for freely (asked for, or
     the person's favourites); leagues already loaded are free too, and
     ``extra_leagues`` more may be loaded before "quota" errors start.
+
+    ``pasted`` holds the slips pasted in this chat that pasted_slip_analyse may
+    use: their views by id (None for one whose view is fetched when needed).
+    Any other id is refused, so nothing pasted elsewhere can be reached.
     """
 
     def __init__(self, lab: Any, uid: str, tz: ZoneInfo, limits: Optional[Mapping[str, Iterable[Decimal]]] = None,
                  paused: bool = False, now: Optional[Callable[[], datetime.datetime]] = None,
-                 leagues: Iterable[str] = (), extra_leagues: int = EXTRA_LEAGUES) -> None:
+                 leagues: Iterable[str] = (), extra_leagues: int = EXTRA_LEAGUES,
+                 pasted: Optional[Mapping[int, Optional[Mapping[str, Any]]]] = None) -> None:
         self.lab = lab
         self.uid = uid
         self.tz = tz
@@ -460,11 +676,13 @@ class Toolbox:
         self.leagues: Set[str] = set(leagues)
         self.extra_leagues = extra_leagues
         self.extra: Set[str] = set()  # leagues loaded this turn beyond self.leagues
+        self.pasted: Dict[int, Optional[Mapping[str, Any]]] = dict(pasted or {})
         self.runners: Dict[str, Callable[[Any], Tuple[Dict[str, Any], str, List[Dict[str, Any]]]]] = {
             "sports_find_events": self._events, "odds_get_prices": self._odds, "player_get_profile": self._profile,
             "player_get_props": self._props, "news_get": self._news, "brain_price_legs": self._brain,
             "ticket_price": self._price, "ticket_build": self._build, "ticket_analyse": self._analyse,
             "rollover_simulate": self._rollover, "slip_propose": self._propose, "user_get_context": self._context,
+            "pasted_slip_analyse": self._pasted,
         }
 
     def _as_of(self) -> str:
@@ -825,6 +1043,58 @@ class Toolbox:
         summary = (f"rollover_simulate(start {body['start']}, {data.days} days at {body['min_odds']}, "
                    f"{data.legs_per_day} leg(s) a day)")
         return content, summary, [plan_card(body, compare)]
+
+    def _pasted(self, data: PastedInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
+        if data.pasted_id not in self.pasted:
+            raise ToolError("not_found", f"No slip {data.pasted_id} was pasted in this chat",
+                            "Use the pasted_id the context gives; for another slip, the user pastes it")
+        view = self.pasted[data.pasted_id]
+        if view is None:  # pasted earlier in this chat: its view is re-priced from the cached boards
+            view = self.pasted[data.pasted_id] = self.lab.pasted_view(self.uid, data.pasted_id) or {}
+        legs = len(view.get("legs") or [])
+        drop = sorted(set(data.drop))
+        if any(index < 1 or index > legs for index in drop):
+            raise ToolError("invalid_input", f"The legs on this slip are numbered 1 to {legs}",
+                            "Use the leg numbers from the slip")
+        if len(drop) >= legs:
+            raise ToolError("rejected", "That leaves no legs on the slip", "Leave at least one leg in")
+        left = legs - len(drop)
+        own_kind = view.get("bet_type") if view.get("bet_type") in TICKET_TYPES else None
+        kind = data.ticket_type or own_kind or ("multi" if left > 1 else "single")
+        k = data.k if data.k is not None else (view.get("k") if kind == "round_robin" else None)
+        system = system_key(data.system or (view.get("system") if kind == "system" else None))
+        bets = bet_count(kind, left, k, system)
+        stake = data.stake
+        if stake is not None and data.split and bets > 1:
+            # Code does the division, rounding down, so the bets never add up to more than the user's stake
+            stake = (stake / bets).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            if stake <= 0:
+                raise ToolError("rejected", f"{_cents(data.stake)} can't be shared across {bets} bets",
+                                "Suggest fewer bets, such as a single or a multi")
+        own = amount_of(view.get("stake"))
+        if stake is not None:
+            self._check_amount("stake", stake, "stake", bets)
+        elif own is not None:
+            self._check_amount("stake", own, "stake", bets)  # the slip's stake on another shape may cost more
+        elif data.ticket_type is not None and data.ticket_type != own_kind:
+            raise ToolError("amount_not_given", "The slip shows no stake, so a new shape needs one from the user",
+                            "Ask the user what stake they want; never choose one for them")
+        options: Dict[str, Any] = {"drop": drop, "stake": _cents(stake) if stake is not None else None}
+        if data.ticket_type is not None:
+            options["ticket_type"] = data.ticket_type
+        if data.k is not None:
+            options["k"] = data.k
+        if data.system:
+            options["system"] = data.system
+        analysis = self.lab.analyse_pasted(self.uid, data.pasted_id, **options) or {}
+        content = pasted_analysis_facts(analysis)
+        ticket = analysis.get("ticket") or {}
+        summary = (f"pasted_slip_analyse(slip {data.pasted_id}{', without legs ' + ','.join(map(str, drop)) if drop else ''}"
+                   f", {ticket_title(ticket)}, stake {analysis.get('stake')} per bet): "
+                   + "; ".join(f"{leg.get('index')}. {pasted_label(leg)}"
+                               for leg in (analysis.get("pasted") or view).get("legs") or []))
+        cards = [pasted_card(analysis.get("pasted") or view, analysis, "pasted_slip_analyse")]
+        return content, summary, cards
 
     def _context(self, data: NoInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
         me = self.lab.me(self.uid) or {}

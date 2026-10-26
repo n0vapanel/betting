@@ -431,11 +431,21 @@ setup_caddy() {
 # Written by setup_vps.sh: the betting dashboard over HTTPS. Caddy gets and renews the certificate.
 $DOMAIN {
 	encode gzip
-	# The app's largest real request is a few kilobytes; the app refuses bigger ones too
-	request_body {
-		max_size 64KB
+	# A pasted bet slip's screenshot (POST /api/chat/slip) may be up to 2.5 MB; every other request is a few
+	# kilobytes. The app refuses bigger ones too, path by path.
+	@slip path /api/chat/slip
+	handle @slip {
+		request_body {
+			max_size 2500KB
+		}
+		reverse_proxy 127.0.0.1:$port
 	}
-	reverse_proxy 127.0.0.1:$port
+	handle {
+		request_body {
+			max_size 64KB
+		}
+		reverse_proxy 127.0.0.1:$port
+	}
 }
 CADDY
   if [ ! -f "$CADDYFILE" ] || stock_caddyfile "$CADDYFILE"; then

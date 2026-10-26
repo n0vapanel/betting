@@ -45,6 +45,15 @@ const NEW_TERMS = {
     body: "Kelly = (chance × odds − 1) ÷ (odds − 1), as a share of your bankroll. It needs a real edge, which almost nobody has against the market, and an overconfident chance makes it overbet, so many professionals use half of it or less. This app never sizes stakes from the AI's confidence.",
     example: "A true 55% chance at 2.00: Kelly says 10% of the bankroll, half-Kelly 5%.",
   },
+  paste_slip: {
+    title: "Paste a slip",
+    short: "Paste a bet slip from any bookmaker (its text or a screenshot) and the app checks it at your own odds.",
+    body: "In Ask AI, tap 📋 Paste a slip. The AI only copies what the slip says; the app's code checks that copy, finds each leg among the games it has odds for and works out the honest chance, what the bookmaker keeps, the weakest leg, better prices elsewhere and cheaper ways to play it. Then you can talk it through: \"what if I drop leg 3?\". "
+      + "It reads moneylines, spreads, totals and NBA player points, rebounds, assists, threes, steals, blocks and turnovers. It can't model player props outside the NBA or unusual markets (both teams to score, correct score, first scorer): those legs are priced at your odds with an estimated chance, and the card says so. "
+      + "Each leg's chance comes from the market (the bookmakers' prices with their margin taken out), from the NBA model, or is estimated from your own price minus a typical bookmaker margin. When a read looks doubtful (your bookmaker's return doesn't match, or some odds couldn't be read) the app asks you to check it before any numbers. "
+      + "Screenshots aren't kept: only what was read from them, in your own history that nobody else can see. With too little AI allowance left, or while picks are paused, the free reader (code only) reads pasted text at no cost; screenshots need the AI, so paste the slip's text then.",
+    example: "Celtics −3.5 at −110 and Nuggets to win at −400 for $10: $23.86 back if both win, about 1 in 2.6.",
+  },
   roi: {
     title: "Net profit and ROI",
     short: "What you're up or down after every stake, and that as a share of everything you staked.",
@@ -251,6 +260,18 @@ const EXTRAS = {
       "That's why the app shows it next to the payout, not tucked away."],
     related: ["one_in", "multi", "payout"], see: "#/build", seeLabel: "See it on your slip",
   },
+  paste_slip: {
+    group: "ai", aka: ["slip reader", "slip checker"],
+    aliases: ["paste", "pasted slip", "bet slip", "betslip", "screenshot", "bookmaker slip", "check my slip", "read my slip",
+      "slip reader", "free reader", "photo of slip", "upload slip"],
+    worked: ["You paste: \"Boston Celtics -3.5 -110\", \"Denver Nuggets ML -400\", \"Stake $10\", \"To win $13.86\".",
+      "Code converts the odds: −110 is 1 + 100 ÷ 110 = 1.909 and −400 is 1 + 100 ÷ 400 = 1.25.",
+      "$10 × 1.909 × 1.25 = $23.86 back, a profit of $13.86: it matches the bookmaker's \"To win\", so the read is right.",
+      "Both legs are on tonight's board, so their chances come from the market with the margin taken out: say 50% and 77%.",
+      "Both must win: 0.50 × 0.77 = 38.5%, about 1 in 2.6. On average $23.86 × 0.385 = $9.19 comes back, so you expect to lose about $0.81 of the $10 (about 8%): the bookmaker's cut on this slip.",
+      "A leg the app can't find is priced at your odds with an estimated chance: at 1.80 with a typical 4.5% margin, (1 ÷ 1.80) ÷ 1.045 = 53.2%."],
+    related: ["book_cut", "market_chance", "one_in"], see: "#/ask?paste=1", seeLabel: "Paste a slip in Ask AI",
+  },
   analysts: {
     group: "ai", aliases: ["claude", "deepseek", "ai analysts", "forecast", "analyst"],
     worked: ["Claude says Thunder 66%, the AI 64%, the market 62%.",
@@ -369,7 +390,7 @@ export const START_STEPS = [
   { iconName: "build", title: "Build", href: "#/build", link: "Open Build",
     text: "Make it singles, a multi, a round robin or a system bet. Ask the AI to analyse it, or let it build one for a stake and a target. The rollover planner shows four ways to play a run of days, real chances first." },
   { iconName: "ask", title: "Ask AI", href: "#/ask", link: "Open Ask AI",
-    text: "Ask in your own words, or fill in the request bar (sports, stake, what you'd like back, legs, Safe · Risky · Crazy). Code works out every number; Claude explains them." },
+    text: "Ask in your own words, paste a bet slip from any bookmaker (text or a screenshot), or fill in the request bar (sports, stake, what you'd like back, legs, Safe · Risky · Crazy). Code works out every number; Claude explains them." },
   { iconName: "chart", title: "My bets", href: "#/bets", link: "Open My bets",
     text: "Saved bets settle by themselves from the final scores. You see your net profit and ROI, your plans day by day, your calls against the AI and the AI's own graded record." },
 ];
@@ -438,6 +459,8 @@ export const FAQ = [
     a: "<p>Yes, until its first game starts (My bets → Upcoming → Delete). Bets under way, settled bets and a plan's days stay in your history so the record stays honest.</p>" },
   { q: "Who can see my bets?",
     a: "<p>Only you. A share code lets someone load the same picks (and the stake) into their own slip; it doesn't show your results or your other bets. In a browser your bets belong to that browser's sign-in; inside Telegram they belong to your Telegram account. Use a share code to move a slip between them.</p>" },
+  { q: "Can I paste a slip from my bookmaker?",
+    a: "<p>Yes. In <a href=\"#/ask?paste=1\">Ask AI</a>, tap 📋 Paste a slip and paste its text or add a screenshot (in Telegram, send it to the bot). The AI copies what it says; the app's code checks the copy, finds each leg among its games and works out the real chance, the bookmaker's cut, better prices and cheaper ways to play it. Player props outside the NBA and unusual markets get a chance estimated from your odds, and say so. Screenshots aren't kept, and nobody else can see your slips. See <a href=\"#/help/paste_slip\">Paste a slip</a>.</p>" },
   { q: "Why does the AI need credits?",
     a: "<p>Each AI chat or written analysis costs money on the server's account, so everyone has a daily allowance (Settings shows what's left). Prices, chances, slips and plans don't use it.</p>" },
   { q: "Can the AI give me a sure bet?",

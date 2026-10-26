@@ -28,10 +28,13 @@ function inline(line, { links = false } = {}) {
   return html;
 }
 
-const BULLET = /^\s*(?:[-•*]|\d{1,2}[.)])\s+/;
+const BULLET = /^\s*[-•*]\s+/;
+// "1. ..." lines keep their numbers: a pasted slip's legs are read back by number ("drop leg 3")
+const NUMBERED = /^\s*(\d{1,2})[.)]\s+/;
 
 /**
- * A reply as safe HTML: blank lines split paragraphs, "- " lines become a list, **bold** stays bold.
+ * A reply as safe HTML: blank lines split paragraphs, "- " lines become a list and "1. " lines a numbered
+ * one (each item keeps its own number), **bold** stays bold.
  * formatReply(text, {links: true}) also turns the helpline numbers into tap-to-call links.
  */
 export function formatReply(text, options = {}) {
@@ -39,9 +42,13 @@ export function formatReply(text, options = {}) {
   return blocks.map((block) => {
     const out = [];
     let list = [];
+    let ordered = false;
     let para = [];
     const flushList = () => {
-      if (list.length) out.push(`<ul>${list.map((item) => `<li>${inline(item, options)}</li>`).join("")}</ul>`);
+      if (list.length) {
+        const items = list.map((item) => `<li${ordered ? ` value="${item.n}"` : ""}>${inline(item.text, options)}</li>`).join("");
+        out.push(ordered ? `<ol>${items}</ol>` : `<ul>${items}</ul>`);
+      }
       list = [];
     };
     const flushPara = () => {
@@ -50,9 +57,12 @@ export function formatReply(text, options = {}) {
     };
     for (const line of block.split("\n")) {
       if (!line.trim()) continue;
-      if (BULLET.test(line)) {
+      const numbered = line.match(NUMBERED);
+      if (numbered || BULLET.test(line)) {
         flushPara();
-        list.push(line.replace(BULLET, ""));
+        if (list.length && Boolean(numbered) !== ordered) flushList();
+        ordered = Boolean(numbered);
+        list.push(numbered ? { n: Number(numbered[1]), text: line.replace(NUMBERED, "") } : { text: line.replace(BULLET, "") });
       } else {
         flushList();
         para.push(line);

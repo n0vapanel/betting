@@ -33,7 +33,7 @@ import threading
 import time
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Any, Callable, Collection, Dict, FrozenSet, List, Literal, Optional
+from typing import Annotated, Any, Callable, Collection, Dict, FrozenSet, List, Literal, Mapping, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
@@ -57,6 +57,7 @@ from .auth import (
     valid_session,
     verify_init_data,
 )
+from ..engine.pasted import MAX_IMAGE_BYTES, MAX_LEGS as MAX_PASTED_LEGS, MAX_PASTE_CHARS
 from .lab import COOLOFF_CHOICES, Lab
 from .service import CallRejected, DashboardService, NotFound
 
@@ -79,6 +80,11 @@ PLAYER_ID = re.compile(r"[A-Za-z0-9-]{8,64}")
 NO_ODDS_KEY = "Add THE_ODDS_API_KEY to the .env file and restart the dashboard"
 # The largest real request is a 2,000-character chat message with a 12-leg slip: a few kilobytes
 MAX_BODY_BYTES = 64 * 1024
+# ... except a pasted bet slip's screenshot: at most 1.8 MB, 2.4 MB as base64, with up to 6,000 characters of
+# text. Only this path takes that much (deploy/setup_vps.sh's Caddy site allows the same, for this path only)
+SLIP_PATH = "/api/chat/slip"
+MAX_SLIP_BODY_BYTES = 2_500_000
+BODY_LIMITS = {SLIP_PATH: MAX_SLIP_BODY_BYTES}
 TOO_LARGE = "The request is too large"
 LOGIN_FAILURES = 10  # wrong passwords from one address (an IPv6 /64) before it is locked out ...
 LOGIN_LOCKOUT = 15 * 60  # ... for this many seconds (failures older than this are forgotten)
@@ -267,6 +273,44 @@ class ChatBody(BaseModel):
         return self
 
 
+class SlipImage(BaseModel):
+    """A screenshot of a bet slip, as base64. Its own first bytes decide its type (the one sent is a hint)."""
+
+    media_type: Optional[str] = Field(None, max_length=40)
+    data: str = Field(min_length=1, max_length=(MAX_IMAGE_BYTES * 4) // 3 + 100)
+
+
+class ChatSlipBody(BaseModel):
+    """A pasted slip for the AI to read: its text, a screenshot, or both."""
+
+    thread_id: Optional[int] = Field(None, ge=1)
+    text: Optional[str] = Field(None, max_length=MAX_PASTE_CHARS * 2)  # the exact limit is checked with a message
+    image: Optional[SlipImage] = None
+
+    @model_validator(mode="after")
+    def something_to_read(self) -> "ChatSlipBody":
+        if not (self.text and self.text.strip()) and self.image is None:
+            raise ValueError("Paste the text of your bet slip or add a screenshot of it")
+        return self
+
+
+class PasteBody(BaseModel):
+    """A pasted slip for the free, code-only reader."""
+
+    text: str = Field(min_length=1, max_length=MAX_PASTE_CHARS * 2)  # the exact limit is checked with a message
+    thread_id: Optional[int] = Field(None, ge=1)
+
+
+class PastedAnalyseBody(BaseModel):
+    """The pasted slip's card toggles: legs left out (by number, from 1), the stake per bet and the kind of bet."""
+
+    drop: List[int] = Field(default_factory=list, max_length=MAX_PASTED_LEGS)
+    stake: Optional[Money] = None
+    type: Optional[Literal["single", "multi", "round_robin", "system"]] = None
+    k: Optional[int] = Field(None, ge=2, le=7)
+    system: Optional[str] = Field(None, pattern=r"^[A-Za-z0-9_ ]{2,20}$")
+
+
 # The browser re-checks the page and its files on every load (a quick 304 when unchanged),
 # so after an update it never keeps running old code against the new API
 NO_CACHE = {"Cache-Control": "no-cache"}
@@ -291,19 +335,22 @@ class LimitBody:
 
     FastAPI reads and parses a route's JSON body before its sign-in dependency runs, so without this
     anyone, signed in or not, could make the process parse (and hold) megabytes of JSON. A declared
-    Content-Length over the limit is refused at once; a chunked body is counted as it arrives.
+    Content-Length over the limit is refused at once; a chunked body is counted as it arrives. ``paths``
+    gives single paths their own limit (a pasted slip's screenshot); every other path keeps ``limit``.
     """
 
-    def __init__(self, app: Any, limit: int = MAX_BODY_BYTES) -> None:
+    def __init__(self, app: Any, limit: int = MAX_BODY_BYTES, paths: Optional[Mapping[str, int]] = None) -> None:
         self.app = app
         self.limit = limit
+        self.paths = dict(paths or {})
 
     async def __call__(self, scope: Dict[str, Any], receive: Callable[[], Any], send: Callable[[Any], Any]) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        limit = self.paths.get(scope.get("path") or "", self.limit)
         declared = next((value for name, value in scope.get("headers") or () if name == b"content-length"), None)
-        if declared is not None and (not declared.isdigit() or int(declared) > self.limit):
+        if declared is not None and (not declared.isdigit() or int(declared) > limit):
             await JSONResponse({"detail": TOO_LARGE}, status_code=413)(scope, receive, send)
             return
         received = 0
@@ -313,7 +360,7 @@ class LimitBody:
             message = await receive()
             if message.get("type") == "http.request":
                 received += len(message.get("body") or b"")
-                if received > self.limit:
+                if received > limit:
                     # FastAPI passes an HTTPException from the body read straight through: a plain 413
                     raise HTTPException(413, TOO_LARGE)
             return message
@@ -523,7 +570,7 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     """
     app = FastAPI(title="SportsBet AI", docs_url=None, redoc_url=None, openapi_url=None)
     app.add_exception_handler(RequestValidationError, invalid_request)  # type: ignore[arg-type]
-    app.add_middleware(LimitBody)  # before routing, so before any body is read or parsed
+    app.add_middleware(LimitBody, paths=BODY_LIMITS)  # before routing, so before any body is read or parsed
     key = session_key(password, bot_token)
     allowed = frozenset(telegram_ids)
     # Read by current_uid, so routes defined in other modules can depend on it too
@@ -820,6 +867,30 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     def chat(body: ChatBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
         """One turn with the AI assistant (it can take a while: it looks things up with the brain's tools)."""
         return lab_call(lambda: lab.chat(uid, body.model_dump(mode="json")))
+
+    @app.post("/api/chat/slip")
+    def chat_slip(body: ChatSlipBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """A pasted bet slip (text and/or a screenshot) for the AI to read, check in code and talk about. The
+        only route that takes a large body (a screenshot, up to 2.5 MB in all); the screenshot isn't kept."""
+        return lab_call(lambda: lab.chat_slip(uid, thread_id=body.thread_id, text=body.text,
+                                              image=body.image.data if body.image else None))
+
+    @app.post("/api/pasted")
+    def read_pasted(body: PasteBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """The free, code-only slip reader: {pasted, analysis} (and "support" after a warning sign in the text)."""
+        return lab_call(lambda: lab.read_free(uid, body.text, thread_id=body.thread_id))
+
+    @app.get("/api/pasted/{pasted_id}")
+    def pasted_slip(pasted_id: int, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        return lab_call(lambda: lab.pasted_view(uid, pasted_id))
+
+    @app.post("/api/pasted/{pasted_id}/analyse")
+    def analyse_pasted(pasted_id: int, body: PastedAnalyseBody, uid: str = Depends(person),
+                       lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """The pasted slip re-priced for the card's toggles (legs left out, stake, kind of bet): code only, free."""
+        return lab_call(lambda: lab.analyse_pasted(uid, pasted_id, drop=body.drop,
+                                                   stake=None if body.stake is None else str(body.stake),
+                                                   ticket_type=body.type, k=body.k, system=body.system))
 
     @app.get("/api/chat/threads")
     def chat_threads(uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> List[Dict[str, Any]]:

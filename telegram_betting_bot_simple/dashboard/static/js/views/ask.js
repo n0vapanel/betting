@@ -7,10 +7,16 @@
 //     the server built from the brain's results (tickets with Add to slip / Tweak, rollover plans,
 //     players), follow-up chips, the AI disclosure at the top and a typing state with step lines;
 //   - the composer dock: free text, optionally with the slip (or a ticket from a card) attached;
+//   - "📋 Paste a slip" (ask/paste.js): a bookmaker's slip as text or a screenshot, read by the AI
+//     (POST /api/chat/slip, a chat turn) or by the free code-only reader (POST /api/pasted, no AI: also
+//     the way in when this server has no assistant or the AI says it isn't set up); pasting slip-like
+//     text into the composer offers the same in one tap. Its card (ask/pasted.js) shows what was read,
+//     each leg's match and chances, leg toggles and a stake that re-price for free, Load into Build,
+//     Fix the reading, and "Is this right?" first when the read is doubtful;
 //   - the daily AI allowance meter, the list of past chats (GET /api/chat/threads) and plain states
 //     for "no assistant on this server", "confirm your age", "on a break" and "allowance used up".
 // Deep links: #/ask?game=<league>:<id>&name=..  #/ask?player=<league>:<id>&name=..  #/ask?slip=1
-//   (attaches the slip)  #/ask?thread=<id>  #/ask?q=<text>  #/ask?new=1
+//   (attaches the slip)  #/ask?thread=<id>  #/ask?q=<text>  #/ask?new=1  #/ask?paste=1 (the paste sheet)
 //
 // Rules kept here: every number shown is the server's (the cards only lay them out); nothing goes on
 // the slip without the person's own tap; chips never suggest staking more; a chat turn keeps running
@@ -19,7 +25,7 @@
 import { api, prefs, isQuiet } from "../api.js";
 import {
   me, slip, session, loadSports, leagueTitle, sportEmoji, refreshMainButton, openSlipSheet, openOnboarding, inTelegram,
-  replaceAddress,
+  replaceAddress, loadMe, legKey,
 } from "../app.js";
 import { esc, pct, ago, chip, notice, toast, sheet, confirmSheet, emptyState, skeleton, errorState } from "../ui.js";
 import { icon } from "../icons.js";
@@ -29,16 +35,33 @@ import {
   loadRequest, saveRequest, checkRequest, requestHtml, requestSummary, amountChips, targetChoices, MAX_SPORTS, STAKES,
 } from "./ask/request.js";
 import { cardHtml, ticketLegs, ticketBody, slipState, syncCardButtons, plainStake, kindLine } from "./ask/cards.js";
+import { openPasteSheet, looksLikeSlip, shotBlocked, MAX_PASTE } from "./ask/paste.js";
+import {
+  pastedClick, pastedChange, pastedInput, pastedToggle, syncPastedButtons, revealPasted, markAnswered, pastedText, loadPlan,
+  CONFIRM_CHIP, FIX_CHIP,
+} from "./ask/pasted.js";
 
 const THREAD_KEY = "askThread";
 const STEP_MS = 2400; // how long each step line shows while the server works
 const SLOW_MS = 15000; // after this, say that tickets can take up to a minute
 const STALE_MS = 30 * 60 * 1000; // cards older than this say their prices will be rechecked
 const MAX_MESSAGE = 2000;
+// Reply kinds whose words the app's code wrote, not Claude (ai/assistant.py's Turn kinds): labelled honestly
+const CODE_KINDS = new Set(["support", "fix", "gate", "unread", "confirm", "free", "paused", "template", "error", "clarify"]);
+// The least an AI turn needs from today's allowance (ai/assistant.py MIN_TURN_CENTS): under it the server
+// makes no AI call at all (no answer, no screenshot read), so the screen says so instead of offering one
+const MIN_TURN_CENTS = 5;
 const DEFAULT_DISCLOSURE = "You're chatting with an AI analyst (Claude, made by Anthropic). The app's code works out "
   + "every number; the AI explains them and can still be wrong. Nothing here is a tip, and only you add bets to your slip.";
 const SUGGESTIONS = ["Who does the AI favour tonight?", "Explain what the bookmaker keeps", "Why do rollovers end early?",
   "How does the AI work out its chances?"];
+const PASTE_STEPS = ["Reading your slip…", "Matching your slip to our games…", "Pricing it at your odds…", "Double-checking the numbers…"];
+const FREE_STEPS = ["Reading your slip (code only)…", "Matching your slip to our games…", "Pricing it at your odds…"];
+const SHOWN_PASTE = 500; // characters of a pasted slip shown as the person's message (the server keeps the same)
+// The free reader's own lines (no AI): what the card below holds, no numbers
+const FREE_DONE = "Read by the app's free reader (code only, no AI). The card shows what it read, how each leg matched and the code's numbers at your odds.";
+const FREE_DOUBT = "Read by the app's free reader (code only, no AI). Before the numbers, check what it read: the card says what looks off.";
+const FREE_PAUSED = "Read by the app's free reader (code only, no AI). Picks are paused, so there are no suggestions: the card shows the code's numbers for your slip.";
 
 // What the chat holds for this visit (kept when the person leaves the screen and comes back)
 const state = {
@@ -50,6 +73,9 @@ const state = {
   requestOpen: null, // null: open while the thread is empty
   draft: "",
   attach: null, // {kind: "slip"} | {kind: "ticket", body, label}
+  pasteDraft: { text: "", image: null }, // the paste sheet as last left, until it is sent (screenshots stay in memory only)
+  lastPaste: null, // the last paste sent ({text, image, id}: id once its card came back): "Fix the reading" and a refused paste start from it
+  pasteHint: false, // slip-like text was just pasted into the composer: offer to analyse it
   busy: null, // {steps, step, started} while a turn is with the server
   loading: false, // a past chat is loading: nothing can be sent until it's on screen
   noAssistant: false,
@@ -101,6 +127,36 @@ function credits() {
   return state.credits || me().credits || null;
 }
 
+/** Why a slip can't be pasted right now (the server refuses pasted slips too), or "". */
+function pasteBlocked() {
+  const profile = me();
+  if (profile.uid && !profile.age_confirmed) return "Confirm you're 18 or older (21+ in the US) first, then paste your slip.";
+  if (profile.on_break) return "Pasting a slip is off during your break.";
+  if (busy()) return state.loading ? "Wait for your chat to load first." : "Wait for the AI's answer first.";
+  return "";
+}
+
+/** The AI can read a paste here (else only the free reader is offered). */
+function aiReads() {
+  return !state.noAssistant && me().ai_enabled !== false;
+}
+
+/** Too little of today's AI allowance is left for any AI call (the server's floor, not just zero). */
+function creditsOut() {
+  const c = credits();
+  return Boolean(c && c.daily_cents && Number(c.left_cents) < MIN_TURN_CENTS);
+}
+
+/** Why a screenshot can't be read now (words for the person), or "" when the AI can read one. */
+function shotRefusal() {
+  return shotBlocked({ ai: aiReads(), paused: pausedNow(), creditsOut: creditsOut() });
+}
+
+function pausedNow() {
+  const until = Date.parse(me().picks_paused_until || "");
+  return Number.isFinite(until) && until > Date.now();
+}
+
 /** The request bar starts open in an empty chat; a chat that is still loading keeps it closed. */
 function requestOpen() {
   return state.requestOpen ?? (!state.loading && !state.messages.length && !state.busy);
@@ -137,8 +193,9 @@ function statusHtml() {
     return `<div class="ask-off">${emptyState({
       iconName: "bot",
       title: "AI chat isn't switched on here yet",
-      body: "The server needs an Anthropic API key (ANTHROPIC_API_KEY) for the chat. Everything else works without it: each game's chances on Today, honest prices for any slip, and tickets built by the app's own code in Build.",
-      actions: [{ label: "Let the app build a ticket", href: "#/build", primary: true }, { label: "Browse games", href: "#/today" }],
+      body: "The server needs an Anthropic API key (ANTHROPIC_API_KEY) for the chat. Everything else works without it: each game's chances on Today, honest prices for any slip (paste one from your bookmaker below: the free reader checks it with code only), and tickets built by the app's own code in Build.",
+      actions: [{ label: "📋 Paste a slip (free reader)", attrs: "data-paste-open", primary: true },
+        { label: "Let the app build a ticket", href: "#/build" }, { label: "Browse games", href: "#/today" }],
     })}</div>`;
   }
   if (reason === "age") {
@@ -148,9 +205,9 @@ function statusHtml() {
   if (reason === "break") {
     return notice("The AI chat is off during your break. You can still read your past chats.", "info");
   }
-  const c = credits();
-  if (c && c.daily_cents && Number(c.left_cents) <= 0) {
-    return notice("You've used today's AI allowance. It resets at midnight (US Eastern); games, odds and slip pricing still work without it.", "info");
+  if (creditsOut()) {
+    const gone = Number(credits().left_cents) <= 0;
+    return notice(`${gone ? "You've used today's AI allowance" : "What's left of today's AI allowance isn't enough for an answer"}. It resets at midnight (US Eastern); games, odds and slip pricing still work without it.`, "info");
   }
   return "";
 }
@@ -166,6 +223,10 @@ function welcomeHtml() {
   return `<div class="ask-welcome">
     <h2>What would you like to know?</h2>
     <p>Ask about tonight's games, a player or your slip, or use “Build me a ticket” above.</p>
+    <div class="ask-welcome-paste">
+      <button type="button" class="btn btn-secondary" data-paste-open><span aria-hidden="true">📋</span>Paste a slip</button>
+      <span class="small muted">From any bookmaker, as text or a screenshot: the app checks it at your odds.</span>
+    </div>
     <div class="chip-row wrap">${slipChip}${SUGGESTIONS.map((s) => chip(s, { attrs: `data-chip="${esc(s)}"` })).join("")}</div>
   </div>`;
 }
@@ -176,7 +237,7 @@ function staleText(at) {
   return `Prices from ${ago(at)}: the slip rechecks them when you add these picks.`;
 }
 
-function kindExtras(m) {
+function kindExtras(m, i) {
   if (m.kind === "support" || m.kind === "paused") {
     return `<div class="ask-actions-row">
       <a class="btn btn-secondary small" href="tel:18004262537">${icon("lifebuoy", { size: 16 })}1-800-GAMBLER</a>
@@ -189,35 +250,84 @@ function kindExtras(m) {
   if (m.kind === "template") {
     return `<p class="ask-meta">${icon("shield", { size: 14 })}Written by the app's code: the AI's wording didn't pass the number check.</p>`;
   }
+  if (m.kind === "free") {
+    return `<p class="ask-meta">${icon("shield", { size: 14 })}Read and worked out by the app's code: no AI used.</p>`;
+  }
+  if (m.kind === "unread" || m.kind === "fix") {
+    return `<div class="ask-actions-row"><button type="button" class="btn btn-secondary small" data-paste-again><span aria-hidden="true">📋</span>Paste the slip again</button></div>`;
+  }
+  if (m.kind === "error" && m.retry && m.retryPath === "/api/chat/slip") {
+    return `<div class="ask-actions-row"><button type="button" class="btn btn-secondary small" data-retry="${i}">${icon("refresh", { size: 16 })}Try again</button></div>`;
+  }
   if (m.kind === "answer" && (/\d/.test(m.text) || m.cards?.length)) {
     return `<p class="ask-meta">${icon("check", { size: 14 })}Numbers checked against the app's own results</p>`;
   }
   return "";
 }
 
+/** A pasted card that still asks "Is this what your slip says?" (its own buttons stand in for the chips). */
+function asksToConfirm(card) {
+  return card?.type === "pasted" && card.pasted?.needs_confirmation && !card.pasted?.confirmed && !card.ui?.confirmed
+    && !(card.ui?.analysis || card.analysis)?.paused_until;
+}
+
+/**
+ * The label of a pasted card's "ask the AI" button, or "" when the AI can't take a question now: during the
+ * picks pause the server answers slip questions with the pause line only (the card's own toggles and stake
+ * box still answer "what if I drop leg 2?" for free), and without enough allowance it can't answer at all.
+ */
+function askLabel(pasted, card = null) {
+  if (!aiReads() || blockedReason() || busy() || pausedNow() || creditsOut()) return "";
+  const until = Date.parse((card?.ui?.analysis || card?.analysis)?.paused_until || "");
+  if (Number.isFinite(until) && until > Date.now()) return "";
+  if (pasted?.thread_id && Number(pasted.thread_id) === Number(state.threadId)) return "Ask about this slip";
+  return pasted?.text ? "Ask the AI about it" : "";
+}
+
+/** The ids of pasted slips shown in messages after message ``index`` (an earlier "Is this right?" was answered). */
+function laterPasted(index) {
+  const ids = new Set();
+  state.messages.slice(index + 1).forEach((m) => (m.cards || []).forEach((card) => {
+    if (card?.type === "pasted" && card.pasted?.id != null) ids.add(card.pasted.id);
+  }));
+  return ids;
+}
+
+/** What a card in message ``index`` needs to draw itself. */
+function cardOptions(index) {
+  const m = state.messages[index];
+  return { stale: m ? staleText(m.at) : "", later: laterPasted(index), canAsk: askLabel };
+}
+
 function messageHtml(m, i, last) {
   if (m.role === "user") {
     return `<div class="ask-msg me">
-      <div class="bubble me">${esc(m.text)}</div>
+      <div class="bubble me${m.paste ? " ask-paste-bubble" : ""}">${m.thumb ? `<img class="ask-thumb" src="${esc(m.thumb)}" alt="Your screenshot (not kept)">` : ""}${esc(m.text)}</div>
       ${m.note ? `<span class="ask-note">${icon(m.noteIcon || "bets", { size: 14 })}${esc(m.note)}</span>` : ""}
     </div>`;
   }
   if (m.kind === "failed") {
     return `<div class="ask-msg ai kind-failed" data-msg="${i}">
       <div class="bubble ai">${icon("alert", { size: 18 })}<div>${esc(m.text)}</div></div>
-      ${m.retry ? `<div class="ask-actions-row"><button type="button" class="btn btn-secondary small" data-retry="${i}">${icon("refresh", { size: 16 })}Try again</button></div>` : ""}
+      ${m.retry || m.freeText || m.fix ? `<div class="ask-actions-row">
+        ${m.freeText ? `<button type="button" class="btn btn-primary small" data-free-read="${i}">${icon("shield", { size: 16 })}Read without AI (free)</button>` : ""}
+        ${m.fix ? `<button type="button" class="btn btn-secondary small" data-paste-open><span aria-hidden="true">📋</span>Fix the paste</button>` : ""}
+        ${m.retry ? `<button type="button" class="btn btn-secondary small" data-retry="${i}">${icon("refresh", { size: 16 })}Try again</button>` : ""}
+      </div>` : ""}
     </div>`;
   }
   const support = m.kind === "support" || m.kind === "paused" || m.kind === "gate";
-  const stale = staleText(m.at);
-  const chips = last && !state.busy ? (m.chips || []) : [];
+  const options = cardOptions(i);
+  let chips = last && !state.busy ? (m.chips || []) : [];
+  // A card asking "Is this right?" carries those two answers itself
+  if ((m.cards || []).some(asksToConfirm)) chips = chips.filter((c) => c !== CONFIRM_CHIP && c !== FIX_CHIP);
   // The server's "Try again" sends the same question again when we know it; otherwise it goes as a message
   const chipAttrs = (c) => (m.retry && /^try again$/i.test(c) ? `data-retry="${i}"` : `data-chip="${esc(c)}"`);
   return `<div class="ask-msg ai kind-${esc(m.kind || "answer")}" data-msg="${i}">
-    <div class="ask-who">${icon("bot", { size: 16 })}<span>AI analyst</span>${m.at ? `<time datetime="${esc(m.at)}">${esc(ago(m.at))}</time>` : ""}</div>
+    <div class="ask-who">${icon("bot", { size: 16 })}<span>${m.local || CODE_KINDS.has(m.kind) ? "App's code" : "AI analyst"}</span>${m.at ? `<time datetime="${esc(m.at)}">${esc(ago(m.at))}</time>` : ""}</div>
     <div class="bubble ai ask-text">${formatReply(m.text, { links: support })}</div>
-    ${kindExtras(m)}
-    ${(m.cards || []).map((card, ci) => cardHtml(card, `${i}:${ci}`, { stale })).join("")}
+    ${kindExtras(m, i)}
+    ${(m.cards || []).map((card, ci) => cardHtml(card, `${i}:${ci}`, options)).join("")}
     ${chips.length ? `<div class="chip-row wrap ask-chips-row" aria-label="Suggested follow-ups">${chips.map((c) =>
       chip(c, { attrs: chipAttrs(c) })).join("")}</div>` : ""}
   </div>`;
@@ -278,11 +388,23 @@ function canSend() {
   return !busy() && !blockedReason() && Boolean(state.draft.trim() || state.attach);
 }
 
+/** "Looks like a bet slip: analyse it?" after slip-like text was pasted into the composer. */
+function hintHtml() {
+  if (!state.pasteHint || blockedReason() || !looksLikeSlip(state.draft)) return "";
+  return `<div class="ask-paste-hint" role="status">
+    <span aria-hidden="true">📋</span><span class="grow">Looks like a bet slip: analyse it?</span>
+    <button type="button" class="btn btn-primary small" data-paste-hint${busy() ? " disabled" : ""}>Analyse it</button>
+    <button type="button" class="icon-btn" data-paste-hint-close aria-label="It's not a bet slip">${icon("close", { size: 18 })}</button>
+  </div>`;
+}
+
 function dockHtml() {
   if (blockedReason() === "off") return "";
   const off = Boolean(blockedReason());
-  return `<div class="ask-attach-area" data-attach>${attachHtml()}</div>
+  return `<div class="ask-hint-area" data-hint>${hintHtml()}</div>
+    <div class="ask-attach-area" data-attach>${attachHtml()}</div>
     <form class="ask-composer" data-composer novalidate>
+      <button type="button" class="btn btn-secondary ask-paste-btn" data-paste-open aria-label="Paste a slip" title="Paste a bet slip (text or a screenshot)"${off ? " disabled" : ""}><span aria-hidden="true">📋</span><span class="ask-paste-word" aria-hidden="true">Paste a slip</span></button>
       <label class="sr-only" for="ask-text">Message the AI analyst</label>
       <textarea id="ask-text" class="input" rows="1" maxlength="${MAX_MESSAGE}" placeholder="${esc(placeholder())}" enterkeyhint="${finePointer() ? "send" : "enter"}"${off ? " disabled" : ""}>${esc(state.draft)}</textarea>
       <button class="btn btn-primary ask-send" type="submit" aria-label="Send"${canSend() ? "" : " disabled"}>${icon("send", { size: 18 })}</button>
@@ -327,8 +449,12 @@ function drawDock() {
 
 /** The dock's buttons and attachment line, without touching the text being typed. */
 function updateDock() {
+  const hint = $("[data-hint]");
+  if (hint) hint.innerHTML = hintHtml();
   const attach = $("[data-attach]");
   if (attach) attach.innerHTML = attachHtml();
+  const paste = $(".ask-paste-btn");
+  if (paste) paste.disabled = Boolean(blockedReason());
   const send = $(".ask-send");
   if (send) send.disabled = !canSend();
   const text = $("#ask-text");
@@ -409,13 +535,11 @@ function stopSteps() {
 
 // --- sending ------------------------------------------------------------------------------------------------
 
-/** One turn: show the person's message at once, the typing state, then the reply (or what went wrong). */
-async function send(body, display) {
-  if (busy() || blockedReason()) return;
-  const payload = { ...body };
-  if (state.threadId) payload.thread_id = state.threadId;
-  state.messages.push({ role: "user", text: display.shown, note: display.note || "", noteIcon: display.noteIcon || "", at: nowIso() });
-  state.busy = { steps: stepsFor(body), step: 0, started: Date.now() };
+/** The person's message goes up at once, then the typing state with ``steps``. */
+function startTurn(display, steps) {
+  state.messages.push({ role: "user", text: display.shown, note: display.note || "", noteIcon: display.noteIcon || "",
+    thumb: display.thumb || null, paste: Boolean(display.paste), at: nowIso() });
+  state.busy = { steps, step: 0, started: Date.now() };
   state.requestOpen = false;
   haptic.tap();
   if (view) {
@@ -424,19 +548,9 @@ async function send(body, display) {
     startSteps();
   }
   refreshMainButton();
+}
 
-  let data = null;
-  let failure = null;
-  try {
-    // No abort signal: the turn finishes on the server anyway, so its answer is kept for when they're back
-    data = await api("/api/chat", { method: "POST", body: payload });
-  } catch (error) {
-    failure = error;
-  }
-  stopSteps();
-  state.busy = null;
-  if (data) received(data, body);
-  else failed(failure, body);
+function endTurn() {
   if (view) {
     redrawAfterTurn();
     const replies = view.root.querySelectorAll(".ask-msg.ai[data-msg]");
@@ -445,7 +559,32 @@ async function send(body, display) {
   refreshMainButton();
 }
 
-function received(data, body) {
+/**
+ * One turn: show the person's message at once, the typing state, then the reply (or what went wrong).
+ * path: /api/chat (a message, a request or a slip) or /api/chat/slip (a pasted slip: {text?, image?}).
+ */
+async function send(body, display, { path = "/api/chat", steps = null } = {}) {
+  if (busy() || blockedReason()) return;
+  const payload = { ...body };
+  if (state.threadId) payload.thread_id = state.threadId;
+  startTurn(display, steps || stepsFor(body));
+
+  let data = null;
+  let failure = null;
+  try {
+    // No abort signal: the turn finishes on the server anyway, so its answer is kept for when they're back
+    data = await api(path, { method: "POST", body: payload });
+  } catch (error) {
+    failure = error;
+  }
+  stopSteps();
+  state.busy = null;
+  if (data) received(data, body, path);
+  else failed(failure, body, path);
+  endTurn();
+}
+
+function received(data, body, path = "/api/chat") {
   if (data.thread_id) {
     state.threadId = data.thread_id;
     prefs.set(THREAD_KEY, data.thread_id);
@@ -459,27 +598,54 @@ function received(data, body) {
   const kind = reply.kind || "answer";
   state.messages.push({
     role: "assistant", text: reply.text || "", cards: Array.isArray(reply.cards) ? reply.cards : [],
-    chips: Array.isArray(reply.chips) ? reply.chips : [], kind, at: nowIso(), retry: kind === "error" ? body : null,
+    chips: Array.isArray(reply.chips) ? reply.chips : [], kind, at: nowIso(), retry: kind === "error" ? body : null, retryPath: path,
   });
+  // The paste just sent is this pasted slip ("Fix the reading" on its card opens it with its screenshot)
+  const read = path === "/api/chat/slip" ? (reply.cards || []).find((card) => card?.type === "pasted" && card.pasted?.id != null) : null;
+  if (read && state.lastPaste && state.lastPaste.id == null) state.lastPaste.id = read.pasted.id;
   haptic.notify(kind === "error" ? "error" : ["gate", "support", "paused"].includes(kind) ? "warning" : "success");
   announce(`The AI replied: ${String(reply.text || "").slice(0, 200)}`);
+  // A warning sign pauses picks on the server: the profile says until when (the paste sheet and the cards read it)
+  if (kind === "support" || kind === "paused") refreshPause();
 }
 
-function failed(error, body) {
+/** Read the profile again after a warning sign, then take "Ask about this slip" off the cards on screen. */
+function refreshPause() {
+  loadMe().then(() => {
+    if (view) syncPastedButtons(view.root, findCard, pastedCtx.options);
+  }).catch(() => null);
+}
+
+function failed(error, body, path = "/api/chat") {
   let text = error?.message || "Something went wrong. Try again in a minute.";
+  const pasted = path !== "/api/chat";
+  const extra = {};
   if (error?.status === 400 && /ANTHROPIC_API_KEY|isn't set up/i.test(text)) {
     state.noAssistant = true;
     text = "AI chat isn't switched on for this server yet.";
+    if (pasted && body.text) {
+      text += " The free reader (code only, no AI) can still read your slip's text and price it at your odds.";
+      extra.freeText = body.text;
+    } else if (pasted) {
+      text += " Paste the slip's text instead of a screenshot and the free reader (code only) reads it.";
+      extra.fix = true;
+    }
   } else if (error?.status === 404 && state.threadId) {
     state.threadId = null;
     prefs.set(THREAD_KEY, null);
     text = "That chat isn't available any more. Try again to start a new one.";
   } else if (error?.signIn) {
     text = "Sign in again, then try again.";
+  } else if (pasted && (error?.status === 400 || error?.status === 413 || error?.status === 422)) {
+    // The paste itself was refused (too long, not a picture it can read, no bet found): fix it, don't resend it
+    if (error.status === 413) text = "That screenshot is too large to send: crop it to just the slip, or paste its text.";
+    extra.fix = true;
   }
-  state.messages.push({ role: "assistant", kind: "failed", text, retry: state.noAssistant ? null : body, at: nowIso() });
+  if (pasted && state.lastPaste) state.pasteDraft = { ...state.lastPaste }; // "Fix the paste" opens with what was sent
+  const retryable = !state.noAssistant && !extra.fix;
+  state.messages.push({ role: "assistant", kind: "failed", text, retry: retryable ? body : null, retryPath: path, at: nowIso(), ...extra });
   haptic.notify("error");
-  announce(`The message didn't go through: ${text}`);
+  announce(`${pasted ? "Your slip" : "The message"} didn't go through: ${text}`);
 }
 
 /** Send a failed message again (or ask again after the server's own error reply). */
@@ -487,10 +653,251 @@ function retry(index) {
   const failedMessage = state.messages[index];
   if (!failedMessage?.retry || busy()) return;
   const asked = state.messages[index - 1];
-  const display = asked?.role === "user" ? { shown: asked.text, note: asked.note, noteIcon: asked.noteIcon } : { shown: "Try again" };
+  const display = asked?.role === "user"
+    ? { shown: asked.text, note: asked.note, noteIcon: asked.noteIcon, thumb: asked.thumb, paste: asked.paste } : { shown: "Try again" };
   if (failedMessage.kind === "failed") state.messages.splice(asked?.role === "user" ? index - 1 : index, asked?.role === "user" ? 2 : 1);
-  send(failedMessage.retry, display);
+  const path = failedMessage.retryPath || "/api/chat";
+  if (path === "/api/pasted") readFree(failedMessage.retry.text);
+  else send(failedMessage.retry, display, { path, steps: path === "/api/chat/slip" ? PASTE_STEPS : null });
 }
+
+// --- pasted slips ------------------------------------------------------------------------------------------
+
+/** "📋 My bet slip (screenshot):\n<the text, cut to SHOWN_PASTE>" as the person's message (as the server keeps it). */
+function pasteShown(text, image, free = false) {
+  const head = `📋 My bet slip${image ? " (screenshot)" : ""}${free ? " (free reader)" : ""}`;
+  if (!text) return head;
+  return `${head}:\n${text.length <= SHOWN_PASTE ? text : `${text.slice(0, SHOWN_PASTE).trimEnd()}…`}`;
+}
+
+/**
+ * The paste sheet (prefilled with the last paste, or what's given). The AI reads when it can, else only the
+ * free reader; a screenshot only when the AI can read one now. note: a line at the top of the sheet.
+ */
+function openPaste({ text, image, file = null, note = "" } = {}) {
+  const reason = pasteBlocked();
+  if (reason) {
+    toast(reason, { kind: "warn" });
+    if (me().uid && !me().age_confirmed) openOnboarding();
+    return;
+  }
+  if (text !== undefined) state.pasteDraft = { text, image: image === undefined ? null : image };
+  openPasteSheet({
+    text: state.pasteDraft.text, image: state.pasteDraft.image, file, note, ai: aiReads(), creditsOut: creditsOut(), paused: pausedNow(),
+    onDraft: (draft) => { state.pasteDraft = draft; },
+    onAnalyse: (draft) => sendPaste(draft),
+    onFree: (pastedTextValue) => readFree(pastedTextValue),
+  });
+}
+
+/** A pasted slip for the AI to read (POST /api/chat/slip): a chat turn like any other. */
+function sendPaste({ text = "", image = null } = {}) {
+  if (pasteBlocked()) return;
+  const clean = String(text || "").trim().slice(0, MAX_PASTE);
+  if (!aiReads()) {
+    if (clean) readFree(clean);
+    return;
+  }
+  // The AI doesn't read screenshots in the pause or without enough allowance: the text alone goes (the
+  // server's free reader reads it), and the person's message doesn't claim a screenshot was read
+  const picture = image && !shotRefusal() ? image : null;
+  if (!clean && !picture) return;
+  const body = {};
+  if (clean) body.text = clean;
+  if (picture) body.image = { media_type: picture.media_type || "image/jpeg", data: picture.base64 };
+  state.pasteHint = false;
+  state.lastPaste = { text: clean, image: picture, id: null };
+  state.pasteDraft = { text: "", image: null };
+  send(body, {
+    shown: pasteShown(clean, picture), note: picture ? "Screenshot · read, then not kept" : "Pasted slip", noteIcon: "bets",
+    thumb: picture?.dataUrl || null, paste: true,
+  }, { path: "/api/chat/slip", steps: PASTE_STEPS });
+}
+
+/** The free, code-only reader (POST /api/pasted): no AI, no allowance. Its card is shown as the app's code's. */
+async function readFree(text) {
+  const clean = String(text || "").trim().slice(0, MAX_PASTE);
+  if (!clean || pasteBlocked()) return;
+  const body = { text: clean };
+  if (state.threadId) body.thread_id = state.threadId;
+  state.pasteHint = false;
+  state.lastPaste = { text: clean, image: null, id: null };
+  const sent = state.lastPaste;
+  state.pasteDraft = { text: "", image: null };
+  startTurn({ shown: pasteShown(clean, null, true), note: "Free reader · code only, no AI", noteIcon: "shield", paste: true }, FREE_STEPS);
+  let data = null;
+  let failure = null;
+  try {
+    data = await api("/api/pasted", { method: "POST", body });
+  } catch (error) {
+    failure = error;
+  }
+  stopSteps();
+  state.busy = null;
+  if (data?.pasted) {
+    const analysis = data.analysis || null;
+    const doubt = data.pasted.needs_confirmation && !analysis?.paused_until;
+    const kind = data.support ? "support" : analysis?.paused_until ? "paused" : "free";
+    if (data.pasted.id != null && sent.id == null) sent.id = data.pasted.id;
+    if (kind !== "free") refreshPause();
+    const words = data.support || (analysis?.paused_until ? FREE_PAUSED : doubt ? FREE_DOUBT : FREE_DONE);
+    state.messages.push({ role: "assistant", kind, text: words, local: true, at: nowIso(), chips: [],
+      cards: [{ type: "pasted", source: "free_reader", pasted: data.pasted, analysis }] });
+    haptic.notify(kind === "free" ? "success" : "warning");
+    announce(doubt ? "The free reader read your slip: check what it read." : "The free reader read your slip: the card shows the numbers.");
+  } else {
+    let message = failure?.message || "Something went wrong. Try again in a minute.";
+    const extra = {};
+    if (failure?.status === 404 && state.threadId) {
+      state.threadId = null;
+      prefs.set(THREAD_KEY, null);
+      message = "That chat isn't available any more. Try again to read it in a new one.";
+      extra.retry = { text: clean };
+    } else if (failure?.status >= 400 && failure?.status < 500 && !failure?.signIn) {
+      extra.fix = true; // no bet found, too long...: the person fixes the text
+      state.pasteDraft = { text: clean, image: null };
+    } else if (!failure?.signIn) {
+      extra.retry = { text: clean };
+    }
+    state.messages.push({ role: "assistant", kind: "failed", text: message, retryPath: "/api/pasted", at: nowIso(), ...extra });
+    haptic.notify("error");
+    announce(`The free reader couldn't read it: ${message}`);
+  }
+  endTurn();
+}
+
+/** "Yes, that's right" on a card: the AI's chat turn when the card is the last word in this chat, else the card shows its numbers. */
+function confirmPasted(card, key) {
+  const index = Number(String(key).split(":")[0]);
+  const pasted = card.pasted || {};
+  const inThread = pasted.thread_id && Number(pasted.thread_id) === Number(state.threadId);
+  if (card.source !== "free_reader" && inThread && index === state.messages.length - 1 && aiReads() && !blockedReason() && !busy()) {
+    markAnswered(card);
+    send({ message: CONFIRM_CHIP }, { shown: CONFIRM_CHIP });
+    return;
+  }
+  revealPasted(card);
+  redrawCard(key);
+  announce("Thanks: the card now shows the numbers for your slip.");
+  view?.root.querySelector(`[data-card-key="${CSS.escape(key)}"] [data-pleg-toggle]`)?.focus({ preventScroll: true });
+}
+
+/**
+ * "Fix the reading" / "Let me fix it": the sheet again with what this card was read from. The last paste
+ * (with its screenshot, kept in this page only) when the card is that paste; else the card's own text; a
+ * screenshot from an earlier paste isn't kept anywhere, so the sheet asks for it again.
+ */
+function fixPasted(card) {
+  const last = state.lastPaste;
+  if (!card) {
+    if (last) openPaste({ text: last.text || "", image: last.image || null });
+    else openPaste();
+    return;
+  }
+  const id = card.pasted?.id ?? (card.ui?.analysis || card.analysis)?.pasted?.id;
+  if (last && id != null && last.id != null && Number(last.id) === Number(id)) {
+    openPaste({ text: last.text || "", image: last.image || null });
+    return;
+  }
+  const text = pastedText(card);
+  const shot = (card.pasted?.source || (card.ui?.analysis || card.analysis)?.pasted?.source) === "image";
+  const note = shot ? "Screenshots aren't kept, so this slip's screenshot can't be shown again: add it again, or paste the slip's text." : "";
+  openPaste({ text, image: null, note });
+}
+
+/** "Ask about this slip": the composer (the chat already holds the slip), or the AI reads it into this chat. */
+function askAboutPasted(card) {
+  const pasted = (card.ui?.analysis || card.analysis)?.pasted || card.pasted || {};
+  const label = askLabel(pasted, card);
+  if (!label) return;
+  if (label === "Ask about this slip") {
+    const text = $("#ask-text");
+    if (text) {
+      text.placeholder = "Ask about this slip, e.g. what if I drop leg 2?";
+      text.focus();
+      text.scrollIntoView({ block: "nearest", behavior: smooth() });
+    }
+    return;
+  }
+  sendPaste({ text: pasted.text });
+}
+
+/** "Load matched legs into Build": the person's own matched legs onto the slip, the others explained. */
+async function loadIntoBuild(card) {
+  const { legs, skipped } = loadPlan(card);
+  const reasons = skipped.map((s) => `<li>${icon("alert", { size: 14 })}<span><b>Leg ${esc(s.index)}</b> (${esc(s.label)}): ${esc(s.why)}.</span></li>`).join("");
+  if (!legs.length) {
+    sheet.info({
+      title: "Nothing to load yet",
+      body: `<p>None of these legs can go on Build's slip:</p><ul class="warnings">${reasons}</ul>
+        <p class="small muted">Build prices moneylines, spreads and totals for the games the app has odds for.</p>`,
+    });
+    return;
+  }
+  const fresh = legs.filter((leg) => !slip.has(leg.ref));
+  let how = "add";
+  const others = slip.legs.filter((have) => !legs.some((leg) => legKey(leg.ref) === have.key)).length;
+  if (fresh.length && others) {
+    how = await chooseHow(slip.count);
+    if (!how) return;
+  }
+  if (how === "replace") slip.clear();
+  let added = 0;
+  for (const leg of legs) {
+    if (slip.has(leg.ref)) continue;
+    if (!slip.add(leg)) {
+      toast("Your slip is full: remove a pick first", { kind: "warn" });
+      break;
+    }
+    added += 1;
+  }
+  if (how === "replace" || !others) {
+    // The slip is now just these legs: play them the way the card does, at the person's own stake
+    const analysis = card.ui?.analysis || card.analysis || {};
+    const type = analysis.ticket_type === "single" ? "single" : "multi";
+    const stake = plainStake(analysis.stake);
+    slip.set(stake ? { type, stake } : { type });
+  }
+  haptic.notify("success");
+  const words = added ? `Loaded ${added} pick${added === 1 ? "" : "s"} into your slip` : "These picks are already in your slip";
+  if (!skipped.length) {
+    toast(`${words}: Build prices them at the best odds the app has`, { kind: "good" });
+    return;
+  }
+  const s = sheet.open({
+    title: words,
+    body: `<p>Build prices them at the best odds the app has, which can differ from your bookmaker's.</p>
+      <p class="label" style="margin-top:14px">Not loaded</p><ul class="warnings">${reasons}</ul>`,
+    footer: `<button type="button" class="btn btn-secondary grow" data-stay>Stay here</button>
+      <a class="btn btn-primary grow" href="#/build" data-go-build>${icon("build", { size: 18 })}Open Build</a>`,
+  });
+  s.foot.addEventListener("click", (event) => {
+    if (event.target.closest("[data-stay]")) s.close();
+    else if (event.target.closest("[data-go-build]")) {
+      event.preventDefault();
+      s.close().then(() => { location.hash = "#/build"; });
+    }
+  });
+}
+
+/** Draw one card again (after it was confirmed on the spot). */
+function redrawCard(key) {
+  const box = view?.root.querySelector(`[data-card-key="${CSS.escape(key)}"]`);
+  const card = findCard(key);
+  if (box && card) box.outerHTML = cardHtml(card, key, cardOptions(Number(String(key).split(":")[0])));
+}
+
+// What the pasted cards need from the screen (ask/pasted.js handles their own taps and typing)
+const pastedCtx = {
+  root: () => view?.root || null,
+  findCard,
+  options: (key) => cardOptions(Number(String(key).split(":")[0])),
+  announce,
+  confirm: confirmPasted,
+  fix: fixPasted,
+  ask: askAboutPasted,
+  load: loadIntoBuild,
+};
 
 function sendComposer() {
   if (!canSend()) return;
@@ -511,6 +918,7 @@ function sendComposer() {
   if (!body.message && !body.slip) return;
   state.draft = "";
   state.attach = null;
+  state.pasteHint = false;
   const shown = text || `Analyse my slip: ${describeTicket(body.slip)}`;
   const box = $("#ask-text");
   if (box) {
@@ -542,6 +950,11 @@ const TICKET_FOLLOW_UPS = ["Explain the risk", "Make it safer", "Swap the weakes
 function sendChip(button) {
   const text = button.dataset.chip;
   const message = state.messages[Number(button.closest("[data-msg]")?.dataset.msg)];
+  if (text === FIX_CHIP) { // fixing a read happens in the paste sheet, not in a chat turn
+    const card = [...(message?.cards || [])].reverse().find((c) => c?.type === "pasted");
+    fixPasted(card || null);
+    return;
+  }
   const tickets = (message?.cards || []).filter((card) => card?.type === "ticket" && card.ticket);
   const body = tickets.length === 1 && TICKET_FOLLOW_UPS.includes(text) ? ticketBody(tickets[0].ticket, tickets[0].refs) : null;
   if (body) {
@@ -698,6 +1111,7 @@ function openTweak(card) {
  * {request} from the request bar, {slip, message?} for a slip, else {message}.
  */
 function askedBody(data) {
+  if (data.paste) return null; // a pasted slip is kept cut short (and a screenshot not at all): paste it again instead
   if (data.request && typeof data.request === "object") return { request: data.request };
   const text = String(data.text || "").trim().slice(0, MAX_MESSAGE);
   if (data.slip && typeof data.slip === "object") {
@@ -711,6 +1125,10 @@ function fromStored(row) {
   const content = row.content;
   const data = content && typeof content === "object" ? content : { text: String(content ?? "") };
   if (row.role === "user") {
+    if (data.paste) {
+      return { role: "user", text: data.text || pasteShown("", data.paste === "image"), paste: true, at: row.at, asked: null,
+        note: data.paste === "image" ? "Screenshot · read, then not kept" : "Pasted slip", noteIcon: "bets" };
+    }
     const note = data.slip ? `Your slip: ${describeTicket(data.slip)}` : data.request ? "Build me a ticket" : "";
     return { role: "user", text: data.text || (data.slip ? `Analyse my slip: ${describeTicket(data.slip)}` : data.request ? describeRequest(data.request) : ""),
       note, noteIcon: data.slip ? "bets" : data.request ? "target" : "", at: row.at, asked: askedBody(data) };
@@ -986,8 +1404,10 @@ function onRequestInput(input) {
 function onClick(event) {
   const target = event.target;
   if (onRequestClick(event)) return;
+  if (pastedClick(event, pastedCtx)) return;
   const simple = [["[data-threads]", openThreads], ["[data-new-chat]", newChat], ["[data-credits-info]", openCreditsInfo],
-    ["[data-confirm-age]", openOnboarding], ["[data-open-slip]", openSlipSheet]];
+    ["[data-confirm-age]", openOnboarding], ["[data-open-slip]", openSlipSheet], ["[data-paste-open]", () => openPaste()], ["[data-paste-again]", () => fixPasted(null)],
+    ["[data-paste-hint]", analyseDraft], ["[data-paste-hint-close]", dismissHint]];
   for (const [selector, action] of simple) {
     if (target.closest(selector)) {
       action();
@@ -1006,6 +1426,12 @@ function onClick(event) {
   const again = target.closest("[data-retry]");
   if (again) {
     retry(Number(again.dataset.retry));
+    return;
+  }
+  const free = target.closest("[data-free-read]");
+  if (free) {
+    const failedMessage = state.messages[Number(free.dataset.freeRead)];
+    if (failedMessage?.freeText && !busy()) readFree(failedMessage.freeText);
     return;
   }
   if (target.closest("[data-attach-slip]")) {
@@ -1044,16 +1470,82 @@ function onInput(event) {
   const target = event.target;
   if (target.id === "ask-text") {
     const had = Boolean(state.draft.trim());
+    const hinted = Boolean(hintHtml());
     state.draft = target.value;
+    if (state.pasteHint && !looksLikeSlip(state.draft)) state.pasteHint = false;
     growComposer();
     const button = $(".ask-send");
     if (button) button.disabled = !canSend();
     const count = $("[data-count]");
     if (count) count.textContent = countText();
+    if (hinted !== Boolean(hintHtml())) {
+      const hint = $("[data-hint]");
+      if (hint) hint.innerHTML = hintHtml();
+    }
     if (had !== Boolean(state.draft.trim())) refreshMainButton();
     return;
   }
+  if (pastedInput(event, pastedCtx)) return;
   if (target.matches("[data-req-input]")) onRequestInput(target);
+}
+
+function onChange(event) {
+  pastedChange(event, pastedCtx);
+}
+
+/** A <details> opened or closed (toggle doesn't bubble: caught on the way down). */
+function onToggle(event) {
+  pastedToggle(event, pastedCtx);
+}
+
+/**
+ * Something pasted into the composer: a picture opens the paste sheet with it; text that looks like a bet
+ * slip offers "Analyse it" (and goes to the sheet when it's longer than a chat message can be).
+ */
+function onPaste(event) {
+  if (event.target.id !== "ask-text" || blockedReason()) return;
+  const data = event.clipboardData;
+  if (!data) return;
+  const picture = [...(data.files || [])].find((f) => /^image\//.test(f.type));
+  if (picture) {
+    event.preventDefault();
+    const refusal = shotRefusal();
+    if (!refusal) openPaste({ text: "", image: null, file: picture });
+    else toast(refusal, { kind: "warn" });
+    return;
+  }
+  const text = data.getData("text/plain") || "";
+  if (!looksLikeSlip(text)) return;
+  const box = event.target;
+  const room = MAX_MESSAGE - (box.value.length - Math.abs((box.selectionEnd ?? 0) - (box.selectionStart ?? 0)));
+  if (text.length > room) {
+    event.preventDefault();
+    openPaste({ text: text.slice(0, MAX_PASTE), image: null });
+    return;
+  }
+  state.pasteHint = true; // drawn by the input event that follows the paste
+}
+
+/** "Analyse it" on the composer's hint: the composer's text goes as a pasted slip. */
+function analyseDraft() {
+  const text = state.draft.trim();
+  if (!text || busy()) return;
+  state.draft = "";
+  state.pasteHint = false;
+  const box = $("#ask-text");
+  if (box) {
+    box.value = "";
+    growComposer();
+    if (!finePointer()) box.blur();
+  }
+  sendPaste({ text });
+}
+
+function dismissHint() {
+  state.pasteHint = false;
+  const hint = $("[data-hint]");
+  if (hint) hint.innerHTML = "";
+  $("#ask-text")?.focus({ preventScroll: true });
 }
 
 function onKeydown(event) {
@@ -1075,6 +1567,7 @@ function onSlipChange() {
   if (!view) return;
   if (state.attach?.kind === "slip" && !slip.count) state.attach = null;
   syncCardButtons(view.root, findCard);
+  syncPastedButtons(view.root, findCard, pastedCtx.options);
   updateDock();
   if (!state.messages.length && !state.busy) drawThread(); // the "Is my slip any good?" suggestion
   refreshMainButton();
@@ -1084,12 +1577,13 @@ function onSlipChange() {
 
 /**
  * Apply #/ask?... once, then tidy the address so a later visit doesn't apply it again.
- * Returns {open: a thread id to open, fresh: true when the link starts a new topic}.
+ * Returns {open: a thread id to open, fresh: true when the link starts a new topic, paste: open the paste sheet}.
  */
 function applyQuery(query) {
-  if (!query || ![...query.keys()].length) return { open: null, fresh: false };
+  if (!query || ![...query.keys()].length) return { open: null, fresh: false, paste: false };
   let open = null;
   let fresh = false;
+  const paste = query.get("paste") === "1";
   const thread = query.get("thread");
   const game = query.get("game");
   const player = query.get("player");
@@ -1123,7 +1617,7 @@ function applyQuery(query) {
   } catch {
     /* the address keeps its query; nothing else depends on it */
   }
-  return { open, fresh };
+  return { open, fresh, paste };
 }
 
 // --- the screen ----------------------------------------------------------------------------------------------------
@@ -1133,10 +1627,13 @@ export async function render(root, params) {
   if (!root.isConnected) return;
   if (!state.request) state.request = loadRequest();
   view = { root, stepTimer: null, offSlip: null };
-  const { open, fresh } = applyQuery(params.query);
+  const { open, fresh, paste } = applyQuery(params.query);
   draw();
   root.addEventListener("click", onClick);
   root.addEventListener("input", onInput);
+  root.addEventListener("change", onChange);
+  root.addEventListener("toggle", onToggle, true);
+  root.addEventListener("paste", onPaste);
   root.addEventListener("keydown", onKeydown);
   root.addEventListener("submit", onSubmit);
   view.offSlip = slip.onChange(onSlipChange);
@@ -1144,9 +1641,10 @@ export async function render(root, params) {
   refreshMainButton();
   // Sport names for the request bar (cached after the first load)
   loadSports().then(() => { if (view?.root === root) drawRequest(); }).catch(() => null);
+  if (paste) openPaste(); // #/ask?paste=1 (Help's "See it live"): the sheet over this chat
   const resume = Number(prefs.get(THREAD_KEY, null));
   if (open && open !== state.threadId) await openThread(open);
-  else if (!open && !fresh && !state.threadId && !state.messages.length && !busy() && Number.isInteger(resume) && resume > 0) {
+  else if (!open && !fresh && !paste && !state.threadId && !state.messages.length && !busy() && Number.isInteger(resume) && resume > 0) {
     await openThread(resume, { quiet: true });
   }
 }
