@@ -231,7 +231,10 @@ def test_a_build_runs_the_tool_loop_and_cards_come_from_the_tool_results(store, 
     assert first["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert first["output_config"] == {"effort": "medium"}  # building is analysis, not a look-up
     assert "tool_choice" not in first  # forced tool use is a 400 on Opus 5.5; auto is the default
-    assert all(tool["strict"] and tool["input_schema"]["additionalProperties"] is False for tool in first["tools"])
+    # Not strict: twelve strict tools compile to a grammar Claude refuses as too large (a 400 on every turn);
+    # Toolbox.run validates every input instead
+    assert all("strict" not in tool and tool["input_schema"]["additionalProperties"] is False
+               for tool in first["tools"])
     assert len(first["tools"]) == 12
     result = second["messages"][-1]["content"][0]
     assert result["type"] == "tool_result" and result["tool_use_id"] == "toolu_1" and not result["is_error"]
@@ -952,6 +955,24 @@ def test_a_failed_api_call_gets_a_plain_message_and_its_cost_is_kept(store, lab)
     out = make(store, lab, claude).reply(UID, message="hi")
     assert out["reply"]["kind"] == "error" and "try again in a minute" in out["reply"]["text"].lower()
     assert store.ai_used_today(UID, now=NOW) > 0  # the router call still cost something
+
+
+def test_a_refused_request_says_waiting_won_t_help_and_keeps_claude_s_detail_out_of_the_chat(store, lab) -> None:
+    refused = anthropic.BadRequestError(
+        "The compiled grammar is too large, which would cause performance issues.", response=httpx2.Response(
+            400, request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages")), body=None)
+    claude = FakeClaude(router=[route("chat")], chat=[refused])
+    out = make(store, lab, claude).reply(UID, message="hi")
+    reply = out["reply"]
+    assert reply["kind"] == "error" and "server log" in reply["text"] and "won't help" in reply["text"]
+    assert "grammar" not in reply["text"] and "try again in a minute" not in reply["text"].lower()
+    assert "Try again" not in reply["chips"]
+
+
+def test_no_tool_is_strict_and_a_bad_input_comes_back_as_a_tool_error(lab) -> None:
+    assert not any("strict" in tool for tool in TOOLS)
+    run = Toolbox(lab, UID, NY).run("odds_get_prices", {"league": "not_a_league", "event_id": 7})
+    assert not run.ok and run.content["error"] == "invalid_input" and run.content["hint"]
 
 
 def test_late_at_night_the_reply_carries_a_note_and_the_owner_sees_it(store, lab) -> None:

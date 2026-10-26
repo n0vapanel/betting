@@ -719,8 +719,12 @@ class Assistant:
         except AIError as exc:
             logging.warning("The assistant couldn't reach Claude: %s", exc)
             spend.add(self.chat_model, exc.cost)
-            turn = Turn(f"I couldn't reach the AI just now ({exc}). Try again in a minute.", "error",
-                        chips=["Try again"] if text else [])
+            if exc.temporary:
+                turn = Turn(f"I couldn't reach the AI just now ({exc}). Try again in a minute.", "error",
+                            chips=["Try again"] if text else [])
+            else:
+                turn = Turn(f"The AI can't answer right now: {exc}. Trying again won't help until that's fixed.",
+                            "error")
         except Exception:
             logging.exception("The assistant failed on a turn")
             turn = Turn("Something went wrong on my side. Try again in a minute.", "error")

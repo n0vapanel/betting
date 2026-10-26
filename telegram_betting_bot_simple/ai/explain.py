@@ -20,6 +20,7 @@ supports them, plain-English errors and a cost estimate, as in ai/claude.py.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 from dataclasses import dataclass, field
@@ -41,12 +42,14 @@ MIN_OUTPUT_TOKENS = 1024  # a request that can't afford this many output tokens 
 class AIError(Exception):
     """Claude couldn't answer; the message says why in plain English (never contains a key).
 
-    ``cost`` is what the failed attempt still cost, in US dollars.
+    ``cost`` is what the failed attempt still cost, in US dollars. ``temporary`` is False when waiting won't
+    help (a bad key, an unknown model, a request Claude refuses), so the person isn't told to try again.
     """
 
-    def __init__(self, message: str, cost: float = 0.0) -> None:
+    def __init__(self, message: str, cost: float = 0.0, temporary: bool = True) -> None:
         super().__init__(message)
         self.cost = cost
+        self.temporary = temporary
 
 
 # --- talking to Claude ------------------------------------------------------------------------
@@ -63,15 +66,19 @@ class ClaudeCaller:
         try:
             return self.client.beta.messages.create(model=model, **extra, **request)
         except anthropic.AuthenticationError:
-            raise AIError("Claude rejected the API key (check ANTHROPIC_API_KEY)") from None
+            raise AIError("Claude rejected the API key (check ANTHROPIC_API_KEY)", temporary=False) from None
         except anthropic.PermissionDeniedError:
-            raise AIError(f"This API key can't use {model}") from None
+            raise AIError(f"This API key can't use {model}", temporary=False) from None
         except anthropic.NotFoundError:
-            raise AIError(f"Unknown Claude model {model} (check AI_CHAT_MODEL and AI_ROUTER_MODEL)") from None
+            raise AIError(f"Unknown Claude model {model} (check AI_CHAT_MODEL and AI_ROUTER_MODEL)",
+                          temporary=False) from None
         except anthropic.RateLimitError:
             raise AIError("Claude is busy right now: try again in a minute") from None
         except anthropic.BadRequestError as exc:
-            raise AIError(f"Claude didn't accept the request: {str(exc.message)[:200]}") from None
+            # The app's own request was refused: the detail is for the server log, not the person
+            logging.warning("Claude refused a %s request: %s", model, str(exc.message)[:500])
+            raise AIError("Claude didn't accept the app's request (the details are in the server log)",
+                          temporary=False) from None
         except anthropic.APIStatusError as exc:
             raise AIError(f"Claude's API answered {exc.status_code}: try again later") from None
         except anthropic.APIConnectionError:

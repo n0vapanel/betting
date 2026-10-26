@@ -97,52 +97,55 @@ _TICKET = {
                                                 "lucky31, heinz, lucky63, super_heinz or goliath"},
 }
 
+# Not "strict": Claude compiles strict schemas into one grammar, and twelve tools with the league list in
+# every leg made it too large ("The compiled grammar is too large", a 400 on every chat turn). Toolbox.run
+# checks every input against its pydantic model instead, and a bad one comes back as an error with a hint.
 TOOLS: List[Dict[str, Any]] = [
-    {"name": "sports_find_events", "strict": True,
+    {"name": "sports_find_events",
      "description": "List upcoming and live games with the AI's predicted winner and chance. Call this first "
                     "whenever the user mentions games, teams or a sport, to get current event ids; never "
                     "guess an id. query filters by team name (empty string for every game).",
      "input_schema": _obj({"leagues": _LEAGUES, "query": _STR,
                            "when": {"type": "string", "enum": ["today", "tomorrow", "week"]}})},
-    {"name": "odds_get_prices", "strict": True,
+    {"name": "odds_get_prices",
      "description": "Every market for one game: best price, the AI's chance, the market's margin-free chance, "
                     "fair odds and a ref for each outcome. Call this before quoting any odds or chance for a game.",
      "input_schema": _obj({"league": _LEAGUE, "event_id": _STR})},
-    {"name": "player_get_profile", "strict": True,
+    {"name": "player_get_profile",
      "description": "A player's season and recent averages, last 10 games, home/away splits, injury status, "
                     "next game and dated news. Call this when the user asks about a player's form.",
      "input_schema": _obj({"name": {"type": "string", "description": "The player's name as the user wrote it"},
                            "league": _LEAGUE})},
-    {"name": "player_get_props", "strict": True,
+    {"name": "player_get_props",
      "description": "A player's posted prop lines with hit rates (with sample sizes), the brain's projection "
                     "and its chance of the over. Call this before talking about any player prop.",
      "input_schema": _obj({"name": _STR, "league": _LEAGUE})},
-    {"name": "news_get", "strict": True,
+    {"name": "news_get",
      "description": "Dated injury and lineup news with sources: for a player (player = name), one game "
                     "(event_id) or the league's games (both empty strings).",
      "input_schema": _obj({"league": _LEAGUE, "player": _STR, "event_id": _STR})},
-    {"name": "brain_price_legs", "strict": True,
+    {"name": "brain_price_legs",
      "description": "The brain's view of each leg on its own: the AI's chance, the market's chance, fair odds, "
                     "edge and the bookmaker's cut. Use it to compare legs; it prices no ticket.",
      "input_schema": _obj({"legs": _LEGS})},
-    {"name": "ticket_price", "strict": True,
+    {"name": "ticket_price",
      "description": "Price a ticket: combined odds, payout, chance as '1 in X' (AI and market), what the "
                     "bookmaker keeps, the expected result in money, the most likely outcome and warnings. "
                     "Call this before quoting any ticket's odds, payout or chance.",
      "input_schema": _obj(dict(_TICKET), optional=("k", "system", "split"))},
-    {"name": "ticket_build", "strict": True,
+    {"name": "ticket_build",
      "description": "Build up to three tickets that turn the user's stake into about their target, with the "
                     "honest ceiling on the chance and a verdict. Use the user's own stake and target "
                     "(target = money back, stake included); ask if either is missing.",
      "input_schema": _obj({"leagues": _LEAGUES, "stake": {"type": "number"}, "target": {"type": "number"},
                            "max_legs": {"type": "integer", "description": "1 to 6"},
                            "tier": {"type": "string", "enum": list(TIERS)}}, optional=("tier",))},
-    {"name": "ticket_analyse", "strict": True,
+    {"name": "ticket_analyse",
      "description": "Analyse the user's own ticket: priced, with notes per leg (injuries, AI vs market gap, "
                     "analysts' views) and alternatives the code worked out (drop the weakest leg, singles, "
                     "a round robin).",
      "input_schema": _obj(dict(_TICKET), optional=("k", "system", "split"))},
-    {"name": "rollover_simulate", "strict": True,
+    {"name": "rollover_simulate",
      "description": "Compare rollover strategies side by side (classic all-in, bank half, pot-and-ladder, "
                     "flat stakes): chance to finish, chance of a profit, typical end, expected cost, the day a "
                     "run most likely ends. Use the user's own start amount and days.",
@@ -150,12 +153,12 @@ TOOLS: List[Dict[str, Any]] = [
                            "min_odds": {"type": "number", "description": "Daily odds, 1.2 to 20; use 2.0 if "
                                                                          "the user gave none"},
                            "legs_per_day": {"type": "integer", "description": "1 to 3"}})},
-    {"name": "slip_propose", "strict": True,
+    {"name": "slip_propose",
      "description": "Show the user a priced ticket card with an 'Add to slip' button. It saves nothing and "
                     "adds nothing: only the user can add it. Use it for the one ticket you suggest.",
      "input_schema": _obj({**_TICKET, "title": {"type": "string", "description": "A short card title"}},
                           optional=("k", "system", "split"))},
-    {"name": "user_get_context", "strict": True,
+    {"name": "user_get_context",
      "description": "The user's settings: odds format, favourite sports, risk tier, weekly budget left, "
                     "cool-off and AI credits left (read only).",
      "input_schema": _obj({})},
