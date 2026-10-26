@@ -394,12 +394,14 @@ export const SURVIVAL = [
   { day: 5, share: 0.023, text: "2.3%" },
 ];
 
-// 200,000 simulated 30-day runs, one bet a day at 2.00, bankroll starting at 1 (the blueprint's table)
+// 30-day runs, one bet a day at 2.00, bankroll starting at 1: [chance of a profit, typical (median) end,
+// chance of ending at half or less], worked out exactly by engine/rollover.py's outcomes(strategy, 30, 2.0, p),
+// the same maths as the rollover planner (pots are 10% of the start), at p = 0.47 (market) and 0.53 (edge)
 export const STRATEGIES = [
   { title: "Classic all-in rollover", market: ["≈0%", "0", "≈100%"], edge: ["≈0%", "0", "≈100%"] },
-  { title: "Roll, but bank half of each day's profit", market: ["22.1%", "0", "77.9%"], edge: ["28.0%", "0.50", "72.0%"] },
-  { title: "Pot and ladder: roll 10% for at most 2 wins, bank, restart; stop below half", market: ["22.4%", "0.48", "53.9%"], edge: ["44.9%", "0.93", "31.4%"] },
-  { title: "Flat 5% of the start each day", market: ["30.6%", "0.90", "9.3%"], edge: ["56.0%", "1.10", "2.4%"] },
+  { title: "Roll, but bank half of each day's profit", market: ["22.1%", "0", "77.9%"], edge: ["28.1%", "0.50", "71.9%"] },
+  { title: "Pot and ladder: roll a pot of 10% of the start for at most 2 wins, bank it, start a new pot; stop below half the start", market: ["30.2%", "0.40", "55.6%"], edge: ["53.4%", "1.10", "34.1%"] },
+  { title: "Flat 5% of the start each day", market: ["30.4%", "0.90", "9.3%"], edge: ["55.9%", "1.10", "2.4%"] },
 ];
 
 export const HELPLINES = [

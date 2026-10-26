@@ -157,6 +157,12 @@ def chance_label(p: Optional[float]) -> Optional[str]:
     return "lottery ticket"
 
 
+def ai_given_no_push(ai_prob: float, push_prob: float) -> float:
+    """The AI's outright chance as a chance given no push, the market's footing, so the two can be compared."""
+    no_push = 1.0 - (push_prob or 0.0)
+    return ai_prob / no_push if no_push > 0 else ai_prob
+
+
 def one_in(p: Optional[float]) -> Optional[int]:
     """A chance as "1 in X" (X at least 1), or None when there is no chance at all."""
     if p is None or p <= 0:
@@ -491,7 +497,8 @@ def _warnings(legs: Sequence[TicketLeg], ticket_type: str, sizes: Sequence[int],
         elif leg.ai_prob is None:
             left = "only the market's view is shown." if market_view else "the AI's view of the ticket isn't shown."
             warnings.append(f"No AI chance for {leg.label}: {left}")
-        elif leg.market_prob is not None and abs(leg.ai_prob - leg.market_prob) > AI_GAP:
+        elif (leg.market_prob is not None
+              and abs(ai_given_no_push(leg.ai_prob, leg.push_prob) - leg.market_prob) > AI_GAP):
             warnings.append(f"The AI is far from the market on {leg.label}: check the injury news.")
     return warnings
 

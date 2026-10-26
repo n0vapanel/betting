@@ -312,11 +312,39 @@ function fillSheet(state, { title = "", body = "", footer = "", label = "" }) {
   state.body.scrollTop = 0;
 }
 
+// --- the page behind a dialog --------------------------------------------------------------------------
+//
+// While a sheet or the sign-in gate is open, the page behind it is `inert`: Tab and a screen reader stay in
+// the dialog (aria-modal alone doesn't keep keyboard focus in). Each dialog holds the page under its own
+// name, so closing a sheet while the gate is up keeps it inert.
+
+const BEHIND = ".app-header, .shell, #slipbar, .tabbar";
+const holders = new Map(); // who holds the page inert -> extra selector for that holder (the gate also covers sheets)
+
+/** Make the page behind a dialog inert (on) or let it go (off). ``also`` adds a selector for this holder. */
+export function holdPage(holder, on, also = "") {
+  if (on) holders.set(holder, also);
+  else holders.delete(holder);
+  const selector = [BEHIND, ...holders.values()].filter(Boolean).join(", ");
+  const wanted = new Set(holders.size ? document.querySelectorAll(selector) : []);
+  for (const el of document.querySelectorAll("[data-held]")) {
+    if (!wanted.has(el)) {
+      el.inert = false;
+      delete el.dataset.held;
+    }
+  }
+  for (const el of wanted) {
+    el.inert = true;
+    el.dataset.held = "";
+  }
+}
+
 function teardown() {
   const closing = current;
   current = null;
   closing.root.classList.remove("open");
   document.body.classList.remove("sheet-open");
+  holdPage("sheet", false); // before focus goes back to the page
   const done = () => closing.root.remove();
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) done();
   else setTimeout(done, 180);
@@ -450,6 +478,7 @@ export const sheet = {
     // A history entry of its own, so the browser's (or Android's) Back closes the sheet, not the page
     pushEntry(current);
     document.body.classList.add("sheet-open");
+    holdPage("sheet", true);
     requestAnimationFrame(() => {
       root.classList.add("open");
       current?.panel.focus({ preventScroll: true }); // the dialog itself, so screen readers start at its title
@@ -861,7 +890,12 @@ export function oddsButton(card, market, side, { wide = false } = {}) {
   const modelled = Boolean(card.prediction);
   const chance = modelled ? offer.ai : offer.fair;
   const point = pointText(market, side, offer.point);
-  const edge = modelled && offer.fair != null && offer.ai != null ? offer.ai - offer.fair : 0;
+  // Like with like: on a line that can push (a whole-number spread or total) the AI's chance is an outright
+  // one, while the market's margin-free chance is a chance given no push, so the AI's is put on that footing
+  // first (engine/tickets.py's ai_given_no_push). Without a push chance the two compare as they are.
+  const noPush = 1 - (Number(offer.push) || 0);
+  const aiGivenNoPush = offer.ai != null && noPush > 0 ? offer.ai / noPush : offer.ai;
+  const edge = modelled && offer.fair != null && aiGivenNoPush != null ? aiGivenNoPush - offer.fair : 0;
   const value = modelled && !card.live && offer.ev != null && offer.ev > 0.03 && edge >= 0.03 && edge < 0.08;
   const far = modelled && !card.live && edge >= 0.08;
   const selected = slip.has(key);
@@ -900,11 +934,14 @@ export function splitBar(awayName, away, homeName, home, { source = "", draw = n
   const drawPart = draw != null ? draw : 0;
   const total = away + home + drawPart || 1;
   const w = (p) => `${Math.max(2, (p / total) * 100).toFixed(1)}%`;
+  // A team's name gives way (…) before its chance does; a draw gets its own line under the bar's middle,
+  // so three outcomes fit a phone-width card
   return `<div class="split" role="img" aria-label="${esc(`${source ? `${source} chance: ` : ""}${awayName} ${pct(away)}${draw != null ? `, draw ${pct(draw)}` : ""}, ${homeName} ${pct(home)}`)}">
-    <div class="split-labels"><span class="${favHome ? "" : "fav"}">${esc(awayName)} <b>${pct(away)}</b></span>
-      ${source ? `<span class="split-source">${esc(source)}${draw != null ? ` · Draw ${pct(draw)}` : ""}</span>` : ""}
-      <span class="${favHome ? "fav" : ""}"><b>${pct(home)}</b> ${esc(homeName)}</span></div>
+    <div class="split-labels"><span class="split-team${favHome ? "" : " fav"}"><span class="split-name">${esc(awayName)}</span> <b>${pct(away)}</b></span>
+      ${source ? `<span class="split-source">${esc(source)}</span>` : ""}
+      <span class="split-team home${favHome ? " fav" : ""}"><b>${pct(home)}</b> <span class="split-name">${esc(homeName)}</span></span></div>
     <div class="split-bar"><span class="${favHome ? "" : "fav"}" style="width:${w(away)}"></span>${draw != null ? `<span class="draw" style="width:${w(draw)}"></span>` : ""}<span class="${favHome ? "fav" : ""}" style="width:${w(home)}"></span></div>
+    ${draw != null ? `<div class="split-draw">Draw <b>${pct(draw)}</b></div>` : ""}
   </div>`;
 }
 

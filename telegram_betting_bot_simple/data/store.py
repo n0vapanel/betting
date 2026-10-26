@@ -251,6 +251,14 @@ CREATE TABLE IF NOT EXISTS ai_credits (
     used_cents REAL NOT NULL DEFAULT 0,  -- estimated US cents (fractions kept: a turn costs about a cent)
     PRIMARY KEY (user, day)
 );
+CREATE TABLE IF NOT EXISTS ai_holds (
+    user TEXT PRIMARY KEY,         -- one running AI call per person (the bot and the dashboard alike)
+    token TEXT NOT NULL,           -- which call holds it, so a late finish never frees someone else's
+    cents REAL NOT NULL,           -- the most the call may still spend, held from the shared allowances
+    pools TEXT NOT NULL,           -- JSON: the shared allowances it counts against ("*web", "*all")
+    started_at REAL NOT NULL,
+    expires_at REAL NOT NULL       -- a hold left by a crashed process stops counting then
+);
 CREATE TABLE IF NOT EXISTS rg_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user TEXT NOT NULL,
@@ -298,6 +306,12 @@ SHARE_CODE_LENGTH = 8
 CREDIT_DAY_TZ = ZoneInfo("America/New_York")  # the config's default; the service can pass its own day
 REQUIRED_LEG_FIELDS = ("league", "event_id", "market", "side", "price", "label")
 SQL_CHUNK = 500  # ids per "IN (...)" query, well under SQLite's variable limit
+# Ids starting with "*" are the app's own rows, never a person's (people are "tg:<id>" or "web:<id>"): the
+# AI allowances shared by many people in ai_credits ("*web", "*all"), and in users the gates every password
+# browser shares (see shared_user)
+RESERVED_PREFIX = "*"
+AI_HOLD_SECONDS = 10 * 60  # a running AI call's hold lapses this long after it was taken or last renewed
+# (renew_ai, before each request to the model), in case its process died mid-call
 
 
 def _record(fields: Tuple[str, ...], values: Sequence[Any]) -> Dict[str, Any]:
@@ -326,6 +340,11 @@ def _now(now: Optional[float]) -> float:
 def _iso(now: float) -> str:
     """Epoch seconds as the ISO 8601 UTC form game start times use, so the two compare as text."""
     return datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _limit(limit: Optional[int]) -> int:
+    """A LIMIT for SQLite: None means no limit, which SQLite writes as -1."""
+    return -1 if limit is None else limit
 
 
 def _cents(value: Any, what: str) -> int:
@@ -450,6 +469,21 @@ def _setting(field: str, value: Any) -> Any:
 
 # What update_user may change. Budget, age and cool-off have their own methods and rules.
 EDITABLE_USER_FIELDS = ("name", "odds_format", "currency", "favourite_sports", "risk_tier", "reality_check_minutes")
+
+
+def _prefixed(column: str, prefix: str) -> Tuple[str, Tuple[str, str]]:
+    """A WHERE clause for ids starting with ``prefix`` (as a range, so the column's index serves it)."""
+    if not prefix:
+        raise ValueError("An id prefix is needed")
+    return f"{column} >= ? AND {column} < ?", (prefix, prefix[:-1] + chr(ord(prefix[-1]) + 1))
+
+
+def _add_usage(db: sqlite3.Connection, user: str, day: str, cents: float) -> None:
+    db.execute(
+        "INSERT INTO ai_credits (user, day, used_cents) VALUES (?, ?, ?) "
+        "ON CONFLICT(user, day) DO UPDATE SET used_cents = ai_credits.used_cents + excluded.used_cents",
+        (user, day, cents),
+    )
 
 
 def _apply_due_raise(db: sqlite3.Connection, user_id: str, now: float) -> None:
@@ -816,6 +850,8 @@ class Store:
         chose in the app isn't overwritten by Telegram's on their next visit."""
         if not isinstance(user_id, str) or not user_id.strip():
             raise ValueError("A user id is needed")
+        if user_id.startswith(RESERVED_PREFIX):
+            raise ValueError("That id is reserved")
         with closing(self._connect()) as db:
             db.execute(
                 "INSERT INTO users (id, name, created_at) VALUES (?, ?, ?) "
@@ -918,6 +954,61 @@ class Store:
             row = db.execute("SELECT cooloff_until FROM users WHERE id = ?", (user_id,)).fetchone()
         return bool(row and row[0] is not None and row[0] > _now(now))
 
+    def extend_setting(self, user_id: str, key: str, until: float) -> Optional[float]:
+        """Set a time in the person's ``settings`` (such as the pause on picks) to ``until``, unless it already
+        runs later: a pause is lengthened, never cut short. One write transaction, so the bot and the dashboard
+        can't lose each other's. Returns the time now stored, or None if there is no such user."""
+        until_value = _finite(until)
+        if until_value is None:
+            raise ValueError("A time is needed")
+        with closing(self._connect()) as db, _transaction(db):
+            row = db.execute("SELECT settings FROM users WHERE id = ?", (user_id,)).fetchone()
+            if row is None:
+                return None
+            settings = json.loads(row[0] or "{}")
+            current = _finite(settings.get(key))
+            if current is None or current < until_value:
+                settings[key] = current = until_value
+                db.execute("UPDATE users SET settings = ? WHERE id = ?", (_dumps(settings), user_id))
+        return current
+
+    def shared_user(self, shared_id: str, members: str, carry: Sequence[str] = (),
+                    now: Optional[float] = None) -> Dict[str, Any]:
+        """The reserved row ``shared_id`` (an id starting with "*") holding the gates shared by everyone whose
+        id starts with ``members``: a break (cooloff_until), the weekly budget with its pending raise, and the
+        ``carry`` settings (the pause on picks). set_weekly_budget, start_cooloff and extend_setting change it
+        as they would a person's row, with the same rules.
+
+        It is made on first use from the members' own rows, so no limit set before the gates were shared is
+        lost: the latest break, the latest of each ``carry`` setting and the lowest weekly budget (a raise
+        that has waited its 24 hours counts; one still waiting is dropped and must be asked for again).
+        """
+        if not shared_id.startswith(RESERVED_PREFIX):
+            raise ValueError(f"A shared row's id starts with {RESERVED_PREFIX}")
+        now = _now(now)
+        row = self.user(shared_id, now=now)
+        if row is not None:
+            return row
+        where, bounds = _prefixed("id", members)
+        with closing(self._connect()) as db, _transaction(db):
+            if db.execute("SELECT 1 FROM users WHERE id = ?", (shared_id,)).fetchone() is None:
+                rows = db.execute(
+                    "SELECT CASE WHEN budget_raise_at IS NOT NULL AND budget_raise_at <= ? THEN pending_budget_cents "
+                    f"ELSE weekly_budget_cents END, cooloff_until, settings FROM users WHERE {where}", (now, *bounds),
+                ).fetchall()
+                settings: Dict[str, float] = {}
+                for key in carry:
+                    times = [_finite(json.loads(values[2] or "{}").get(key)) for values in rows]
+                    if any(value is not None for value in times):
+                        settings[key] = max(value for value in times if value is not None)
+                db.execute(
+                    "INSERT INTO users (id, created_at, weekly_budget_cents, cooloff_until, settings) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (shared_id, now, min((values[0] for values in rows if values[0] is not None), default=None),
+                     max((values[1] for values in rows if values[1] is not None), default=None), _dumps(settings)),
+                )
+        return self.user(shared_id, now=now)
+
     # --- slips: tickets people save, each leg with the exact quote it was built on --------------
 
     def save_slip(self, user: str, ticket_type: str, legs: Sequence[Any], stake_cents: int,
@@ -997,8 +1088,9 @@ class Store:
         return slip
 
     def slips(self, user: str, status: Union[None, str, Iterable[str]] = None,
-              limit: int = 100) -> List[Dict[str, Any]]:
-        """The person's slips with their legs, newest first, optionally by status (one or several)."""
+              limit: Optional[int] = 100) -> List[Dict[str, Any]]:
+        """The person's slips with their legs, newest first, optionally by status (one or several).
+        ``limit=None`` returns every one."""
         where, args = ["user = ?"], [user]
         statuses = _statuses(status)
         if statuses:
@@ -1007,7 +1099,7 @@ class Store:
         with closing(self._connect()) as db:
             rows = db.execute(
                 f"SELECT {', '.join(SLIP_FIELDS)} FROM slips WHERE {' AND '.join(where)} "
-                "ORDER BY created_at DESC, id DESC LIMIT ?", (*args, limit),
+                "ORDER BY created_at DESC, id DESC LIMIT ?", (*args, _limit(limit)),
             ).fetchall()
             return _with_legs(db, rows)
 
@@ -1086,6 +1178,26 @@ class Store:
             ).fetchone()
         return int(row[0])
 
+    def budget_staked_since(self, since: float, user: Optional[str] = None, members: Optional[str] = None) -> int:
+        """Cents staked since a time that count against a weekly budget: one person's bets (``user``), or those
+        of everyone whose id starts with ``members`` (every password browser, "web:"). As staked_since, but a
+        paper plan's days are left out: they are play money."""
+        if (user is None) == (members is None):
+            raise ValueError("Give a user or an id prefix")
+        where, args = ("user = ?", (user,)) if user is not None else _prefixed("user", members or "")
+        with closing(self._connect()) as db:
+            rows = db.execute(
+                # Only a payload that mentions "paper" can be a paper plan's day: no other is read and decoded
+                f"SELECT stake_cents, CASE WHEN payload LIKE '%paper%' THEN payload END FROM slips WHERE {where} "
+                "AND status IN ('saved', 'settled') AND created_at >= ?", (*args, since),
+            ).fetchall()
+        total = 0
+        for stake, payload in rows:
+            plan = (json.loads(payload).get("plan") or {}) if payload else {}
+            if not (isinstance(plan, dict) and plan.get("mode") == "paper"):
+                total += int(stake)
+        return total
+
     # --- rollover plans: recorded one day at a time, failures like successes ----------------------
 
     def create_plan(self, user: str, start_cents: int, days: int, min_odds: Any, legs_per_day: int, strategy: str,
@@ -1124,10 +1236,15 @@ class Store:
             plans = _with_days(db, rows)
         return plans[0] if plans else None
 
-    def plans(self, user: str, status: Union[None, str, Iterable[str]] = None,
-              limit: int = 50) -> List[Dict[str, Any]]:
-        """The person's plans with their recorded days, newest first, optionally by status."""
-        where, args = ["user = ?"], [user]
+    def plans(self, user: Optional[str] = None, status: Union[None, str, Iterable[str]] = None,
+              limit: Optional[int] = 50, members: Optional[str] = None) -> List[Dict[str, Any]]:
+        """The person's plans with their recorded days, newest first, optionally by status (``limit=None``:
+        every one); or with ``members`` instead of ``user``, those of everyone whose id starts with it (every
+        password browser, "web:", for the rules that cover them all)."""
+        if (user is None) == (members is None):
+            raise ValueError("Give a user or an id prefix")
+        clause, bounds = ("user = ?", (user,)) if user is not None else _prefixed("user", members or "")
+        where, args = [clause], list(bounds)
         statuses = _statuses(status)
         if statuses:
             where.append(_in("status", statuses))
@@ -1135,7 +1252,7 @@ class Store:
         with closing(self._connect()) as db:
             rows = db.execute(
                 f"SELECT {', '.join(PLAN_FIELDS)} FROM plans WHERE {' AND '.join(where)} "
-                "ORDER BY created_at DESC, id DESC LIMIT ?", (*args, limit),
+                "ORDER BY created_at DESC, id DESC LIMIT ?", (*args, _limit(limit)),
             ).fetchall()
             return _with_days(db, rows)
 
@@ -1291,11 +1408,7 @@ class Store:
         used = _usage(cents, "AI usage")
         day = day or self.credit_day(now)
         with closing(self._connect()) as db:
-            db.execute(
-                "INSERT INTO ai_credits (user, day, used_cents) VALUES (?, ?, ?) "
-                "ON CONFLICT(user, day) DO UPDATE SET used_cents = ai_credits.used_cents + excluded.used_cents",
-                (user, day, used),
-            )
+            _add_usage(db, user, day, used)
             return float(db.execute("SELECT used_cents FROM ai_credits WHERE user = ? AND day = ?",
                                     (user, day)).fetchone()[0])
 
@@ -1305,6 +1418,83 @@ class Store:
             row = db.execute("SELECT used_cents FROM ai_credits WHERE user = ? AND day = ?",
                              (user, day or self.credit_day(now))).fetchone()
         return float(row[0]) if row else 0.0
+
+    # --- AI holds: one running AI call per person, and what running calls hold from shared allowances ----
+    # The bot and the dashboard are separate processes on this one file, so the hold lives here, not in
+    # memory. An allowance is an ai_credits id with its daily cap in cents: the person's own id, and the
+    # shared ones their spending also counts against ("*web" for every password browser, "*all").
+
+    def _ai_left(self, db: sqlite3.Connection, user: str, caps: Mapping[str, float], now: float) -> float:
+        """The least any of ``caps`` has left today after what it has used and what other people's running
+        calls hold from it (the person's own running call isn't taken off)."""
+        day = self.credit_day(now)
+        held: Dict[str, float] = {}
+        for cents, pools in db.execute("SELECT cents, pools FROM ai_holds WHERE user != ? AND expires_at > ?",
+                                       (user, now)):
+            for pool in json.loads(pools):
+                held[pool] = held.get(pool, 0.0) + float(cents)
+        left = math.inf
+        for allowance, cap in caps.items():
+            row = db.execute("SELECT used_cents FROM ai_credits WHERE user = ? AND day = ?",
+                             (allowance, day)).fetchone()
+            left = min(left, float(cap) - (float(row[0]) if row else 0.0) - held.get(allowance, 0.0))
+        return left
+
+    def ai_left(self, user: str, caps: Mapping[str, float], now: Optional[float] = None) -> float:
+        """US cents the person may still spend on AI today: the least any of their allowances (``caps``:
+        ai_credits id -> daily cap, their own id among them) has left, after other running calls' holds."""
+        with closing(self._connect()) as db:
+            return self._ai_left(db, user, caps, _now(now))
+
+    def reserve_ai(self, user: str, caps: Mapping[str, float], most: float, least: float = 0.0,
+                   now: Optional[float] = None, seconds: float = AI_HOLD_SECONDS) -> Optional[Tuple[str, float]]:
+        """Start an AI call for a person, in one write transaction: (token, the most it may spend in US cents),
+        or None while another call of theirs is running (in this process or another).
+
+        The amount is at most ``most`` and never more than any of ``caps`` has left after what it has used
+        and other running calls hold, so it is held from every allowance until settle_ai and release_ai.
+        Under ``least`` there isn't enough for a call: nothing is held then, but the person still counts as
+        busy until release_ai. A hold lapses after ``seconds``, in case the process holding it died.
+        """
+        now = _now(now)
+        pools = [allowance for allowance in caps if allowance != user]
+        with closing(self._connect()) as db, _transaction(db):
+            db.execute("DELETE FROM ai_holds WHERE expires_at <= ?", (now,))
+            if db.execute("SELECT 1 FROM ai_holds WHERE user = ?", (user,)).fetchone():
+                return None
+            cents = max(0.0, min(float(most), self._ai_left(db, user, caps, now)))
+            token = secrets.token_hex(8)
+            db.execute("INSERT INTO ai_holds (user, token, cents, pools, started_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+                       (user, token, cents if cents >= least else 0.0, json.dumps(pools), now, now + seconds))
+        return token, cents
+
+    def settle_ai(self, user: str, token: str, cents: float, pools: Sequence[str] = (),
+                  now: Optional[float] = None) -> None:
+        """What a running call really cost (US cents), in one write: added to the person's day and to each of
+        ``pools``, and the call's hold drops to nothing (the person stays busy until release_ai)."""
+        used = _usage(cents, "AI usage")
+        now = _now(now)
+        day = self.credit_day(now)
+        with closing(self._connect()) as db, _transaction(db):
+            if used > 0:
+                for allowance in dict.fromkeys([user, *pools]):
+                    _add_usage(db, allowance, day, used)
+            db.execute("UPDATE ai_holds SET cents = 0 WHERE user = ? AND token = ?", (user, token))
+
+    def renew_ai(self, user: str, token: str, now: Optional[float] = None, seconds: float = AI_HOLD_SECONDS) -> bool:
+        """Keep a running call's hold for ``seconds`` more (called before each request it sends to the model).
+        False when it has already lapsed: other calls may have counted what it held as free since, so the call
+        must stop rather than spend it."""
+        now = _now(now)
+        with closing(self._connect()) as db:
+            cursor = db.execute("UPDATE ai_holds SET expires_at = ? WHERE user = ? AND token = ? AND expires_at > ?",
+                                (now + seconds, user, token, now))
+        return cursor.rowcount > 0
+
+    def release_ai(self, user: str, token: str) -> None:
+        """The call is over (or failed): the person may start another. Only that call's own hold is removed."""
+        with closing(self._connect()) as db:
+            db.execute("DELETE FROM ai_holds WHERE user = ? AND token = ?", (user, token))
 
     # --- responsible gambling: warning signs code acted on, for the owner to review ----------------
 
@@ -1319,9 +1509,16 @@ class Store:
         return int(cursor.lastrowid)
 
     def rg_events(self, user: Optional[str] = None, kind: Optional[str] = None, reviewed: Optional[bool] = None,
-                  since: Optional[float] = None, limit: int = 200) -> List[Dict[str, Any]]:
-        """Warning signs, newest first: one person's or everyone's, by kind, reviewed or not, since a time."""
-        where, args = [], []
+                  since: Optional[float] = None, limit: int = 200,
+                  members: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Warning signs, newest first: one person's, those of everyone whose id starts with ``members`` (every
+        password browser, "web:") or everyone's, by kind, reviewed or not, since a time."""
+        where: List[str] = []
+        args: List[Any] = []
+        if members is not None:
+            clause, bounds = _prefixed("user", members)
+            where.append(clause)
+            args.extend(bounds)
         for clause, value in (("user = ?", user), ("kind = ?", kind), ("ts >= ?", since)):
             if value is not None:
                 where.append(clause)

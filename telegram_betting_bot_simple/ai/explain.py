@@ -24,16 +24,18 @@ import math
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import anthropic
 from pydantic import BaseModel, ValidationError
 
-from .claude import FALLBACK_BETA, FALLBACK_MODELS, PRICES
+from ..engine.tickets import ai_given_no_push
+from .claude import FALLBACK_BETA, FALLBACK_MODELS, PRICES, UNKNOWN_PRICE, usage_cost
 
 EXPLAIN_MODEL = "claude-opus-5-5"
 EXPLAIN_EFFORT = "medium"
 MAX_TEXT = 700  # characters per explanation field: a verdict is a sentence or two, not an essay
+MIN_OUTPUT_TOKENS = 1024  # a request that can't afford this many output tokens isn't sent (thinking uses some)
 
 
 class AIError(Exception):
@@ -76,15 +78,43 @@ class ClaudeCaller:
             raise AIError("Couldn't reach Claude's API") from None
 
     @staticmethod
-    def cost(model: str, usage: Any) -> Tuple[float, int, int]:
-        """(estimated dollars, input tokens, output tokens) of one response."""
-        price_in, price_out, price_read = PRICES.get(model, PRICES[EXPLAIN_MODEL])
-        fresh = getattr(usage, "input_tokens", 0) or 0
-        written = getattr(usage, "cache_creation_input_tokens", 0) or 0
-        read = getattr(usage, "cache_read_input_tokens", 0) or 0
-        out = getattr(usage, "output_tokens", 0) or 0
-        dollars = (fresh * price_in + written * price_in * 1.25 + read * price_read + out * price_out) / 1e6
-        return dollars, fresh + written + read, out
+    def cost(model: str, usage: Any, served: Optional[str] = None) -> Tuple[float, int, int]:
+        """(estimated dollars, input tokens, output tokens) of one response to a request for ``model``.
+
+        ``served`` is the model that answered (``response.model``): a refusal fallback can hand the request
+        to a dearer model, and the declined attempt is billed too (see ai/claude.py's usage_cost).
+        """
+        return usage_cost(model, usage, served)
+
+    @staticmethod
+    def prices(model: str) -> Tuple[float, float]:
+        """The dearest US dollars per million tokens (input, output) a request for ``model`` can be billed at:
+        a refusal fallback can rerun it on Opus 5 or 4.8, which cost more than Opus 5.5 (an attempt declined
+        mid-answer is billed as well, which this leaves out: refusals are rare). Unknown models get the
+        dearest known rates."""
+        price_in, price_out, _ = PRICES.get(model, UNKNOWN_PRICE)
+        if model in FALLBACK_MODELS:
+            fallback = PRICES["claude-opus-5"]
+            price_in, price_out = max(price_in, fallback[0]), max(price_out, fallback[1])
+        return price_in, price_out
+
+    def worst_cost(self, model: str, request: Dict[str, Any], max_tokens: int) -> float:
+        """The most a request can cost (US dollars): every prompt token written to the cache (1.25x the input
+        price; prompts counted at 3 characters a token, more than English or JSON use) and ``max_tokens``
+        of output."""
+        price_in, price_out = self.prices(model)
+        prompt = len(json.dumps({k: v for k, v in request.items() if k != "max_tokens"}, default=str)) / 3
+        return (prompt * price_in * 1.25 + max_tokens * price_out) / 1e6
+
+    def max_tokens_within(self, model: str, budget: Optional[float], request: Dict[str, Any],
+                          wanted: int) -> int:
+        """The most output tokens a request may ask for (up to ``wanted``) so that even at its worst it costs
+        no more than ``budget`` (US dollars; None for no limit). 0 when not even MIN_OUTPUT_TOKENS fit."""
+        if budget is None:
+            return wanted
+        room = (budget - self.worst_cost(model, request, 0)) * 1e6 / self.prices(model)[1]
+        tokens = int(min(wanted, room))
+        return tokens if tokens >= MIN_OUTPUT_TOKENS else 0
 
 
 def response_text(response: Any) -> str:
@@ -107,7 +137,8 @@ _NOT_NUMBERS = [
     re.compile(r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?"
                r"|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?"
                r"(?:,?\s+\d{4})?\b", re.I),
-    re.compile(r"1-800-GAMBLER|1-800-522-4700|0808 ?8020 ?133|\b988\b|\b116 ?123\b", re.I),
+    re.compile(r"1-800-GAMBLER|1-800-522-4700|0808 ?8020 ?133|\b988\b|\b116 ?123\b|\b24\s*[/-]\s*7\b"
+               r"|\btwenty[- ]four[- ]seven\b", re.I),
     re.compile(r"\b(?:18|21)\s?\+"),
 ]
 # A number glued to letters is part of a name or a unit we don't check ("76ers", "3rd", "7pm")
@@ -115,16 +146,117 @@ _GLUED_AFTER = re.compile(r"(?:st|nd|rd|th|am|pm|ers|s)\b", re.I)
 ROUNDING_SHARE = 0.05  # "about 1,900" may round a number by at most 5% of it
 SMALL_COUNT = 12  # bare whole numbers up to this are counts and positions: "3 legs", "leg 2", "day 1"
 
+# Numbers written as words are checked like digits ("one in three", "ten times your stake", "seventy percent")
+_WORD_VALUES = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+    "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+}
+_WORD = "|".join(list(_WORD_VALUES) + ["hundred", "thousand"])
+# What kind of number word each is, for joining them: "twenty-four" is one number, "four seven" two
+_WORD_KINDS = {word: "unit" if value < 10 else "teen" if value < 20 else "tens" for word, value in _WORD_VALUES.items()}
+_WORD_RUN = re.compile(rf"\b(?:an?\s+(?=(?:hundred|thousand)\b))?(?:{_WORD})(?:[-\s]+(?:{_WORD}))*\b", re.I)
+# Fractions and multiples only count where they state a chance or a payout
+_WORD_FORMS = [
+    (re.compile(r"\b(?:a|one)[-\s]+half\s+(?=of\s+the\s+time\b)|\bhalf\s+(?=the\s+time\b)", re.I), "50% "),
+    (re.compile(r"\b(?:a|one)[-\s]+third\s+(?=of\s+the\s+time\b)", re.I), "33% "),
+    (re.compile(r"\b(?:a|one)[-\s]+quarter\s+(?=of\s+the\s+time\b)", re.I), "25% "),
+    (re.compile(r"\bthree[-\s]+quarters\s+(?=of\s+the\s+time\b)", re.I), "75% "),
+    (re.compile(r"\btwo[-\s]+thirds\s+(?=of\s+the\s+time\b)", re.I), "67% "),
+    (re.compile(r"\b(\d{1,3})\s*/\s*([1-9]\d{0,2})\s+(?=of\s+the\s+time\b)"),
+     lambda m: f"{round(100 * int(m[1]) / int(m[2]))}% "),
+    (re.compile(r"\b(?:doubles?|doubled|doubling|twice)\s+(?=(?:your|the|my|their)\s+(?:money|stake|bet|cash)\b)",
+                re.I), "2 times "),
+    (re.compile(r"\b(?:triples?|tripled|tripling)\s+(?=(?:your|the|my|their)\s+(?:money|stake|bet|cash)\b)", re.I),
+     "3 times "),
+]
+# A small whole number is still a betting figure in these forms: "12x", "ten times your stake", "3 in 4",
+# "3 out of 4", "pays 9 to 1", "9/1" (but "2 to 4 legs" is a range of counts)
+_COUNT_NOUN = re.compile(
+    r"\s+(?:legs?|days?|games?|bets?|picks?|points?|pts|rebounds?|assists?|wins?|losses|matches|nights?|weeks?"
+    r"|hours?|minutes?|teams?|players?|tickets?|parlays?|selections?|goals?|runs?|seasons?|months?|years?)\b", re.I)
+_CHECKED_AFTER = re.compile(
+    r"\s*[xX×](?![A-Za-z])|[-\s]fold\b"
+    r"|\s+times\s+(?:(?:your|the|my|their)\s+)?(?:stake|money|bet|wager|cash|payout)\b"
+    r"|\s+(?:times\s+)?(?:in|out\s+of)\s+\d|/\d", re.I)
+_CHECKED_BEFORE = re.compile(r"\d\s+(?:times\s+)?(?:in|out\s+of)\s+$|\d/$", re.I)
+_TO_AFTER = re.compile(r"\s+to\s+\d+(?:\.\d+)?\b")
+# Money in words after the number ("11 dollars", "eleven bucks", "26 cents"); "pounds" is left out (weights)
+_MONEY_AFTER = re.compile(r"\s*(?:dollars?|bucks?|(?P<cents>cents?)|quid|euros?)\b", re.I)
+_TO_BEFORE = re.compile(r"\d\s+to\s+$", re.I)
+# What a figure is said to be: a gain ("a profit of $0.26", "make about $3") or a loss ("lose $2.60")
+_FILLER = (r"(?:(?:about|around|roughly|nearly|almost|approximately|only|just|an?|the|of|on|average|expected"
+           r"|estimated|some)\s+){0,4}")
+_GAIN_BEFORE = re.compile(rf"\b(?:profits?|gains?|make|makes|making|made|win|wins|winning|won|earn|earns|earning"
+                          rf"|earned|up|ahead|plus)\s+{_FILLER}$", re.I)
+_LOSS_BEFORE = re.compile(rf"\b(?:lose|loses|losing|lost|loss(?:es)?|cost|costs|costing|down|behind|minus)\s+"
+                          rf"{_FILLER}$", re.I)
+
 
 @dataclass(frozen=True)
 class Figure:
     """One number as written in a text."""
     text: str
-    value: float  # its size (signs are ignored: "lose $2.60" and "-2.60" are the same figure)
+    value: float  # its size
     decimals: int
     percent: bool
     money: bool
     one_in: bool = False
+    sign: int = 0  # +1 or -1 when written with a sign ("+$0.26", "-2.60"), else 0
+    gain: bool = False  # said to be a gain: "a profit of $0.26", "make about $3"
+    loss: bool = False  # said to be a loss: "lose $2.60", "costs $3"
+
+    @property
+    def signed(self) -> float:
+        """The number with the sign the text gives it (a loss counts as negative)."""
+        return -self.value if self.sign < 0 or (not self.sign and self.loss) else self.value
+
+
+def _spell_out(text: str) -> str:
+    """Numbers written as words, as digits: "one in three" -> "1 in 3", "seventy percent" -> "70 percent"."""
+    for pattern, digits in _WORD_FORMS:
+        text = pattern.sub(digits, text)
+
+    def value(match: "re.Match[str]") -> str:
+        # Words join into one number only as numbers are written ("twenty-four", "one hundred five", "two
+        # thousand"); "twenty-four seven" and "four seven" are two numbers, never added up
+        numbers: List[int] = []
+        total = current = 0
+        last: Optional[str] = None
+        for word in re.split(r"[-\s]+", match.group(0).lower()):
+            if word in ("a", "an"):
+                continue
+            kind = _WORD_KINDS.get(word, word)
+            joins = ((kind == "unit" and last in ("tens", "hundred", "thousand"))
+                     or (kind in ("teen", "tens") and last in ("hundred", "thousand"))
+                     or (kind == "hundred" and last in ("unit", "teen"))
+                     or (kind == "thousand" and last in ("unit", "teen", "tens", "hundred") and not total))
+            if last is not None and not joins:
+                numbers.append(total + current)
+                total = current = 0
+            if kind == "hundred":
+                current = (current or 1) * 100
+            elif kind == "thousand":
+                total, current = (current or 1) * 1000, 0
+            else:
+                current += _WORD_VALUES[word]
+            last = kind
+        numbers.append(total + current)
+        return " ".join(str(number) for number in numbers)
+
+    return _WORD_RUN.sub(value, text)
+
+
+def _checked_small(text: str, start: int, end: int) -> bool:
+    """Whether a small whole number at text[start:end] is a betting figure (a multiple, ratio or odds)."""
+    before = text[max(0, start - 20):start]
+    if _CHECKED_AFTER.match(text, end) or _CHECKED_BEFORE.search(before):
+        return True
+    to = _TO_AFTER.match(text, end)
+    if to:
+        return not _COUNT_NOUN.match(text, to.end())
+    return bool(_TO_BEFORE.search(before)) and not _COUNT_NOUN.match(text, end)
 
 
 def _figures(text: str, skip_trivial: bool) -> List[Figure]:
@@ -141,6 +273,8 @@ def _figures(text: str, skip_trivial: bool) -> List[Figure]:
             continue
         number = match.group("num")
         percent, money = bool(match.group("pct")), bool(match.group("cur") or match.group("cur2"))
+        in_words = None if percent or money else _MONEY_AFTER.match(text, end)
+        money = money or in_words is not None
         if not percent and not money and _GLUED_AFTER.match(text, end):
             continue
         if not percent and not money and end < len(text) and text[end].isalpha() and text[end] not in "xX":
@@ -148,22 +282,35 @@ def _figures(text: str, skip_trivial: bool) -> List[Figure]:
         digits = number.replace(",", "")
         value = float(digits)
         decimals = len(digits.split(".")[1]) if "." in digits else 0
+        if in_words is not None and in_words.group("cents"):
+            value, decimals = value / 100, decimals + 2  # "26 cents" is $0.26
         if skip_trivial and not percent and not money and decimals == 0 and not match.group("sign"):
-            if value <= SMALL_COUNT or (len(digits) == 4 and 1900 <= value <= 2100):
+            if (value <= SMALL_COUNT and not _checked_small(text, start, end)) \
+                    or (len(digits) == 4 and 1900 <= value <= 2100):
                 continue  # a count, a position or a year
-        figures.append(Figure(match.group(0).strip(), value, decimals, percent, money))
+        sign = {"+": 1, "-": -1, "−": -1}.get(match.group("sign") or "", 0)
+        said = text[max(0, start - 60):start]
+        figures.append(Figure(match.group(0).strip(), value, decimals, percent, money, sign=sign,
+                              gain=bool(_GAIN_BEFORE.search(said)), loss=bool(_LOSS_BEFORE.search(said))))
     return figures
 
 
-def numbers_in(text: str) -> List[Figure]:
-    """The figures in a reply that must be traced back to the code: money, odds, chances, "1 in X"."""
-    for pattern in _NOT_NUMBERS:
+def numbers_in(text: str, exempt: Optional["re.Pattern[str]"] = None) -> List[Figure]:
+    """The figures in a reply that must be traced back to the code: money, odds, chances, "1 in X". Text
+    matching ``exempt`` (after numbers in words are read as digits) isn't checked: the assistant passes the
+    app's own rules there ("a break of 90 days")."""
+    for pattern in _NOT_NUMBERS:  # before and after the words: "twenty-four seven", "24/7"
+        text = pattern.sub(" ", text)
+    text = _spell_out(text)
+    for pattern in _NOT_NUMBERS + ([exempt] if exempt is not None else []):
         text = pattern.sub(" ", text)
     return _figures(text, skip_trivial=True)
 
 
 def source_numbers(*objects: Any) -> Set[float]:
-    """Every number in tool results or a fact sheet (values and numbers inside strings), unsigned."""
+    """Every number in tool results or a fact sheet (values and numbers inside strings), with its sign: a
+    number in a string counts as negative when written so ("-2.60") or said to be a loss ("cost $3"). A line's
+    ``point`` counts with both signs: Boston +4.5 is the Lakers -4.5."""
     found: Set[float] = set()
 
     def walk(value: Any) -> None:
@@ -172,10 +319,13 @@ def source_numbers(*objects: Any) -> Set[float]:
         if isinstance(value, (int, float, Decimal)):
             number = float(value)
             if math.isfinite(number):
-                found.add(abs(number))
+                found.add(number)
         elif isinstance(value, str):
-            found.update(figure.value for figure in _figures(value, skip_trivial=False))
+            found.update(figure.signed for figure in _figures(value, skip_trivial=False))
         elif isinstance(value, dict):
+            point = value.get("point")
+            if isinstance(point, (int, float, Decimal)) and not isinstance(point, bool):
+                walk(-point)
             for item in value.values():
                 walk(item)
         elif isinstance(value, (list, tuple, set)):
@@ -187,12 +337,29 @@ def source_numbers(*objects: Any) -> Set[float]:
     return found
 
 
+def _sign_fits(figure: Figure, source: float) -> bool:
+    """A figure written "+$0.26", or called a profit or a win, can't stand for a loss the code worked out;
+    one written "-$0.26" can't stand for a gain. ("Lose $10" may be the $10 stake, so a loss word alone
+    doesn't need a negative number.)"""
+    if figure.sign > 0:
+        return source > 0
+    if figure.sign < 0:
+        return source < 0
+    if figure.gain and not figure.loss:
+        return source >= 0
+    return True
+
+
 def _traced(figure: Figure, sources: Iterable[float]) -> bool:
-    """Whether a figure is a source number rounded to the precision shown (or a chance as a percentage)."""
+    """Whether a figure is a source number rounded to the precision shown (or a chance as a percentage),
+    with a sign that fits it."""
     slack = 0.5 * 10 ** -figure.decimals + 1e-9
     whole = figure.decimals == 0 and not figure.percent and figure.value >= 100
     zeros = len(str(int(figure.value))) - len(str(int(figure.value)).rstrip("0")) if whole else 0
-    for source in sources:
+    for signed in sources:
+        if not _sign_fits(figure, signed):
+            continue
+        source = abs(signed)
         if abs(source - figure.value) <= slack:
             return True
         if figure.percent and source <= 1 and abs(source * 100 - figure.value) <= slack:
@@ -204,9 +371,9 @@ def _traced(figure: Figure, sources: Iterable[float]) -> bool:
     return False
 
 
-def invented_numbers(text: str, sources: Set[float]) -> List[str]:
-    """The figures in ``text`` that no source number accounts for (as written)."""
-    return [figure.text for figure in numbers_in(text) if not _traced(figure, sources)]
+def invented_numbers(text: str, sources: Set[float], exempt: Optional["re.Pattern[str]"] = None) -> List[str]:
+    """The figures in ``text`` that no source number accounts for (as written); see numbers_in for ``exempt``."""
+    return [figure.text for figure in numbers_in(text, exempt) if not _traced(figure, sources)]
 
 
 # --- banned phrases ----------------------------------------------------------------------------
@@ -221,14 +388,18 @@ BANNED: Sequence[Tuple[str, "re.Pattern[str]"]] = [
     ("guaranteed", re.compile(r"\bguarantee(?:d|s|ing)?\b", re.I)),
     ("sure thing", re.compile(r"\bsure[- ](?:thing|bet|win|winner|shot|fire)\b|\bsurefire\b|\bdead cert", re.I)),
     ("risk-free", re.compile(r"\brisk[- ]?free\b|\b(?:no|zero)[- ]risk\b|\bwithout (?:any )?risk\b", re.I)),
-    ("can't lose", re.compile(r"\b(?:can(?:'|’)?t|cannot|can not|won(?:'|’)?t) (?:lose|miss|go wrong)\b"
+    ("can't lose", re.compile(r"\b(?:can(?:'|’)?t|cannot|can not|won(?:'|’)?t)[-\s](?:lose|miss|go wrong)\b"
                               r"(?!\s+more\b)", re.I)),
     # Money won back, not sports: "win back-to-back titles", "won back home" and "make it back to the
     # playoffs" are fine
     ("win back", re.compile(
         rf"\b{_EARN}\s+(?:it(?:\s+all)?|that|them|{_LOST_MONEY})\s+back\b"
         r"(?![-‐\s]+(?:to[-‐\s]+back|home|to\s+(?:the|a|an|their|his|her|its)|into)\b)"
-        rf"|\b{_EARN}\s+back\s+(?:{_LOST_MONEY}|what\b)", re.I)),
+        rf"|\b{_EARN}\s+back\s+(?:{_LOST_MONEY}|what\b)"
+        # "get your money back" (a refund of a void bet is fine: see REFUND) and "back what you lost"
+        r"|\bget(?:s|ting)?\s+(?:back\s+(?:your|my|our|their)\s+(?:money|losses|cash)\b"
+        r"|(?:your|my|our|their)\s+(?:money|losses|cash)\s+back\b)"
+        r"|\bback\s+what\s+(?:you|I|we|they)(?:'ve|’ve|\s+have)?\s+lost\b", re.I)),
     ("chase losses", re.compile(r"\b(?:chas(?:e|es|ed|ing)|recoup(?:s|ed|ing)?|recover(?:s|ed|ing)?)\s+"
                                 r"(?:(?:all|some)\s+(?:of\s+)?)?(?:(?:your|my|our|their|the|those|these)\s+(?:\w+\s+)?)?"
                                 r"loss(?:es)?\b(?!\s+of\b)", re.I)),
@@ -239,6 +410,21 @@ BANNED: Sequence[Tuple[str, "re.Pattern[str]"]] = [
                                 r"|\b(?:increase|raise|up|double|triple|boost)\s+(?:your|the|that|this)\s+"
                                 r"(?:stake|bet|wager|unit)s?\b"
                                 r"|\b(?:bigger|larger|higher|max(?:imum)?)\s+(?:stake|bet|wager)s?\b", re.I)),
+    # More money or more legs in other words, said as a suggestion and about money or bets: sports talk such
+    # as "they went all in on defence", "loaded up the paint", "put more pressure on the rim" or "put up 30
+    # points" is fine, and so is the warning "a bigger parlay pays more but wins less often"
+    ("bet more", re.compile(
+        r"\bdouble[- ]down\b"
+        r"|\bgo(?:ing)?\s+all[- ]in\b(?!\s+on\s+(?:defen[cs]e|offen[cs]e|youth|the\s+(?:rebuild|draft|deadline|trade)))"
+        r"|\b(?:put|throw|throwing|putting)\s+more\s+(?:money|cash|on\s+(?:it|this|that|them)|into\s+(?:it|this|that))\b"
+        r"|\bload(?:ing)?\s+up\s+on\b"
+        r"|\b(?:add|throw\s+in|tack\s+on)\s+(?:another|more|one\s+more|an?\s+(?:extra|second|third|fourth|fifth|sixth))"
+        r"\s+legs?\b"
+        r"|\b(?:try|go\s+for|build|make|chase\s+it\s+with)\s+(?:an?\s+)?(?:bigger|larger)\s+"
+        r"(?:parlay|multi|ticket|accumulator|acca)s?\b"
+        r"|\bmax(?:imi[sz]e)?\s+out\s+(?:your|the)\s+(?:stake|bet|wager|bankroll)\b"
+        r"|\b(?:put|bet|stake|risk|throw|wager)\s+(?:(?:your|the)\s+(?:whole|entire)|all\s+(?:of\s+)?your)\s+bankroll\b"
+        r"|\bgo\s+big\s+on\b|(?:^|[.!?:;]\s*)go\s+big\b", re.I | re.M)),
     ("safe", re.compile(r"\b(?:[Ii]s|[Ii]t(?:'|’)?s|[Ll]ooks|[Ff]eels|[Vv]ery|[Pp]retty|[Qq]uite|[Tt]otally"
                         r"|[Cc]ompletely|[Pp]erfectly|[Rr]eally|[Ss]uper|[Aa]bsolutely|[Ff]airly)\s+safe\b"
                         r"|\bsafe (?:bet|pick|play|ticket|parlay|multi|option|choice|money)s?\b")),
@@ -246,10 +432,51 @@ BANNED: Sequence[Tuple[str, "re.Pattern[str]"]] = [
 
 
 # These may appear in an honest warning ("nothing is guaranteed", "never raise your stake"); the rest
-# oversell whatever surrounds them ("not a lock" still puts the idea in the reader's head)
-NEGATABLE = {"guaranteed", "risk-free", "bigger stake"}
-_NEGATION = re.compile(r"\b(?:never|not|no|nothing|nobody|don(?:'|’)?t|doesn(?:'|’)?t|isn(?:'|’)?t|aren(?:'|’)?t"
-                       r"|won(?:'|’)?t|avoid|without)\b[^.!?]{0,30}$", re.I)
+# oversell whatever surrounds them ("not a lock" still puts the idea in the reader's head). Only a negation
+# that governs the phrase counts: right before it, with at most "is", "ever", "a" and the like between, or
+# as the subject of its sentence ("Nothing in betting is guaranteed", "None of these picks is guaranteed").
+# "No doubt about it, this one is guaranteed", "No one can deny it's guaranteed" and "Don't hold back: bet
+# more" are not negated
+NEGATABLE = {"guaranteed", "risk-free", "bigger stake", "bet more"}
+_NEGATOR = (r"(?:never|not|no|nothing|nothing(?:'|’)s|nobody|don(?:'|’)?t|do\s+not|doesn(?:'|’)?t|does\s+not"
+            r"|isn(?:'|’)?t|aren(?:'|’)?t|won(?:'|’)?t|will\s+not|shouldn(?:'|’)?t|should\s+not"
+            r"|wouldn(?:'|’)?t|would\s+not|avoid|without)")
+# Words that can't sit in a negated subject: they start a clause of their own ("no doubt ...", "no one can deny")
+_NOT_SUBJECT = (r"(?:can|cannot|could|will|would|should|must|may|might|do|does|did|is|are|was|were|be|been"
+                r"|doubt|question|matter|deny|wonder|kidding|worries|lie|way|that|which|who|if|but|and|or|so"
+                r"|because|when|than)")
+_NEGATION = re.compile(
+    rf"\b{_NEGATOR}\s+(?:(?:is|are|was|be|been|ever|really|actually|always|truly|a|an|any|so)\s+){{0,2}}$"
+    r"|\bno\s+(?:bet|ticket|parlay|multi|pick|leg|result|outcome|game|win|wager|one)s?\s+(?:is|are)\s+"
+    r"(?:(?:ever|really|truly|a|an)\s+){0,2}$"
+    rf"|\b(?:nothing|none|no|not\s+even)(?:\s+(?!{_NOT_SUBJECT}\b)[\w'’-]+){{0,4}}\s+"
+    r"(?:is|are|was|were|(?:can|could|will|would|should|may|might|must)(?:\s+(?:ever|really|truly))?\s+be)\s+"
+    r"(?:(?:ever|really|actually|always|truly|a|an|any|so)\s+){0,2}$"
+    r"|\bno\s+such\s+thing\s+as\s+(?:an?\s+)?$|\bno\s+need\s+to\s+$"
+    r"|\b(?:never|not|isn(?:'|’)?t)\s+(?:a\s+)?(?:good|smart|wise|great)\s+(?:idea\s+)?to\s+$"
+    rf"|\b{_NEGATOR}\s+(?:suggest|recommend|advise|tell\s+you\s+to)(?:ing)?\s+(?:an?\s+|that\s+you\s+)?$", re.I)
+# "You get your money back if the game is postponed" is a refund, not chasing
+REFUND = re.compile(r"\b(?:void(?:ed|s)?|postpon\w*|cancel\w*|refund\w*|push(?:es|ed)?|scratch(?:ed)?|abandon\w*)\b",
+                    re.I)
+_CLAUSE_BREAK = re.compile(r"[,;:–—]|\s-\s|\b(?:and|but)\b", re.I)
+_CONDITION = re.compile(r"\s*(?:if|when|whenever|once|since|because|as)\b", re.I)
+
+
+def _refund(text: str, start: int, end: int) -> bool:
+    """Whether "get your money back" at text[start:end] is a refund: a void, push or postponement in its own
+    clause ("you get your money back if the game is postponed") or in the condition just before it ("If a leg
+    is voided, you get your money back"). "A win gets your money back, and a push returns the stake" isn't."""
+    left = max(text.rfind(mark, 0, start) for mark in ".!?\n") + 1
+    rights = [i for i in (text.find(mark, end) for mark in ".!?\n") if i >= 0]
+    right = min(rights) if rights else len(text)
+    bounds = [left] + [i for cut in _CLAUSE_BREAK.finditer(text, left, right) for i in (cut.start(), cut.end())]
+    bounds.append(right)
+    clauses = [text[bounds[i]:bounds[i + 1]] for i in range(0, len(bounds), 2)]  # the text between the cuts
+    own = next(i for i in range(len(clauses)) if bounds[2 * i + 1] >= end or i == len(clauses) - 1)
+    if REFUND.search(clauses[own]):
+        return True
+    before = clauses[own - 1] if own else ""
+    return bool(_CONDITION.match(before) and REFUND.search(before))
 
 
 def banned_phrases(text: str) -> List[str]:
@@ -257,17 +484,22 @@ def banned_phrases(text: str) -> List[str]:
     found = []
     for name, pattern in BANNED:
         for match in pattern.finditer(text):
-            if name in NEGATABLE and _NEGATION.search(text[max(0, match.start() - 40):match.start()]):
+            if name in NEGATABLE and _NEGATION.search(text[max(0, match.start() - 60):match.start()]):
+                continue
+            said = match.group(0).lower()
+            # Losses are never refunded: only "get your money back" can be a void or a push
+            if name == "win back" and said.startswith("get") and "loss" not in said \
+                    and _refund(text, match.start(), match.end()):
                 continue
             found.append(name)
             break
     return found
 
 
-def problems(text: str, sources: Set[float]) -> List[str]:
-    """Why a text can't be shown (empty when it can)."""
+def problems(text: str, sources: Set[float], exempt: Optional["re.Pattern[str]"] = None) -> List[str]:
+    """Why a text can't be shown (empty when it can); see numbers_in for ``exempt``."""
     found = []
-    invented = invented_numbers(text, sources)
+    invented = invented_numbers(text, sources, exempt)
     if invented:
         found.append("numbers that are not in the facts you were given: " + ", ".join(dict.fromkeys(invented)))
     banned = banned_phrases(text)
@@ -440,10 +672,13 @@ def template_explanation(fact_sheet: Dict[str, Any]) -> Dict[str, Any]:
         index = leg.get("index", i)
         odds = (leg.get("odds") or {}).get("decimal")
         bits = [f"{leg.get('label', 'This leg')}" + (f" at {odds:.2f}" if isinstance(odds, (int, float)) else "")]
-        if leg.get("ai_prob") is not None:
-            bits.append(f"AI {pct(leg['ai_prob'])}")
-        if leg.get("market_prob") is not None:
-            bits.append(f"market {pct(leg['market_prob'])}")
+        ai, market, push = leg.get("ai_prob"), leg.get("market_prob"), leg.get("push_prob") or 0.0
+        both = ai is not None and market is not None and push > 0
+        if ai is not None:
+            # The AI's chance is outright and the market's given no push: side by side, both given no push
+            bits.append(f"AI {pct(ai_given_no_push(ai, push) if both else ai)}")
+        if market is not None:
+            bits.append(f"market {pct(market)}" + (" (both given no push)" if both else ""))
         text = ": ".join([bits[0], ", ".join(bits[1:])]) if len(bits) > 1 else bits[0]
         if leg.get("chance_label"):
             text += f" ({leg['chance_label']})"
@@ -485,29 +720,40 @@ def _parse(text: str, fact_sheet: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def explain_ticket(fact_sheet: Dict[str, Any], caller: ClaudeCaller, model: str = EXPLAIN_MODEL,
-                   effort: str = EXPLAIN_EFFORT) -> Explanation:
+                   effort: str = EXPLAIN_EFFORT, budget: Optional[float] = None,
+                   before: Optional[Callable[[], None]] = None) -> Explanation:
     """Claude's verdict, per-leg notes and case against for a ticket, checked against the fact sheet.
 
     A text with a number that isn't on the sheet, or with banned wording, is sent
     back once with the reasons; if the second try fails too (or Claude refuses,
-    or its answer is cut off) the template is used. Raises AIError only when the
-    API itself fails (its ``cost`` holds what was already spent).
+    or its answer is cut off, or ``budget`` (US dollars) can't pay for a try) the
+    template is used. ``before`` runs before each try (the assistant renews its
+    AI hold there, and raises AIError once it has lapsed). Raises AIError only
+    when the API itself fails or ``before`` does (its ``cost`` holds what was
+    already spent).
     """
     sources = source_numbers(fact_sheet)
     messages: List[Dict[str, Any]] = [{"role": "user", "content": json.dumps(fact_sheet, default=str)}]
     out = Explanation("", [], "", "template")
     for attempt in range(2):
+        request: Dict[str, Any] = {
+            "max_tokens": 8000,
+            "system": [{"type": "text", "text": EXPLAIN_PROMPT, "cache_control": {"type": "ephemeral"}}],
+            "messages": messages,
+            "output_config": {"effort": effort, "format": {"type": "json_schema", "schema": EXPLAIN_SCHEMA}},
+        }
+        if budget is not None:
+            request["max_tokens"] = caller.max_tokens_within(model, budget - out.cost, request, request["max_tokens"])
+            if not request["max_tokens"]:
+                out.notes.append("the AI allowance left can't pay for another try")
+                break
         try:
-            response = caller.create(
-                model,
-                max_tokens=8000,
-                system=[{"type": "text", "text": EXPLAIN_PROMPT, "cache_control": {"type": "ephemeral"}}],
-                messages=messages,
-                output_config={"effort": effort, "format": {"type": "json_schema", "schema": EXPLAIN_SCHEMA}},
-            )
+            if before is not None:
+                before()
+            response = caller.create(model, **request)
         except AIError as exc:
             raise AIError(str(exc), out.cost + exc.cost) from None
-        cost, tokens_in, tokens_out = caller.cost(getattr(response, "model", model) or model, response.usage)
+        cost, tokens_in, tokens_out = caller.cost(model, response.usage, getattr(response, "model", None))
         out.cost += cost
         out.input_tokens += tokens_in
         out.output_tokens += tokens_out

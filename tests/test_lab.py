@@ -353,6 +353,31 @@ def test_me_settings_budget_and_break(client, clock) -> None:
     assert client.post("/api/tickets/price", json={"type": "single", "stake": 5, "legs": [ref("g1")]}).status_code == 200
 
 
+def test_the_app_stores_the_person_s_time_zone_for_the_late_night_note(client, lab) -> None:
+    from telegram_betting_bot_simple.ai.assistant import LATE_NOTE, Assistant
+
+    assert client.get("/api/me").json()["timezone"] is None
+    me = client.put("/api/me", json={"timezone": "Europe/London"}).json()
+    assert me["timezone"] == "Europe/London" and me["odds_format"] == "decimal"  # nothing else changed
+    stored = lab.store.user(UID)
+    assert stored["settings"] == {lab_module.TIMEZONE_SETTING: "Europe/London"}
+    # The assistant's late-night note reads that very setting: 2:30 AM in London is late there
+    late = datetime.datetime(2027, 1, 15, 2, 30, tzinfo=datetime.timezone.utc).timestamp()
+    assert Assistant(None, lab, lab.store)._late_note(stored, late) == LATE_NOTE
+    # Each browser keeps its own; other settings sent with it still apply
+    assert client.get("/api/me", headers={"X-Player": "other-browser-99"}).json()["timezone"] is None
+    assert client.put("/api/me", json={"timezone": "America/Los_Angeles", "risk_tier": "safe"}).json()["timezone"] == \
+        "America/Los_Angeles"
+    for bad in ("Not/AZone", "../../etc/passwd", "/etc/localtime", "localtime", "Europe/London\u0000", " UTC"):
+        response = client.put("/api/me", json={"timezone": bad})
+        assert response.status_code == 400 and "time zone" in response.json()["detail"], bad
+    for bad in ("x" * 65, "", 5, ["UTC"]):
+        assert client.put("/api/me", json={"timezone": bad}).status_code == 422, bad
+    assert client.get("/api/me").json()["timezone"] == "America/Los_Angeles"  # a refused name changed nothing
+    assert client.put("/api/me", json={"timezone": None}).json()["timezone"] is None  # null clears it
+    assert lab.store.user(UID)["settings"] == {}
+
+
 def test_nothing_betting_related_before_the_age_is_confirmed(client) -> None:
     for method, path, body in (("post", "/api/tickets/price", {"stake": 5, "legs": [ref("g1")]}),
                                ("post", "/api/tickets/analyse", {"stake": 5, "legs": [ref("g1")]}),
@@ -367,9 +392,9 @@ def test_nothing_betting_related_before_the_age_is_confirmed(client) -> None:
 
 
 def test_a_warning_sign_in_the_chat_pauses_picks_in_the_app_too(ready, client, clock) -> None:
-    # The chat stores the 24-hour pause in the person's settings; building and plans honour it
+    # The chat pauses picks for 24 hours through the Lab; building and plans honour it
     until = clock() + 24 * 3600
-    ready.store.update_user(UID, {"settings": {lab_module.PAUSE_SETTING: until}})
+    assert ready.pause_picks(UID, until) == until
     assert client.get("/api/me").json()["picks_paused_until"]
     for path, body in (("/api/tickets/build", {"stake": 5, "target": 20}),
                        ("/api/plans", {"start": 10, "days": 3, "min_odds": 2})):
@@ -380,6 +405,118 @@ def test_a_warning_sign_in_the_chat_pauses_picks_in_the_app_too(ready, client, c
     clock.advance(24.01)
     assert client.get("/api/me").json()["picks_paused_until"] is None
     assert client.post("/api/tickets/build", json={"stake": 5, "target": 20}).status_code == 200
+
+
+def test_every_password_browser_shares_one_break_pause_and_budget(ready, client, clock) -> None:
+    # The password is the owner's alone and X-Player is whatever a browser makes up: a new one is the same
+    # person for the gates, so it can't shed a break, a pause or a weekly limit
+    other = {"X-Player": "brand-new-browser-77"}
+    me = client.get("/api/me", headers=other).json()
+    assert me["uid"] == "web:brand-new-browser-77" and me["shared_limits"] and not me["age_confirmed"]
+    response = client.get("/api/today", headers=other)
+    assert response.status_code == 400 and response.json()["detail"] == AGE_MESSAGE  # age: each browser confirms
+    client.put("/api/me", headers=other, json={"confirm_age": True})
+
+    # A break taken in one browser covers them all, and another browser can't cut it short
+    taken = client.post("/api/me/cooloff", json={"hours": 72}).json()
+    assert taken["on_break"]
+    seen = client.get("/api/me", headers=other).json()
+    assert seen["on_break"] and seen["cooloff_until"] == taken["cooloff_until"]
+    for path, body in (("/api/today", None), ("/api/tickets/build", {"stake": 5, "target": 20})):
+        response = client.request("GET" if body is None else "POST", path, headers=other, json=body)
+        assert response.status_code == 400 and response.json()["detail"].startswith("You're on a break until"), path
+    shorter = client.post("/api/me/cooloff", headers=other, json={"hours": 24}).json()
+    assert shorter["cooloff_until"] == taken["cooloff_until"]
+    assert ready.me("tg:42")["on_break"] is False and ready.me("tg:42")["shared_limits"] is False  # Telegram: own
+    clock.advance(72.01)
+    assert client.get("/api/today", headers=other).status_code == 200
+
+    # A warning sign said in one browser's chat pauses picks in every one of them, and only there
+    until = ready.pause_picks("web:brand-new-browser-77", clock() + 24 * 3600)
+    assert client.get("/api/me").json()["picks_paused_until"] == lab_module._iso(until)
+    response = client.post("/api/tickets/build", json={"stake": 5, "target": 20})
+    assert response.status_code == 400 and response.json()["detail"].startswith("Picks are paused until")
+    assert ready.picks_paused_until(UID) == until and ready.picks_paused_until("tg:42") is None
+    assert ready.pause_picks(UID, clock() + 3600) == until  # an earlier end never shortens it
+    clock.advance(24.01)
+
+    # One weekly budget over everything all password browsers staked: the lowest set applies at once
+    client.put("/api/me", json={"weekly_budget": 20})
+    assert client.get("/api/me", headers=other).json()["budget"]["weekly"] == "20.00"
+    body = {"type": "single", "stake": 15, "legs": [ref("g2")]}
+    assert client.post("/api/slips", headers=other, json=body).status_code == 200
+    budget = client.get("/api/me").json()["budget"]
+    assert (budget["used"], budget["left"]) == ("15.00", "5.00")
+    over = client.post("/api/slips", json={**body, "stake": 10})
+    assert over.status_code == 400 and "$5 until Monday" in over.json()["detail"]
+    # Raising it from the other browser still waits 24 hours; lowering from either applies at once
+    raised = client.put("/api/me", headers=other, json={"weekly_budget": 50}).json()["budget"]
+    assert raised["weekly"] == "20.00" and raised["pending"]["amount"] == "50.00"
+    assert client.put("/api/me", json={"weekly_budget": 16}).json()["budget"]["weekly"] == "16.00"
+    assert client.get("/api/me", headers=other).json()["budget"] == {**budget, "weekly": "16.00", "left": "1.00"}
+    # Bets, like plans and chats, stay each browser's own
+    assert client.get("/api/slips").json() == [] and len(client.get("/api/slips", headers=other).json()) == 1
+
+
+def test_shared_gates_start_from_what_each_password_browser_had_set(lab, clock) -> None:
+    # Limits set before the gates were shared aren't lost: the latest break and pause, the lowest budget
+    store = lab.store
+    for uid in ("web:old-browser-1", "web:old-browser-2", "tg:42"):
+        store.get_or_create_user(uid, now=clock())
+    store.set_weekly_budget("web:old-browser-1", 3000, now=clock())
+    store.set_weekly_budget("web:old-browser-2", 1500, now=clock())
+    store.set_weekly_budget("web:old-browser-2", 9000, now=clock())  # a raise still waiting: dropped
+    store.set_weekly_budget("tg:42", 500, now=clock())  # Telegram users aren't password browsers
+    store.start_cooloff("web:old-browser-1", 48, now=clock())
+    store.update_user("web:old-browser-2", {"settings": {lab_module.PAUSE_SETTING: clock() + 3600}})
+    me = lab.me("web:new-browser-3")
+    assert me["budget"]["weekly"] == "15.00" and me["budget"]["pending"] is None
+    assert me["on_break"] and me["cooloff_until"] == lab_module._iso(clock() + 48 * 3600)
+    assert me["picks_paused_until"] == lab_module._iso(clock() + 3600)
+    with pytest.raises(ValueError, match="reserved"):  # nobody can sign in as the shared row
+        store.get_or_create_user(lab_module.SHARED_WEB)
+    assert lab.me("tg:42")["budget"]["weekly"] == "5.00" and not lab.me("tg:42")["on_break"]
+
+
+def test_the_first_dashboards_routes_have_the_same_gates(lab, client, clock) -> None:
+    # The new app still loads the AI's Safe / Risky / Crazy tickets (Build) and the game page from these
+    game = {"league": NBA, "id": "g2"}
+    call = {**game, "call": {"winner": "home"}}
+    routes = {
+        "/api/ai-bets": ("get", {"league": NBA}, None),
+        "/api/analysts/ask": ("post", None, {**game, "analyst": "claude"}),
+        "/api/game": ("get", game, None),
+        "/api/games": ("get", {"league": NBA}, None),
+        "/api/judge": ("post", None, call),
+        "/api/calls": ("post", None, {**call, "player": "browser-1234", "name": "Sam"}),
+        "/api/slip": ("post", None, {"mode": "single", "stakes": {"0": 5}, "picks": [ref("g1")]}),
+    }
+
+    def answers() -> Dict[str, Any]:
+        out = {}
+        for path, (method, params, body) in routes.items():
+            response = client.request(method, path, params=params, json=body)
+            out[path] = (response.status_code, response.json().get("detail") if response.status_code != 200 else None)
+        return out
+
+    assert answers() == {path: (400, AGE_MESSAGE) for path in routes}  # nothing before the age is confirmed
+    client.put("/api/me", json={"confirm_age": True})
+    open_now = answers()
+    assert open_now["/api/ai-bets"][0] == 200 and open_now["/api/game"][0] == 200
+    assert "ANTHROPIC_API_KEY" in open_now["/api/analysts/ask"][1]  # past the gates: no analysts set up here
+    # After a warning sign in the chat, the AI's picks pause; the odds and the maths stay open
+    lab.pause_picks(UID, clock() + 24 * 3600)
+    paused = answers()
+    for path in ("/api/ai-bets", "/api/analysts/ask"):
+        assert paused[path][0] == 400 and paused[path][1].startswith("Picks are paused until"), path
+    assert {path: paused[path] for path in routes if path not in ("/api/ai-bets", "/api/analysts/ask")} == {
+        path: answer for path, answer in open_now.items() if path not in ("/api/ai-bets", "/api/analysts/ask")}
+    # On a break, none of it
+    clock.advance(24.01)
+    client.post("/api/me/cooloff", json={"hours": 72})
+    for path, (status, detail) in answers().items():
+        assert status == 400 and detail.startswith("You're on a break until"), path
+    assert client.get("/api/leaderboard").status_code == 200  # the record stays readable
 
 
 def test_the_leaderboard_never_shows_another_persons_id(lab, client) -> None:
@@ -658,6 +795,31 @@ def test_a_draw_loses_a_three_way_moneyline(ready, lab) -> None:
     assert lab_module._outcome(home, {"home": 2, "away": 1}, {"three_way": True}) == "won"
 
 
+def test_every_bet_and_plan_is_listed_for_the_results(ready, client, lab) -> None:
+    # The app adds up net and ROI from this list, so it holds every bet, not the newest 100
+    first = client.post("/api/slips", json={"type": "single", "stake": 1, "legs": [ref("g1")]}).json()
+    legs = lab.store.slip(UID, first["id"])["legs"]
+    for _ in range(104):
+        lab.store.save_slip(UID, "single", legs, 100, payload={"unit_stake": "1.00"})
+    slips = client.get("/api/slips").json()
+    assert len(slips) == 105 and sum(Decimal(s["stake"]) for s in slips) == Decimal("105.00")
+    for _ in range(55):
+        plan_row = lab.store.create_plan(UID, 1000, 3, Decimal("1.5"), 1, "classic")
+        lab.store.finish_plan(UID, plan_row["id"], "stopped")
+    assert len(client.get("/api/plans").json()) == 55
+
+
+def test_notes_compare_the_ai_and_the_market_like_for_like(lab) -> None:
+    # On a line that can push, the AI's chance is outright and the market's is given no push
+    leg = {"ai_prob": 0.5226, "market_prob": 0.50, "push_prob": 0.06, "chance_label": "coin flip"}
+    notes = lab._notes(leg, None)
+    assert ("The AI (56%) is 6 points above the market (50%) (both given no push): check the injury news before "
+            "trusting the gap.") in notes
+    agree = lab._notes({**leg, "ai_prob": 0.47}, None)  # 0.47 / 0.94 = 0.50
+    assert "The AI (50%) and the market (50%) roughly agree (both given no push)." in agree
+    assert "The AI (52%) and the market (50%) roughly agree." in lab._notes({**leg, "push_prob": 0.0}, None)
+
+
 def test_leagues_the_grader_cant_settle_are_priced_but_not_saved(ready, client, lab) -> None:
     lab.service.odds = MoreOdds()
     body = {"type": "single", "stake": 10, "legs": [{"league": MMA, "id": "m1", "market": "h2h", "side": "home"}]}
@@ -738,6 +900,24 @@ def test_each_strategy_stakes_from_the_plans_own_money() -> None:
         {"day": 2, "stake_cents": 200, "result": {"returns": "4.00"}},
         {"day": 3, "stake_cents": 100, "result": None}]}
     assert replay(played) == Run(bankroll=1300, banked=400, rolled=0, pot_wins=0, days=2)
+
+
+def test_the_ladders_banked_money_is_never_more_than_it_has() -> None:
+    # Each fresh pot comes out of all the plan's money, so once the rest is gone it comes out of what was
+    # banked: $100 at 2.00, six pots that win twice ($40 banked each), then five $10 pots that lose
+    ladder = plan("ladder", start=10000, days=60)
+    run = Run(bankroll=10000)
+    for _ in range(12):
+        stake = next_stake(ladder, run)
+        run = play_day(ladder, run, stake, 2 * stake)[0]
+    assert (run.bankroll, run.banked) == (28000, 24000)
+    for _ in range(5):
+        run = play_day(ladder, run, next_stake(ladder, run), 0)[0]
+    assert run.bankroll == 23000 and run.banked == 23000 and not run.ended  # not "has $230, banked $240"
+    # Bank half never stakes its banked money again, so nothing changes there
+    half = plan("bank_half")
+    run = play_day(half, Run(bankroll=1000), 1000, 2000)[0]
+    assert play_day(half, run, next_stake(half, run), 0)[0].banked == 500
 
 
 def test_rollover_compare_shows_every_strategy_and_the_honest_sentences(client, ready) -> None:
@@ -870,6 +1050,66 @@ def test_a_winning_plan_can_stake_more_than_a_single_request(ready, lab) -> None
     assert day2["day"] == 2 and day2["in_play"] == "165000.00"
 
 
+def test_a_plan_day_meets_the_minimum_at_the_odds_shown(ready, client, lab) -> None:
+    lab.service.odds = Odds(more_games() + [
+        make_event("p1", "Atlanta Hawks", "Brooklyn Nets", "2030-01-03T00:00:00Z", {"DraftKings": (1.05, 9.00, -10.5, 1.91)}),
+        make_event("p2", "Charlotte Hornets", "Dallas Mavericks", "2030-01-03T01:00:00Z",
+                   {"DraftKings": (1.90, 1.95, -1.5, 1.91)}),
+    ])
+    created = client.post("/api/plans", json={"start": 10, "days": 3, "min_odds": "2.00", "legs_per_day": 2,
+                                              "strategy": "classic"}).json()
+    legs = [ref("p1"), ref("p2")]  # 1.05 x 1.90 = 1.995, shown as 2.00 everywhere
+    assert client.post("/api/tickets/price", json={"type": "multi", "stake": 10, "legs": legs}).json()["odds"]["decimal"] == 2.0
+    short = client.post(f"/api/plans/{created['id']}/day", json={"legs": [ref("p2")]})
+    assert short.status_code == 400 and short.json()["detail"] == (
+        "Today's pick pays 1.90; this plan needs odds of 2.00 or more. Choose a pick at 2.00 or above.")
+    played = client.post(f"/api/plans/{created['id']}/day", json={"legs": legs})
+    assert played.status_code == 200 and played.json()["in_play"] == "10.00"
+
+
+def test_a_plan_cant_win_past_what_the_app_can_record(ready, lab) -> None:
+    long_shots = [make_event(f"x{i}", home, away, "2030-01-03T00:00:00Z", {"DraftKings": (1.01, 101.0, -20.5, 1.91)})
+                  for i, (home, away) in enumerate((("Atlanta Hawks", "Brooklyn Nets"),
+                                                    ("Charlotte Hornets", "Dallas Mavericks")))]
+    lab.service.odds = Odds(more_games() + long_shots)
+    created = lab.create_plan(UID, {"start": 100000, "days": 3, "min_odds": "1.5", "strategy": "classic"})
+    lab.plan_day(UID, created["id"], {"legs": [ref("x0", side="away")]})
+    lab.service.espn = Results({"Atlanta Hawks": (90, 100)})
+    set_leg_starts(lab.store)
+    lab.service.grade_due()
+    assert lab.get_plan(UID, created["id"])["bankroll"] == "10100000.00"
+    # Another win at 101 would take the plan past $1bn: refused before anything is saved
+    with pytest.raises(CallRejected, match="more than the app can record.*stop the plan: stopping keeps the result"):
+        lab.plan_day(UID, created["id"], {"legs": [ref("x1", side="away")]})
+    assert len(lab.list_slips(UID)) == 1
+    assert lab.stop_plan(UID, created["id"])["status"] == "stopped"
+
+
+def test_a_plan_day_past_the_cap_is_still_recorded_and_the_plan_stays_usable(ready, lab, caplog) -> None:
+    created = lab.create_plan(UID, {"start": 10, "days": 5, "min_odds": "1.5", "strategy": "classic"})
+    lab.plan_day(UID, created["id"], {"legs": [ref("g3", side="away")]})
+    # A settling that fails (here, the store refusing) leaves the plan viewable and stoppable
+    real = lab.store.settle_plan_day
+    lab.store.settle_plan_day = lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("no room"))
+    try:
+        lab.service.espn = Results({"Boston Celtics": (100, 110)})
+        set_leg_starts(lab.store)
+        lab.service.grade_due()
+        assert lab.get_plan(UID, created["id"])["in_play"] == "10.00"
+        assert [p["id"] for p in lab.list_plans(UID)] == [created["id"]]
+    finally:
+        lab.store.settle_plan_day = real
+    assert "Couldn't settle day 1" in caplog.text
+    assert lab.get_plan(UID, created["id"])["bankroll"] == "27.50"  # settled at the next look
+    # A win the store can't hold (a day saved before playing a day checked for it) is recorded at the cap,
+    # and the plan stops there instead of being stuck for good
+    lab.plan_day(UID, created["id"], {"legs": [ref("g5", side="away")]})
+    lab._settle_plan_day(UID, created["id"], 2, {"status": "won", "returns": "2000000000.00", "profit": "1999999972.50"})
+    stuck = lab.get_plan(UID, created["id"])
+    assert stuck["status"] == "stopped" and stuck["days_played"][1]["result"]["returns"] == "2000000000.00"
+    assert lab.create_plan(UID, {"start": 10, "days": 3, "min_odds": "1.5"})["status"] == "active"
+
+
 def test_stopping_a_plan_mid_day_still_brings_the_break(ready, client, lab, clock) -> None:
     body = {"start": 10, "days": 5, "min_odds": 1.5, "strategy": "classic"}
     created = client.post("/api/plans", json=body).json()
@@ -897,6 +1137,58 @@ def test_stopping_a_plan_mid_day_still_brings_the_break(ready, client, lab, cloc
     events = lab.store.rg_events(UID)  # the stopped run's loss counts as one of two failed runs this week
     assert [(e["kind"], e["action"], e["detail"]["plans"]) for e in events] == [
         ("failed_rollovers", "break_suggested", 2)]
+
+
+def test_a_new_password_browser_cant_shed_the_plan_rules(ready, client, lab, clock) -> None:
+    # Every password browser is one person (see gates_id): one plan at a time over all of them, a stopped
+    # plan's day still in play holds them all, a failed run's break covers them all and failures add up
+    body = {"start": 10, "days": 5, "min_odds": 1.5, "strategy": "classic"}
+    other, third = {"X-Player": "brand-new-browser-77"}, {"X-Player": "brand-new-browser-88"}
+    for headers in (other, third):
+        client.put("/api/me", headers=headers, json={"confirm_age": True})
+    created = client.post("/api/plans", json=body).json()
+    running = client.post("/api/plans", headers=other, json=body)
+    assert running.status_code == 400 and running.json()["detail"] == (
+        "You already have a plan running in another browser signed in with the password: finish or stop it "
+        "before starting another.")
+    client.post(f"/api/plans/{created['id']}/day", json={"legs": [ref("g1", "spreads")]})
+    client.post(f"/api/plans/{created['id']}/stop")
+    waiting = client.post("/api/plans", headers=other, json=body)
+    assert waiting.status_code == 400 and "Day 1 of the plan you stopped in another browser" in waiting.json()["detail"]
+
+    lab.service.espn = Results({"Oklahoma City Thunder": (100, 110)})  # the day loses: the run failed
+    set_leg_starts(lab.store)
+    lab.service.grade_due()
+    for headers in (other, third):  # the restart break, whichever browser asks
+        response = client.post("/api/plans", headers=headers, json=body)
+        assert response.status_code == 400 and "take a break" in response.json()["detail"]
+    assert client.get("/api/plans", headers=other).json() == []  # plans stay each browser's own
+    clock.advance(25)
+    second = client.post("/api/plans", headers=other, json=body).json()
+    assert second["status"] == "active"
+    client.post(f"/api/plans/{second['id']}/day", headers=other, json={"legs": [ref("g2", "spreads")]})
+    lab.service.espn = Results({"New York Knicks": (100, 110)})
+    set_leg_starts(lab.store)
+    lab.service.grade_due()
+    assert client.get(f"/api/plans/{second['id']}", headers=other).json()["status"] == "failed"
+    # Two failed runs in a week across two browsers: the warning sign, logged as the browser's that failed
+    assert lab.store.rg_events(UID) == []
+    events = lab.store.rg_events("web:brand-new-browser-77")
+    assert [(e["kind"], e["action"], e["detail"]["plans"]) for e in events] == [
+        ("failed_rollovers", "break_suggested", 2)]
+    response = client.post("/api/plans", json=body)
+    assert response.status_code == 400 and "take a break" in response.json()["detail"]
+    # Telegram users keep their own
+    lab.update_me("tg:42", {"confirm_age": True})
+    assert lab.create_plan("tg:42", body)["status"] == "active"
+
+
+def test_a_failed_run_from_before_the_shared_row_still_brings_the_break(lab, clock) -> None:
+    lab.store.get_or_create_user("web:old-browser-1", now=clock())
+    lab.store.update_user("web:old-browser-1", {"settings": {lab_module.PLAN_FAILED_SETTING: clock() - 3600}})
+    lab.update_me("web:new-browser-2", {"confirm_age": True})
+    with pytest.raises(CallRejected, match="take a break"):
+        lab.create_plan("web:new-browser-2", {"start": 10, "days": 5, "min_odds": 1.5, "strategy": "classic"})
 
 
 # --- players ---------------------------------------------------------------------------------------

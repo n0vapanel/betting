@@ -34,8 +34,10 @@ from telegram_betting_bot_simple.dashboard.app import (
     current_uid,
 )
 from telegram_betting_bot_simple.dashboard.auth import (
+    INIT_DATA_EXPIRED,
     INIT_DATA_MAX_AGE,
     InitDataError,
+    InitDataExpired,
     session_key,
     session_token,
     session_uid,
@@ -253,6 +255,32 @@ def test_init_data_in_a_header_works_without_cookies(service) -> None:
     client.post("/api/login", json={"password": "s3cret"})
     assert client.get("/test/whoami", headers=header).json() == {"uid": "tg:7"}
     assert client.get("/test/whoami", headers=forged).json() == {"uid": "web"}  # bad header: the cookie
+
+
+def test_expired_init_data_says_so_when_there_is_no_session_to_fall_back_on(service) -> None:
+    # The Mini App was left open over a day: its initData is genuine but stale, and only Telegram renews it
+    client = make_client(service)
+    stale = make_init_data({"id": 7, "first_name": "Kim"}, auth_date=int(time.time()) - INIT_DATA_MAX_AGE - 60)
+    with pytest.raises(InitDataExpired):
+        verify_init_data(stale, BOT_TOKEN)
+    for method, path in (("get", "/test/whoami"), ("get", "/api/me"), ("get", "/api/leagues")):
+        response = client.request(method, path, headers={INIT_DATA_HEADER: stale, "X-Player": "browser-1234"})
+        assert response.status_code == 401 and response.json()["detail"] == INIT_DATA_EXPIRED, path
+    assert INIT_DATA_EXPIRED == "Telegram sign-in data has expired: reopen the app"
+    # Any other bad initData keeps its answer: the plain "Sign in required"
+    fresh = make_init_data({"id": 7, "first_name": "Kim"}, auth_date=int(time.time()))
+    for bad in (edit_field(fresh, "user", json.dumps({"id": 1})),  # forged
+                edit_field(stale, "hash", "0" * 64),  # stale and forged: not "expired", it was never genuine
+                make_init_data({"id": 7}, auth_date=int(time.time()) + 3600),  # from the future
+                make_init_data({"id": 7}, auth_date=int(time.time()), token="654321:another-bot")):
+        response = client.get("/test/whoami", headers={INIT_DATA_HEADER: bad})
+        assert response.status_code == 401 and response.json()["detail"] == "Sign in required"
+    # A session that is still good carries on, as with any bad initData
+    client.post("/api/tg-login", json={"init_data": fresh})
+    assert client.get("/test/whoami", headers={INIT_DATA_HEADER: stale}).json() == {"uid": "tg:7"}
+    # Telegram's own sign-in route says the same about stale data
+    response = make_client(service).post("/api/tg-login", json={"init_data": stale})
+    assert response.status_code == 401 and response.json()["detail"] == INIT_DATA_EXPIRED
 
 
 def test_session_cookie_is_secure_over_https(service) -> None:

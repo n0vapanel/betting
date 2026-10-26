@@ -49,6 +49,13 @@ class InitDataError(ValueError):
     """Telegram's initData was missing, malformed, tampered with or too old."""
 
 
+class InitDataExpired(InitDataError):
+    """Genuine initData that is too old: only opening the Mini App again from Telegram renews it."""
+
+
+INIT_DATA_EXPIRED = "Telegram sign-in data has expired: reopen the app"
+
+
 # --- Telegram Mini App initData ---------------------------------------------------
 
 def webapp_key(bot_token: str) -> bytes:
@@ -93,7 +100,7 @@ def verify_init_data(init_data: str, bot_token: str, now: Optional[float] = None
         raise InitDataError("Telegram sign-in data has no date")
     age = (time.time() if now is None else now) - int(auth_date)
     if age > max_age:
-        raise InitDataError("Telegram sign-in data has expired: reopen the app")
+        raise InitDataExpired(INIT_DATA_EXPIRED)
     if age < -CLOCK_SKEW:
         raise InitDataError("Telegram sign-in data is dated in the future")
     try:

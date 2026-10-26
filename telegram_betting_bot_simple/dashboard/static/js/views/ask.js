@@ -19,6 +19,7 @@
 import { api, prefs, isQuiet } from "../api.js";
 import {
   me, slip, session, loadSports, leagueTitle, sportEmoji, refreshMainButton, openSlipSheet, openOnboarding, inTelegram,
+  replaceAddress,
 } from "../app.js";
 import { esc, pct, ago, chip, notice, toast, sheet, confirmSheet, emptyState, skeleton, errorState } from "../ui.js";
 import { icon } from "../icons.js";
@@ -1118,7 +1119,7 @@ function applyQuery(query) {
     state.focus = true;
   }
   try {
-    history.replaceState(history.state, "", "#/ask");
+    if (location.hash !== "#/ask") replaceAddress("#/ask"); // through the shell: Back still finds this screen
   } catch {
     /* the address keeps its query; nothing else depends on it */
   }

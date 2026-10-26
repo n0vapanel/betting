@@ -85,7 +85,7 @@ export function setInitData(value) {
   initData = value || "";
 }
 
-/** What to do on a 401 (app.js shows the sign-in form). */
+/** What to do on a 401 (app.js shows the sign-in form; inside Telegram it signs in again or asks to reopen the app). */
 export function onUnauthorized(handler) {
   unauthorized = handler;
 }

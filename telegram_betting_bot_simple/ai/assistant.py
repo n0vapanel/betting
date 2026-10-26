@@ -28,6 +28,23 @@ Each chat turn runs the same steps, in this order:
    tool results kept as one-line summaries), and its cost is logged and taken
    from the person's daily credits.
 
+What a turn may spend is fixed before it starts: one AI call at a time per
+person (a second one sent meanwhile is refused), at most MAX_TURN_CENTS and
+never more than is left of the person's allowance, of the allowance all
+password sign-ins share (their X-Player id is the browser's own choice, so a
+new one mustn't mean a fresh allowance) and of the whole app's daily cap. That
+amount is held from the shared allowances while the turn runs, and every
+request to Claude asks for no more output than the rest of it can pay for.
+The bot and the dashboard are separate processes on one SQLite file, so the
+hold is a row in the store (Store.reserve_ai, one write transaction), settled
+with the real cost when the turn ends and released on errors. It is renewed
+before each request to Claude, so only a hold left by a crashed process lapses
+(AI_HOLD_SECONDS after its last renewal); a turn whose hold lapsed anyway stops.
+
+The break and the pause on picks are read, and the pause written, through the
+Lab (dashboard/lab.py's Gates), the one place that knows that every password
+browser shares them.
+
 The first reply in a thread carries the AI disclosure (Anthropic's usage
 policy: tell people they are talking to an AI at the start of a session).
 The system prompt and tool list never change between requests, so the prompt
@@ -46,9 +63,11 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 from zoneinfo import ZoneInfo
 
-from ..dashboard.lab import PAUSE_SETTING, paused_until
+from ..dashboard.lab import COOLOFF_CHOICES, PLAN_RESTART_HOURS
 from ..dashboard.service import CallRejected, NotFound
+from ..data.store import BUDGET_RAISE_DELAY, REALITY_CHECK_MINUTES
 from .explain import (
+    MIN_OUTPUT_TOKENS,
     AIError,
     ClaudeCaller,
     Explanation,
@@ -75,6 +94,32 @@ DEFAULT_LEAGUES = ["basketball_nba"]
 DEFAULT_MAX_LEGS = 3
 DEFAULT_LEGS_PER_DAY = 1
 MAX_REQUEST_LEAGUES = 4  # each league's odds fetch costs quota
+# AI spending (US cents). A turn needs MIN_TURN_CENTS left to start (a router call and one short Opus round
+# at worst) and spends at most MAX_TURN_CENTS; each request asks for no more output than the rest can pay for
+MIN_TURN_CENTS = 5
+MAX_TURN_CENTS = 40
+ROUTER_WORST = 0.0015  # US dollars: the most a router call can cost (2,000 Haiku output tokens and its prompt)
+CONTEXT_ROOM = 1500  # characters the <context> block takes at most, for the worst-case estimate
+# Shared allowances, kept as rows of their own in ai_credits (a "*" never appears in a person's id): every
+# password sign-in together, and the whole app. Their defaults are this many people's daily allowance
+WEB_POOL, ALL_POOL = "*web", "*all"
+WEB_POOL_PEOPLE = 3
+ALL_POOL_PEOPLE = 10
+BUSY_MESSAGE = "I'm still working on your last message: wait for that answer, then send the next one."
+
+
+def _rule_durations() -> "re.Pattern[str]":
+    """The app's own rules, which code states and Claude may explain without a tool: how long a break, the
+    pause on picks, a budget raise's wait, the wait after a failed plan and a reality check last ("a break of
+    90 days", "after 24 hours"). Only these durations, with their unit, are exempt from the numbers check."""
+    hours = sorted({int(PAUSE_SECONDS // 3600), int(BUDGET_RAISE_DELAY // 3600), PLAN_RESTART_HOURS, *COOLOFF_CHOICES})
+    days = sorted({hour // 24 for hour in hours if hour % 24 == 0})
+    alternatives = [(hours, r"hours?"), (days, r"days?"), (REALITY_CHECK_MINUTES, r"min(?:ute)?s?")]
+    return re.compile("|".join(rf"\b(?:{'|'.join(str(n) for n in values)})[-\s]?{unit}\b"
+                               for values, unit in alternatives), re.I)
+
+
+RULE_DURATIONS = _rule_durations()
 
 HELPLINE = "Gambling can be addictive · Help 24/7: 1-800-GAMBLER / 0808 8020 133"
 DISCLOSURE = ("You're chatting with an AI analyst (Claude, made by Anthropic). Our code works out every number; "
@@ -91,7 +136,22 @@ SUPPORT_MESSAGE = (
 DISTRESS_EXTRA = ("If you're thinking about harming yourself, please call or text 988 (US) or call Samaritans "
                   "on 116 123 (UK) now.")
 SUPPORT_CHIPS = ["How do I set a budget?", "How do I take a break?", "Where can I get help?"]
+# The support chips' answers, written by code: free, so they come before every gate (credits included)
+_IN_THE_APP = "In Telegram, open the app with 📱 Open in app or the menu button first."
+SUPPORT_ANSWERS = {
+    SUPPORT_CHIPS[0]: ("Open Settings, then Limits, then Weekly budget: type an amount and tap Set. Stakes you save "
+                       "count against it, and anything past it is refused. Lowering it applies at once; raising it "
+                       f"only after 24 hours. {_IN_THE_APP}\n\n{HELPLINE}"),
+    SUPPORT_CHIPS[1]: ("Open Settings, then Limits, then Take a break, and choose 24 hours, 3 days, 1 week, 1 month or "
+                       "3 months. Picks, building, plans and this chat stay off until it ends, and a break can be "
+                       f"made longer but never cut short. {_IN_THE_APP}\n\n{HELPLINE}"),
+    SUPPORT_CHIPS[2]: ("Free, confidential help is there 24/7: call 1-800-GAMBLER (US) or 0808 8020 133 (UK National "
+                       f"Gambling Helpline). {DISTRESS_EXTRA} You can also set a weekly budget or take a break in "
+                       "Settings."),
+}
 LATE_NOTE = "It's late where you are: decisions made tired tend to be worse ones."
+# Without the person's own timezone, the note says whose clock it read
+LATE_NOTE_APP_CLOCK = "It's {time} on the app's clock: decisions made late at night tend to be worse ones."
 # What the app's own chips send; they never suggest betting more
 TICKET_CHIPS = ["Explain the risk", "Make it safer", "Swap the weakest leg"]
 PLAN_CHIPS = ["Why do rollovers end early?", "Compare with flat stakes"]
@@ -202,7 +262,7 @@ Style
 - Short and plain: two to five sentences for most replies, at most about 150 words. No headings, tables \
 or emojis; short dash lists are fine. The user is probably on a phone.
 - You explain; you don't tip. Saying which leg is weakest, or where the AI and the market disagree and \
-why, is fine.
+why, is fine (on a line that can push, set ai_chance_given_no_push beside market_chance, not ai_chance).
 - If the tools can't answer, say so and suggest what the user could ask instead.
 """
 
@@ -311,6 +371,26 @@ def soft_flags(text: str) -> List[str]:
     return [flag for flag, pattern in SOFT_RULES.items() if flag not in strong and pattern.search(text or "")]
 
 
+def support_message(flags: Sequence[str]) -> str:
+    """The fixed reply to a strong warning sign (with the crisis lines for distress)."""
+    return SUPPORT_MESSAGE + (f"\n\n{DISTRESS_EXTRA}" if "distress" in flags else "")
+
+
+def note_warning_sign(lab: Any, uid: str, flags: Sequence[str], source: str, text: str,
+                      thread_id: Optional[int] = None, soft: Sequence[str] = (), now: Optional[float] = None) -> float:
+    """What code does about a strong warning sign, wherever it was seen (the chat, or the bot without the AI):
+    picks off for 24 hours (through the Lab, which pauses every password browser at once when one said it)
+    and an rg_event for the owner to review. Returns when picks come back on."""
+    now = time.time() if now is None else now
+    until = lab.pause_picks(uid, now + PAUSE_SECONDS)
+    detail = {"flags": list(flags), "source": source, "thread_id": thread_id, "excerpt": text[:200],
+              "paused_until": until}
+    if soft:
+        detail["soft_rules"] = list(soft)  # code's rules saw it too, without the "I" or "my" to be sure
+    lab.store.add_rg_event(uid, flags[0], detail, action="support_message,picks_off_24h", now=now)
+    return until
+
+
 @dataclass
 class Route:
     """What the router (or the app's request bar) says the person wants; fields are None when not given."""
@@ -410,8 +490,18 @@ class Turn:
 
 @dataclass
 class Spend:
-    """What a turn cost, per model (logged to analyst_calls and taken from the person's credits)."""
+    """What a turn cost, per model (logged to analyst_calls and taken from the person's credits), and the
+    most it may cost (US dollars; None for no limit)."""
     by_model: Dict[str, List[float]] = field(default_factory=dict)  # model -> [dollars, tokens in, tokens out]
+    budget: Optional[float] = None
+    stopped: bool = False  # a request was left unsent because the budget couldn't pay for it
+    keep: Optional[Callable[[], bool]] = None  # renews the turn's AI hold; False once it has lapsed
+
+    def alive(self) -> None:
+        """Before each request to Claude: renew the turn's hold (Store.renew_ai), or stop the turn with an
+        AIError when it has lapsed (other calls may count what it held as free by now)."""
+        if self.keep is not None and not self.keep():
+            raise AIError("this answer took too long, so it was stopped")
 
     def add(self, model: str, dollars: float, tokens_in: int = 0, tokens_out: int = 0) -> None:
         row = self.by_model.setdefault(model, [0.0, 0, 0])
@@ -433,40 +523,102 @@ class Spend:
 class Assistant:
     def __init__(self, client: Any, lab: Any, store: Any, chat_model: str = CHAT_MODEL,
                  router_model: str = ROUTER_MODEL, daily_cents: int = DAILY_CENTS,
-                 tz: ZoneInfo = ZoneInfo("America/New_York"), clock: Callable[[], float] = time.time) -> None:
+                 tz: ZoneInfo = ZoneInfo("America/New_York"), clock: Callable[[], float] = time.time,
+                 web_cents: Optional[float] = None, total_cents: Optional[float] = None) -> None:
         self.caller = ClaudeCaller(client)
         self.lab = lab
         self.store = store
         self.chat_model = chat_model
         self.router_model = router_model
         self.daily_cents = daily_cents
+        # What all password sign-ins may spend together a day, and the whole app
+        self.web_cents = daily_cents * WEB_POOL_PEOPLE if web_cents is None else web_cents
+        self.total_cents = daily_cents * ALL_POOL_PEOPLE if total_cents is None else total_cents
         self.tz = tz
         self.clock = clock
 
     # --- credits and pauses ---
 
     def credits(self, uid: str) -> Dict[str, Any]:
-        """Today's AI allowance in US cents: {used_cents, daily_cents, left_cents}."""
-        used = self.store.ai_used_today(uid, now=self.clock())
+        """Today's AI allowance in US cents: {used_cents, daily_cents, left_cents}. What's left is the
+        person's own allowance, or less when a shared one (password sign-ins, the whole app) is nearly used
+        or held by other people's running calls."""
+        now = self.clock()
+        used = self.store.ai_used_today(uid, now=now)
+        left = self.store.ai_left(uid, self._caps(uid), now=now)
         return {"used_cents": round(used, 2), "daily_cents": self.daily_cents,
-                "left_cents": round(max(0.0, self.daily_cents - used), 2)}
+                "left_cents": round(max(0.0, left), 2)}
+
+    def _pools(self, uid: str) -> List[Tuple[str, float]]:
+        """The shared allowances a person's spending counts against, with their daily caps."""
+        pools = [(ALL_POOL, float(self.total_cents))]
+        if uid.startswith("web:"):
+            pools.insert(0, (WEB_POOL, float(self.web_cents)))
+        return pools
+
+    def _caps(self, uid: str) -> Dict[str, float]:
+        """Every allowance a person's spending counts against (their own first), with its daily cap."""
+        return {uid: float(self.daily_cents), **dict(self._pools(uid))}
+
+    def _begin(self, uid: str) -> Optional[Tuple[str, float]]:
+        """Start an AI call for a person: None while another one of theirs is running (in the bot or the
+        dashboard), else (the hold's token, the most this call may spend in US cents, at most MAX_TURN_CENTS),
+        held from the shared allowances until _end. Under MIN_TURN_CENTS means there isn't enough left today,
+        and nothing is held."""
+        return self.store.reserve_ai(uid, self._caps(uid), float(MAX_TURN_CENTS), float(MIN_TURN_CENTS),
+                                     now=self.clock())
+
+    def _keeper(self, uid: str, token: str) -> Callable[[], bool]:
+        """Renews the call's hold (see Spend.alive)."""
+        return lambda: self.store.renew_ai(uid, token, now=self.clock())
+
+    def _end(self, uid: str, token: str) -> None:
+        """The call is over (its cost settled by _record, or it failed): the person may start another."""
+        try:
+            self.store.release_ai(uid, token)
+        except Exception:  # the hold lapses by itself; the answer must still reach the person
+            logging.exception("Couldn't release an AI hold")
+
+    def _allowance_used(self, uid: str, need: float = MIN_TURN_CENTS) -> str:
+        """Which allowance can't pay for a turn needing ``need`` cents: the person's own, or a shared one."""
+        own = self.daily_cents - self.store.ai_used_today(uid, now=self.clock())
+        if own < MIN_TURN_CENTS:
+            return "You've used today's AI allowance"
+        if own < need:
+            return "What's left of today's AI allowance isn't enough for an answer"
+        if uid.startswith("web:"):
+            return "Today's AI allowance for everyone signed in with the password has run out"
+        return "Today's AI allowance for the whole app has run out"
+
+    def _turn_floor(self, history: Sequence[Dict[str, Any]], text: str) -> float:
+        """The least a turn on this thread can cost at worst (US cents): the router and one short Opus round."""
+        probe = {"system": SYSTEM_PROMPT, "tools": TOOLS, "context": "x" * CONTEXT_ROOM,
+                 "messages": self._history(history) + [{"role": "user", "content": text}]}
+        worst = ROUTER_WORST + self.caller.worst_cost(self.chat_model, probe, MIN_OUTPUT_TOKENS)
+        return max(float(MIN_TURN_CENTS), worst * 100)
 
     def picks_paused_until(self, uid: str) -> Optional[float]:
-        """When picks come back on after a warning sign (epoch seconds), or None if they're on."""
-        return paused_until(self.store.user(uid), self.clock())
+        """When picks come back on after a warning sign (epoch seconds), or None if they're on (read through
+        the Lab: a pause said in one password browser covers them all)."""
+        return self.lab.picks_paused_until(uid, now=self.clock())
 
     def _pause_picks(self, uid: str) -> float:
-        until = max(self.clock() + PAUSE_SECONDS, self.picks_paused_until(uid) or 0.0)
-        self.store.update_user(uid, {"settings": {PAUSE_SETTING: until}})
-        return until
+        return self.lab.pause_picks(uid, self.clock() + PAUSE_SECONDS)
 
-    def _record(self, uid: str, spend: Spend, ok: bool) -> None:
+    def _record(self, uid: str, spend: Spend, ok: bool, token: Optional[str] = None) -> None:
+        """Log what the call cost per model and take it from the person's allowance and the shared ones; with
+        the call's hold ``token``, in the same write that drops the hold (settle_ai)."""
         for model, (dollars, tokens_in, tokens_out) in spend.by_model.items():
             if dollars <= 0 and not tokens_in and not tokens_out:
                 continue
             self.store.log_analyst_call("assistant", model, None, int(tokens_in), int(tokens_out), dollars, ok)
-        if spend.dollars > 0:
-            self.store.add_ai_usage(uid, spend.dollars * 100, now=self.clock())
+        pools = [pool for pool, _ in self._pools(uid)]
+        if token is not None:
+            self.store.settle_ai(uid, token, max(0.0, spend.dollars) * 100, pools, now=self.clock())
+        elif spend.dollars > 0:  # a free turn (a warning sign) calls no model; this is only a safety net
+            now = self.clock()
+            for allowance in [uid, *pools]:
+                self.store.add_ai_usage(allowance, spend.dollars * 100, now=now)
 
     def _local(self, epoch: float) -> str:
         moment = datetime.datetime.fromtimestamp(epoch, self.tz)
@@ -486,23 +638,31 @@ class Assistant:
             raise CallRejected(f"Picks are paused until {self._local(paused)} after an earlier message about losses "
                                f"or money worries, so the AI won't comment on tickets until then; the numbers above "
                                f"are complete. {HELPLINE}")
-        if self.credits(uid)["left_cents"] <= 0:
-            raise CallRejected("You've used today's AI allowance; it resets at midnight (US Eastern). "
-                               "The numbers above are complete.")
-        spend = Spend()
+        hold = self._begin(uid)
+        if hold is None:
+            raise CallRejected("The AI is still working on your last request; the numbers above are complete.")
+        token, budget = hold
         try:
-            result: Explanation = explain_ticket(fact_sheet, self.caller, self.chat_model)
-        except AIError as exc:
-            logging.warning("Claude couldn't explain a ticket: %s", exc)
-            spend.add(self.chat_model, exc.cost)
-            self._record(uid, spend, False)
-            return {**template_explanation(fact_sheet), "source": "template", "model": None,
-                    "cost": round(exc.cost, 5)}
-        if result.notes:
-            logging.info("Ticket explanation fell back or retried: %s", "; ".join(result.notes))
-        spend.add(result.model or self.chat_model, result.cost, result.input_tokens, result.output_tokens)
-        self._record(uid, spend, result.source == "claude")
-        return result.as_dict()
+            if budget < MIN_TURN_CENTS:
+                raise CallRejected(f"{self._allowance_used(uid)}; it resets at midnight (US Eastern). "
+                                   "The numbers above are complete.")
+            spend = Spend(budget=budget / 100, keep=self._keeper(uid, token))
+            try:
+                result: Explanation = explain_ticket(fact_sheet, self.caller, self.chat_model, budget=spend.budget,
+                                                     before=spend.alive)
+            except AIError as exc:
+                logging.warning("Claude couldn't explain a ticket: %s", exc)
+                spend.add(self.chat_model, exc.cost)
+                self._record(uid, spend, False, token)
+                return {**template_explanation(fact_sheet), "source": "template", "model": None,
+                        "cost": round(exc.cost, 5)}
+            if result.notes:
+                logging.info("Ticket explanation fell back or retried: %s", "; ".join(result.notes))
+            spend.add(result.model or self.chat_model, result.cost, result.input_tokens, result.output_tokens)
+            self._record(uid, spend, result.source == "claude", token)
+            return result.as_dict()
+        finally:
+            self._end(uid, token)
 
     # --- a chat turn ---
 
@@ -513,13 +673,32 @@ class Assistant:
 
         Returns {thread_id, message_idx, reply: {text, cards, chips}, credits, disclosure?}. ``on_step`` is
         called with progress lines ("Pricing 3 legs…") from this thread as the turn runs. Raises
-        CallRejected for an empty or over-long message and NotFound for someone else's thread.
+        CallRejected for an empty or over-long message, or while another of the person's turns is still
+        running (one at a time, so two can't both spend what's left today), and NotFound for someone
+        else's thread.
         """
         text = " ".join(str(message or "").split())
         if len(text) > MAX_MESSAGE:
             raise CallRejected(f"Keep messages under {MAX_MESSAGE} characters")
         if not text and not request and not slip:
             raise CallRejected("Type a message")
+        # A warning sign and the support chips are answered by code, free: never turned away as busy
+        free = bool(risk_flags(text)) or text in SUPPORT_ANSWERS
+        hold = None if free else self._begin(uid)
+        if hold is None and not free:
+            raise CallRejected(BUSY_MESSAGE)
+        token, budget = hold if hold is not None else (None, None)
+        try:
+            spend = Spend(budget=None if budget is None else budget / 100,
+                          keep=None if token is None else self._keeper(uid, token))
+            return self._reply(uid, thread_id, text, request, slip, on_step, spend, token)
+        finally:
+            if token is not None:
+                self._end(uid, token)
+
+    def _reply(self, uid: str, thread_id: Optional[int], text: str, request: Optional[Mapping[str, Any]],
+               slip: Optional[Mapping[str, Any]], on_step: Optional[Callable[[str], None]], spend: Spend,
+               token: Optional[str] = None) -> Dict[str, Any]:
         step = on_step or (lambda line: None)
         user = self.store.get_or_create_user(uid)
         if thread_id is None:
@@ -534,7 +713,6 @@ class Assistant:
         if first:
             self.store.update_thread(uid, thread["id"], title=shown[:60])
 
-        spend = Spend()
         route = Route()
         try:
             turn = self._turn(uid, user, thread["id"], text, request, slip, history, route, spend, step)
@@ -546,7 +724,7 @@ class Assistant:
         except Exception:
             logging.exception("The assistant failed on a turn")
             turn = Turn("Something went wrong on my side. Try again in a minute.", "error")
-        self._record(uid, spend, turn.kind == "answer")
+        self._record(uid, spend, turn.kind == "answer", token)
 
         user_content: Dict[str, Any] = {"text": shown, "route": route.fields()}
         if request:
@@ -573,17 +751,20 @@ class Assistant:
               slip: Optional[Mapping[str, Any]], history: List[Dict[str, Any]], route: Route, spend: Spend,
               step: Callable[[str], None]) -> Turn:
         now = self.clock()
-        # 1. Warning signs by code's rules: free, so they run before anything else
+        # 1. Warning signs by code's rules: free, so they run before anything else; so do the support chips'
+        # answers (after a warning sign, help must not wait behind the age, break or credits gates)
         flags = risk_flags(text)
         if flags:
             return self._support(uid, thread_id, text, flags, "rules")
+        if text in SUPPORT_ANSWERS:
+            return Turn(SUPPORT_ANSWERS[text], "support", chips=[chip for chip in SUPPORT_CHIPS if chip != text])
         # 2. Gates
-        gate = self._gate(uid, user)
+        soft = soft_flags(text)
+        gate = self._gate(uid, user, thread_id, text, soft, spend, history)
         if gate:
             return gate
         # 3. The router (only for typed text: the request bar and the slip already say what they want). It
         # also judges the soft warning signs: wording sports talk can share counts only if it agrees
-        soft = soft_flags(text)
         pending = self._pending(history)
         if text:
             step("Reading your message…")
@@ -592,9 +773,7 @@ class Assistant:
                 return self._support(uid, thread_id, text, route.flags, "router", soft)
         unconfirmed = bool(soft) and not route.routed  # the router was down: no pause, but the helpline shows
         if unconfirmed:
-            self.store.add_rg_event(uid, f"possible_{soft[0]}", {"flags": soft, "source": "rules, router unavailable",
-                                                                 "thread_id": thread_id, "excerpt": text[:200]},
-                                    action="helpline_note", now=self.clock())
+            self._possible_sign(uid, thread_id, text, soft, "rules, router unavailable")
         if slip:
             route.intent = "analyse"
         elif request:
@@ -611,11 +790,11 @@ class Assistant:
         if question:
             return question
         # 4-6. The tool loop, cards and the checks
-        late = datetime.datetime.fromtimestamp(now, self.tz).hour in LATE_HOURS
+        late = self._late_note(user, now)
         if late:
             self._late_night(uid, thread_id)
         turn = self._answer(uid, user, text, request, slip, history, route, bool(paused), spend, step)
-        notes = [LATE_NOTE] if late else []
+        notes = [late] if late else []
         if paused or unconfirmed or self._flagged_recently(uid):
             notes.append(HELPLINE)
         if notes:
@@ -626,37 +805,67 @@ class Assistant:
 
     def _support(self, uid: str, thread_id: int, text: str, flags: Sequence[str], source: str,
                  soft: Sequence[str] = ()) -> Turn:
-        until = self._pause_picks(uid)
-        detail = {"flags": list(flags), "source": source, "thread_id": thread_id, "excerpt": text[:200],
-                  "paused_until": until}
-        if soft:
-            detail["soft_rules"] = list(soft)  # code's rules saw it too, without the "I" or "my" to be sure
-        self.store.add_rg_event(uid, flags[0], detail, action="support_message,picks_off_24h", now=self.clock())
-        message = SUPPORT_MESSAGE + (f"\n\n{DISTRESS_EXTRA}" if "distress" in flags else "")
-        return Turn(message, "support", chips=list(SUPPORT_CHIPS))
+        note_warning_sign(self.lab, uid, flags, source, text, thread_id=thread_id, soft=soft, now=self.clock())
+        return Turn(support_message(flags), "support", chips=list(SUPPORT_CHIPS))
+
+    def _possible_sign(self, uid: str, thread_id: int, text: str, soft: Sequence[str], source: str) -> None:
+        """A soft sign code couldn't confirm: logged for the owner, and the helpline shows (no pause)."""
+        self.store.add_rg_event(uid, f"possible_{soft[0]}", {"flags": list(soft), "source": source,
+                                                             "thread_id": thread_id, "excerpt": text[:200]},
+                                action="helpline_note", now=self.clock())
 
     def _flagged_recently(self, uid: str) -> bool:
+        """A strong warning sign in the last day: the person's own, or for a password browser any password
+        browser's (they are one person, and share the pause on picks it brought)."""
         since = self.clock() - PAUSE_SECONDS
-        return any(event["kind"] in STRONG_FLAGS for event in self.store.rg_events(uid, since=since, limit=20))
+        who: Dict[str, Any] = {"members": "web:"} if uid.startswith("web:") else {"user": uid}
+        return any(self.store.rg_events(kind=kind, since=since, limit=1, **who) for kind in STRONG_FLAGS)
 
     def _late_night(self, uid: str, thread_id: int) -> None:
         """Log a late-night session once a night, for the owner's review (it doesn't pause anything)."""
         if not self.store.rg_events(uid, kind="late_night", since=self.clock() - 6 * 3600, limit=1):
             self.store.add_rg_event(uid, "late_night", {"thread_id": thread_id}, action="reminder", now=self.clock())
 
+    def _late_note(self, user: Mapping[str, Any], now: float) -> Optional[str]:
+        """The late-night note, or None. By the person's own timezone when the app has stored it (settings
+        "timezone"); else by the app's clock, and the note says so rather than claiming it's late for them."""
+        name = (user.get("settings") or {}).get("timezone")
+        try:
+            zone = ZoneInfo(name) if isinstance(name, str) and 0 < len(name) <= 64 else None
+        except (ValueError, KeyError, OSError):  # an unknown or malformed zone name
+            zone = None
+        moment = datetime.datetime.fromtimestamp(now, zone or self.tz)
+        if moment.hour not in LATE_HOURS:
+            return None
+        return LATE_NOTE if zone else LATE_NOTE_APP_CLOCK.format(time=f"{moment:%-I:%M %p %Z}")
+
     # --- step 2: gates ---
 
-    def _gate(self, uid: str, user: Dict[str, Any]) -> Optional[Turn]:
+    def _gate(self, uid: str, user: Dict[str, Any], thread_id: int, text: str, soft: Sequence[str],
+              spend: Spend, history: Sequence[Dict[str, Any]] = ()) -> Optional[Turn]:
+        """A template answer when the age isn't confirmed, the person is on a break or the AI allowance is used
+        up. After a warning sign (soft wording now, or a strong one in the last day) it carries the helpline
+        and no pointer to odds, and soft wording is logged for the owner as when the router is down."""
+        worried = bool(soft) or self._flagged_recently(uid)
+        on_break = self.lab.break_until(uid, now=self.clock())  # a password browser's break covers them all
         if not user.get("age_confirmed_at"):
-            return Turn("Before we chat, please confirm you're 18 or older (21+ in the US). You can do it in "
+            turn = Turn("Before we chat, please confirm you're 18 or older (21+ in the US). You can do it in "
                         "the app's Settings.", "gate", chips=[])
-        if self.store.cooloff_active(uid, now=self.clock()):
-            return Turn(f"You're on a break until {self._local(float(user['cooloff_until']))}, so the AI chat "
+        elif on_break:
+            turn = Turn(f"You're on a break until {self._local(on_break)}, so the AI chat "
                         f"is off until then.\n\n{HELPLINE}", "gate")
-        if self.credits(uid)["left_cents"] <= 0:
-            return Turn("You've used today's AI allowance. It resets at midnight (US Eastern); the app's games, "
-                        "odds and ticket pricing still work without it.", "gate")
-        return None
+        else:
+            left = spend.budget * 100 if spend.budget is not None else self.credits(uid)["left_cents"]
+            need = self._turn_floor(history, text)
+            if left >= need:
+                return None
+            pointer = "." if worried else "; the app's games, odds and ticket pricing still work without it."
+            turn = Turn(f"{self._allowance_used(uid, need)}. It resets at midnight (US Eastern){pointer}", "gate")
+        if worried and HELPLINE not in turn.text:
+            turn.text += f"\n\n{HELPLINE}"
+        if soft:
+            self._possible_sign(uid, thread_id, text, soft, "rules, at a gate")
+        return turn
 
     # --- step 3: the router, defaults and clarifying questions ---
 
@@ -676,6 +885,7 @@ class Assistant:
             parts.append(f"The assistant is waiting for an answer to: {pending.get('question')}\n"
                          f"Known so far: {json.dumps({k: v for k, v in pending.items() if k not in ('question', 'asks')})}")
         parts.append(f"Latest message:\n{text}")
+        spend.alive()
         try:
             response = self.caller.create(
                 self.router_model,
@@ -849,8 +1059,14 @@ class Assistant:
 
         runs: List[ToolRun] = []
         reply, content = self._loop(messages, effort, toolbox, runs, spend, step, MAX_ROUNDS)
-        sources = source_numbers([run.content for run in runs], said, context, dict(request or {}), dict(slip or {}))
-        found = problems(reply, sources) if reply else ["no answer"]
+        if not reply and not runs and spend.stopped:  # not even one round fits in what's left today
+            return Turn("What's left of today's AI allowance isn't enough for an answer. It resets at midnight "
+                        "(US Eastern); the app's games, odds and ticket pricing still work without it.", "gate")
+        # The numbers Claude may quote: this turn's tool results and what the person asked (never the context's
+        # housekeeping, such as the AI credits left or the clock)
+        asked = [said, route.fields(), dict(request or {}), dict(slip or {})]
+        sources = source_numbers([run.content for run in runs], *asked)
+        found = problems(reply, sources, RULE_DURATIONS) if reply else ["no answer"]
         if found and reply and content is not None:
             step("Double-checking the numbers…")
             messages.append({"role": "assistant", "content": content})
@@ -860,8 +1076,8 @@ class Assistant:
                 "banned wording.")})
             first_problems = found
             reply, content = self._loop(messages, effort, toolbox, runs, spend, step, RETRY_ROUNDS)
-            sources = source_numbers([run.content for run in runs], said, context, dict(request or {}), dict(slip or {}))
-            found = problems(reply, sources) if reply else ["no answer"]
+            sources = source_numbers([run.content for run in runs], *asked)
+            found = problems(reply, sources, RULE_DURATIONS) if reply else ["no answer"]
             if found:
                 found = first_problems + found
         cards = self._cards(runs)
@@ -886,10 +1102,20 @@ class Assistant:
             }
             if round_ == rounds - 1:
                 request["tool_choice"] = {"type": "none"}  # the last round must answer
+            if spend.budget is not None:
+                # No more output than what's left of the turn's budget can pay for, even at the worst
+                room = self.caller.max_tokens_within(self.chat_model, spend.budget - spend.dollars, request,
+                                                     request["max_tokens"])
+                if not room:
+                    logging.info("A chat turn stopped at round %d: its AI budget is spent", round_ + 1)
+                    spend.stopped = True
+                    return "", None
+                request["max_tokens"] = room
             step("Thinking…" if round_ == 0 else "Putting it together…")
+            spend.alive()
             response = self.caller.create(self.chat_model, **request)
             model = getattr(response, "model", None) or self.chat_model
-            dollars, tokens_in, tokens_out = self.caller.cost(model, response.usage)
+            dollars, tokens_in, tokens_out = self.caller.cost(self.chat_model, response.usage, model)
             spend.add(model, dollars, tokens_in, tokens_out)
             if response.stop_reason in ("refusal", "max_tokens"):
                 # Declined, or cut off mid-sentence: the template answers instead. How often betting talk
@@ -1012,4 +1238,8 @@ def build_assistant(config: Any, lab: Any, store: Any, client: Optional[Any] = N
         router_model=getattr(config, "ai_router_model", ROUTER_MODEL),
         daily_cents=getattr(config, "ai_chat_daily_cents", DAILY_CENTS),
         tz=ZoneInfo(getattr(config, "timezone", "America/New_York")),
+        # The shared daily caps (config fields AI_CHAT_WEB_DAILY_CENTS and AI_CHAT_DAILY_TOTAL_CENTS when the
+        # config has them; otherwise WEB_POOL_PEOPLE and ALL_POOL_PEOPLE people's allowance)
+        web_cents=getattr(config, "ai_chat_web_daily_cents", None),
+        total_cents=getattr(config, "ai_chat_daily_total_cents", None),
     )

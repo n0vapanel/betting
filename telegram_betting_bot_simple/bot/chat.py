@@ -3,7 +3,9 @@
 The chat is private: only people in TELEGRAM_ALLOWED_IDS (the owner and
 friends) can use it, since every message costs money on the owner's API
 account; anyone else gets a short note pointing them to /start, where
-browsing games stays open to all.
+browsing games stays open to all. A message with a warning sign (chasing
+losses, betting to pay debts, distress) gets the support message and the
+helplines from anyone, AI or no AI: code's own rules spot it, for free.
 
 While the assistant works, the person sees what it is doing: a message
 draft (Telegram's streaming preview, Bot API 9.3+) that starts as Telegram's
@@ -38,7 +40,7 @@ from telegram.constants import ChatType, ParseMode
 from telegram.error import TelegramError
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
-from ..ai.assistant import build_assistant
+from ..ai.assistant import HELPLINE, build_assistant, note_warning_sign, risk_flags, support_message
 from ..ai.explain import money, one_in_text, pct
 from ..config import Config
 from ..dashboard.service import CallRejected, NotFound
@@ -202,6 +204,9 @@ def reply_text(result: Dict[str, Any], asked: Optional[str] = None) -> str:
     cards = [card_text(card) for card in (reply.get("cards") or [])[:MAX_CARDS]]
     credits = result.get("credits") or {}
     foot = []
+    # Under a ticket or a plan, the helpline, as the app shows it on every screen
+    if any(card.get("type") in ("ticket", "plan") for card in (reply.get("cards") or [])[:MAX_CARDS]):
+        foot.append(f"<i>{html.escape(HELPLINE)}</i>")
     if credits.get("daily_cents"):
         foot.append(f"<i>AI analyst · {credits.get('left_cents', 0):g}¢ of {credits['daily_cents']}¢ "
                     "of today's AI credits left</i>")
@@ -362,17 +367,37 @@ async def run_turn(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
 
 
 async def chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """A plain text message to the bot: the AI chat for the owner's friends, a pointer to /start for others."""
+    """A plain text message to the bot: the AI chat for the owner's friends, a pointer to /start for others.
+
+    A warning sign gets the support message from anyone, before either pointer to the games."""
     message = update.effective_message
     if message is None or not message.text or update.effective_user is None:
         return
-    if not _allowed(update, context):
-        await message.reply_text(PRIVATE_MESSAGE)
-        return
-    if context.application.bot_data.get("assistant") is None:
-        await message.reply_text(NO_AI_MESSAGE)
+    allowed = _allowed(update, context)
+    assistant = context.application.bot_data.get("assistant")
+    if not allowed or assistant is None:
+        flags = risk_flags(message.text)
+        if flags:
+            await _support_without_ai(update, context, message.text, flags)
+        else:
+            await message.reply_text(PRIVATE_MESSAGE if not allowed else NO_AI_MESSAGE)
         return
     await run_turn(update, context, message.text)
+
+
+async def _support_without_ai(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, flags: List[str]) -> None:
+    """A warning sign from someone the AI chat doesn't answer (not on the allowlist, or no API key): the same
+    support message and helplines, and the same pause on the AI's picks (logged for the owner to review)."""
+    assistant = context.application.bot_data.get("assistant")
+    # The Lab writes the pause (dashboard/lab.py's Gates), as it does for the chat and the app
+    lab = getattr(assistant, "lab", None) or getattr(context.application.bot_data.get("service"), "lab", None)
+    if lab is not None:
+        try:
+            await asyncio.to_thread(note_warning_sign, lab, _uid(update), flags, "rules, bot without the AI chat",
+                                    text)
+        except Exception:
+            logging.exception("Couldn't record a warning sign")
+    await update.effective_message.reply_text(support_message(flags))
 
 
 async def _stored_reply(context: ContextTypes.DEFAULT_TYPE, uid: str, thread_id: int, index: int) -> Dict[str, Any]:

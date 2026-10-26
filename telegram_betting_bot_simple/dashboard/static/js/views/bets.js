@@ -14,8 +14,7 @@
 // The pieces live in bets/: slips.js (cards, results, share, delete), plans.js, record.js, styles.js.
 
 import { api } from "../api.js";
-import { refreshMainButton } from "../app.js";
-import * as shell from "../app.js"; // for replaceAddress() once the shell exports it (see setAddress)
+import { refreshMainButton, replaceAddress } from "../app.js";
 import { segmented } from "../ui.js";
 import { renderMyCalls } from "../legacy.js";
 import { ensureStyles } from "./bets/styles.js";
@@ -47,13 +46,11 @@ export function onLeave() {
 }
 
 /**
- * Change the address without a new history entry. Through the shell's own replaceAddress() when app.js
- * exports it, so its in-app history (and the scroll position Back restores) follows the new address;
- * until then, directly.
+ * Change the address without a new history entry, through the shell, so its in-app history (and the
+ * scroll position Back restores) follows the new address.
  */
 function setAddress(hash) {
-  if (typeof shell.replaceAddress === "function") shell.replaceAddress(hash);
-  else if (location.hash !== hash) history.replaceState(history.state, "", hash);
+  if (location.hash !== hash) replaceAddress(hash);
 }
 
 function pickTab(query) {
@@ -115,7 +112,16 @@ export async function render(root, params) {
   };
 
   const tabs = root.querySelector(".mb-tabs");
-  const reveal = () => tabs.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  // Bring the chosen tab into the strip's view sideways only: scrollIntoView would also scroll the page,
+  // undoing the scroll position the shell restores on Back
+  const reveal = () => {
+    const on = tabs.querySelector('[aria-pressed="true"]');
+    if (!on) return;
+    const tab = on.getBoundingClientRect();
+    const strip = tabs.getBoundingClientRect();
+    if (tab.left < strip.left) tabs.scrollLeft -= strip.left - tab.left + 8;
+    else if (tab.right > strip.right) tabs.scrollLeft += tab.right - strip.right + 8;
+  };
   root.addEventListener("click", (event) => {
     const seg = event.target.closest('[data-seg="bets-tab"]');
     if (!seg || seg.dataset.value === screen?.tab) return;

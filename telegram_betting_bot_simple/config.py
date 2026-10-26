@@ -48,6 +48,12 @@ class Config(BaseSettings):
     # the model that chats and calls the brain's tools, and the small model that reads each message
     # first (what is asked, and any warning signs of problem gambling)
     ai_chat_daily_cents: int = Field(100, ge=0, validation_alias="AI_CHAT_DAILY_CENTS")
+    # Daily caps (US cents) shared by many people: AI_CHAT_WEB_DAILY_CENTS for everyone signed in with the
+    # dashboard password together (each browser is told apart by an id it makes up, so a new one mustn't
+    # mean a fresh allowance), and AI_CHAT_DAILY_TOTAL_CENTS for the whole app. Unset, they are 3 and 10
+    # people's AI_CHAT_DAILY_CENTS; 0 switches that group's AI chat off
+    ai_chat_web_daily_cents: Optional[int] = Field(None, ge=0, validation_alias="AI_CHAT_WEB_DAILY_CENTS")
+    ai_chat_daily_total_cents: Optional[int] = Field(None, ge=0, validation_alias="AI_CHAT_DAILY_TOTAL_CENTS")
     ai_chat_model: str = Field("claude-opus-5-5", validation_alias="AI_CHAT_MODEL")
     ai_router_model: str = Field("claude-haiku-5-5", validation_alias="AI_ROUTER_MODEL")
     # Writable folder for the odds store and bot state shared by the bot and dashboard;
@@ -62,6 +68,12 @@ class Config(BaseSettings):
         # "PUBLIC_URL=" in .env means unset; a trailing slash would double up when paths are added
         value = (value or "").strip().rstrip("/")
         return value or None
+
+    @field_validator("ai_chat_web_daily_cents", "ai_chat_daily_total_cents", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        # "AI_CHAT_WEB_DAILY_CENTS=" in .env means unset (the default), not a startup error
+        return None if isinstance(value, str) and not value.strip() else value
 
     @field_validator("telegram_allowed_ids")
     @classmethod

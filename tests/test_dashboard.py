@@ -6,14 +6,21 @@ import pytest
 from fastapi.testclient import TestClient
 
 from telegram_betting_bot_simple.dashboard.app import SESSION_COOKIE, create_app, session_token, valid_session
+from telegram_betting_bot_simple.data.store import Store
+
+PLAYER = {"X-Player": "browser-1234"}  # this browser's own id on the shared password
 
 @pytest.fixture()
-def visitor(service):
+def visitor(service, tmp_path):
+    service.store = Store(str(tmp_path / "betting.db"))  # people's accounts: the gates read them
     return TestClient(create_app(service, "s3cret", login_delay=0))
 
 @pytest.fixture()
 def client(visitor):
+    """Signed in on the password, as one browser that has confirmed its age (the gates' first check)."""
     assert visitor.post("/api/login", json={"password": "s3cret"}).status_code == 200
+    visitor.headers.update(PLAYER)
+    assert visitor.put("/api/me", json={"confirm_age": True}).status_code == 200
     return visitor
 
 def test_the_api_needs_a_session_from_the_sign_in_form(visitor) -> None:
@@ -88,9 +95,7 @@ def test_without_an_odds_key_the_api_says_how_to_fix_it() -> None:
     response = client.get("/api/leagues")
     assert response.status_code == 503 and "THE_ODDS_API_KEY" in response.json()["detail"]
 
-def test_calls_api_judges_saves_and_validates(client, service, tmp_path) -> None:
-    from telegram_betting_bot_simple.data.store import Store
-    service.store = Store(str(tmp_path / "betting.db"))
+def test_calls_api_judges_saves_and_validates(client) -> None:
     game = {"league": "basketball_nba", "id": "g1"}
     judged = client.post("/api/judge", json={**game, "call": {"winner": "away", "confidence": 0.7}}).json()
     assert judged["winner"]["team"] == "Los Angeles Clippers" and "disagrees" in judged["verdict"]
@@ -121,3 +126,108 @@ def test_ai_bets_leaderboard_and_record_endpoints(client) -> None:
     assert client.get("/api/ai-bets", params={"league": "basketball_nba", "source": "yolo"}).status_code == 422
     assert client.get("/api/leaderboard").json() == []
     assert client.get("/api/track-record").json()["games"] == 0
+
+def test_a_huge_body_is_refused_before_it_is_read(visitor) -> None:
+    # FastAPI parses a route's JSON before its sign-in check runs, so the size is checked first, for anyone
+    huge = b"[" + b"[]," * 350_000 + b"[]]"  # about 1 MB of nested arrays: costly to parse, never parsed
+    for path in ("/api/chat", "/api/login", "/api/tg-login"):
+        response = visitor.post(path, content=huge, headers={"Content-Type": "application/json"})
+        assert response.status_code == 413 and response.json() == {"detail": "The request is too large"}, path
+    # Without a Content-Length (chunked), the bytes are counted as they arrive
+    chunked = visitor.post("/api/chat", content=(part for part in [huge[:40_000], huge[40_000:]]),
+                           headers={"Content-Type": "application/json"})
+    assert chunked.status_code == 413
+    # Real requests are a few kilobytes and go through as before
+    assert visitor.post("/api/chat", json={"message": "x" * 2000}).status_code == 401
+    assert visitor.post("/api/login", json={"password": "s3cret"}).status_code == 200
+
+def test_password_guessing_locks_out_the_address() -> None:
+    app = create_app(None, "s3cret", login_delay=0)
+    guard = app.state.login_guard
+    clock = [1_000.0]
+    guard.now = lambda: clock[0]
+    guesser, friend = TestClient(app, client=("203.0.113.9", 4000)), TestClient(app, client=("198.51.100.7", 4000))
+    for _ in range(10):
+        assert guesser.post("/api/login", json={"password": "guess"}).status_code == 401
+    # Locked out for 15 minutes: even the right password is refused, without being checked
+    response = guesser.post("/api/login", json={"password": "s3cret"})
+    assert response.status_code == 429 and "15 minutes" in response.json()["detail"]
+    assert SESSION_COOKIE not in guesser.cookies
+    assert friend.post("/api/login", json={"password": "s3cret"}).status_code == 200  # other addresses aren't
+    clock[0] += 15 * 60
+    assert guesser.post("/api/login", json={"password": "s3cret"}).status_code == 200
+    # A right password clears the count; wrong ones spread over more than 15 minutes don't add up
+    for _ in range(9):
+        assert guesser.post("/api/login", json={"password": "guess"}).status_code == 401
+    clock[0] += 15 * 60 + 1
+    assert guesser.post("/api/login", json={"password": "guess"}).status_code == 401
+    assert guesser.post("/api/login", json={"password": "s3cret"}).status_code == 200
+
+def test_guesses_sent_side_by_side_still_wait_their_turn() -> None:
+    import asyncio
+    import time
+
+    import httpx
+
+    app = create_app(None, "s3cret", login_delay=0.1)
+
+    async def guesses():
+        transport = httpx.ASGITransport(app=app, client=("203.0.113.9", 4000))
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as http:
+            began = time.monotonic()
+            replies = await asyncio.gather(*(http.post("/api/login", json={"password": f"guess-{i}"})
+                                             for i in range(4)),
+                                           http.post("/api/login", json={"password": "s3cret"}))
+            return [r.status_code for r in replies], time.monotonic() - began
+
+    statuses, took = asyncio.run(guesses())
+    assert statuses == [401, 401, 401, 401, 200]
+    assert took >= 0.38  # four wrong guesses one after another, not side by side (about 0.1 s)
+
+def test_new_addresses_in_one_ipv6_block_share_one_lockout() -> None:
+    # An IPv6 line has a whole /64: a new address in it for each guess is still the same guesser
+    app = create_app(None, "s3cret", login_delay=0)
+    app.state.login_guard.now = lambda: 1_000.0
+
+    def client(host):
+        return TestClient(app, client=(host, 4000))
+
+    for i in range(1, 11):
+        assert client(f"2001:db8:1:2::{i:x}").post("/api/login", json={"password": "guess"}).status_code == 401
+    for host in ("2001:db8:1:2::ff", "2001:db8:1:2:abcd::1"):
+        assert client(host).post("/api/login", json={"password": "s3cret"}).status_code == 429
+    assert client("2001:db8:1:3::1").post("/api/login", json={"password": "s3cret"}).status_code == 200
+    # IPv4 stays per address, written plainly or inside IPv6
+    for _ in range(10):
+        assert client("::ffff:203.0.113.9").post("/api/login", json={"password": "guess"}).status_code == 401
+    assert client("203.0.113.9").post("/api/login", json={"password": "s3cret"}).status_code == 429
+    assert client("203.0.113.10").post("/api/login", json={"password": "s3cret"}).status_code == 200
+
+
+def test_a_full_line_of_wrong_guesses_still_lets_the_owner_in() -> None:
+    import asyncio
+
+    from fastapi import HTTPException
+
+    from telegram_betting_bot_simple.dashboard.app import LoginGuard
+
+    guard = LoginGuard(0.0625, queue=3, kept=1, now=lambda: 1_024.0)  # a stopped clock, exact sums: no races
+
+    async def tried(address, password):
+        try:
+            return await guard.attempt(address, lambda: password == "s3cret")
+        except HTTPException as exc:
+            return exc.status_code
+
+    async def flood():
+        assert await tried("198.51.100.77", "s3cret") is True  # the owner signed in here before
+        assert await tried("2001:db8:9:9::1", "guess") is False  # the guesser's block has a wrong password
+        guesses = [asyncio.ensure_future(tried(f"2001:db8:9:9::{i:x}", "guess")) for i in range(2, 6)]
+        fresh = asyncio.ensure_future(tried("198.51.100.78", "s3cret"))  # a clean address: the kept turn
+        late = asyncio.ensure_future(tried("198.51.100.79", "s3cret"))  # taken by then
+        owner = asyncio.ensure_future(tried("198.51.100.77", "s3cret"))  # signed in before: one more kept turn
+        return await asyncio.gather(*guesses), await fresh, await late, await owner
+
+    guesses, fresh, late, owner = asyncio.run(flood())
+    assert guesses == [False, False, 429, 429] and fresh is True and late == 429 and owner is True
+    assert guard._waiting == {}  # nobody is left counted in the line

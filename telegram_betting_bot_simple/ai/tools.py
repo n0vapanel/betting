@@ -43,7 +43,7 @@ from pydantic import BaseModel, Field, ValidationError
 from ..dashboard.service import CallRejected, NotFound
 from ..data.espn_client import LEAGUES as ESPN_LEAGUES
 from ..data.leagues import POPULAR_LEAGUES
-from ..engine.tickets import chance_label, combinations, one_in
+from ..engine.tickets import ai_given_no_push, chance_label, combinations, one_in
 
 LEAGUE_KEYS: Tuple[str, ...] = tuple(sorted(set(ESPN_LEAGUES) | set(POPULAR_LEAGUES)))
 MARKETS = ("h2h", "spreads", "totals")
@@ -279,6 +279,13 @@ def _p(value: Any) -> Optional[float]:
     return round(float(value), 4) if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool) else None
 
 
+def _no_push(ai: Any, push: Any) -> Optional[float]:
+    """The AI's outright chance on the market's footing (given no push), for a line that can push: market_chance
+    is given no push, so this is the AI chance to set beside it."""
+    ai, push = _p(ai), _p(push)
+    return _p(ai_given_no_push(ai, push)) if ai is not None and push else None
+
+
 def _chance(p: Any) -> Dict[str, Any]:
     """A chance in the forms Claude may quote: the number, "1 in X" and the fixed label."""
     value = _p(p)
@@ -345,7 +352,9 @@ def ticket_facts(ticket: Mapping[str, Any]) -> Dict[str, Any]:
         legs.append({
             "index": leg.get("index"), "label": leg.get("label"), "game": leg.get("game"),
             "odds": leg.get("odds"), "ai_chance": leg.get("ai_prob"), "market_chance": leg.get("market_prob"),
-            "push_chance": leg.get("push_prob") or None, "chance_label": leg.get("chance_label"),
+            "push_chance": leg.get("push_prob") or None,
+            "ai_chance_given_no_push": _no_push(leg.get("ai_prob"), leg.get("push_prob")),
+            "chance_label": leg.get("chance_label"),
             "fair_odds": leg.get("fair_odds"), "edge": leg.get("edge"), "book": leg.get("book"),
             "started": leg.get("started") or None, "ref": ref_of(leg),
         })
@@ -619,6 +628,7 @@ class Toolbox:
                     "ai_chance": ai, "ai_one_in": one_in(ai), "market_chance": fair, "market_one_in": one_in(fair),
                     "chance_label": chance_label(ai if ai is not None else fair),
                     "push_chance": _p(offer.get("push")) or None,
+                    "ai_chance_given_no_push": _no_push(ai, offer.get("push")),
                     "fair_odds": round(1 / ai, 2) if ai else None, "edge": _p(offer.get("ev")),
                 })
         as_of = (today.get("odds_as_of") or {})
@@ -695,6 +705,7 @@ class Toolbox:
             legs.append({"index": leg.get("index"), "label": leg.get("label"), "game": leg.get("game"),
                          "odds": leg.get("odds"), "ai_chance": ai, "ai_one_in": one_in(ai), "market_chance": market,
                          "market_one_in": one_in(market), "push_chance": leg.get("push_prob") or None,
+                         "ai_chance_given_no_push": _no_push(ai, leg.get("push_prob")),
                          "chance_label": leg.get("chance_label"), "fair_odds": leg.get("fair_odds"),
                          "edge": leg.get("edge"), "book_keeps": leg.get("book_cut"), "book": leg.get("book"),
                          "started": leg.get("started") or None, "ref": ref_of(leg)})

@@ -60,6 +60,26 @@ export function onMeChange(fn) {
   return () => listeners.me.delete(fn);
 }
 
+/**
+ * On a break right now (on_break, until cooloff_until). The server refuses pricing, analysing and saving
+ * a slip then (as well as picks and plans), so the slip's Analyse and Save are off and its old price goes.
+ */
+export function onBreak(profile = me()) {
+  if (!profile.on_break) return false;
+  if (!profile.cooloff_until) return true;
+  const until = Date.parse(profile.cooloff_until);
+  return Number.isFinite(until) && until > Date.now();
+}
+
+/** The leagues shown before anyone has picked any (Today, Settings, the sports sheet, Build and Ask AI). */
+export const DEFAULT_SPORTS = ["basketball_nba"];
+
+/** The person's favourite leagues, or the default ones until they save some. */
+export function favouriteSports(profile = me()) {
+  const list = profile.favourite_sports || [];
+  return list.length ? [...list] : [...DEFAULT_SPORTS];
+}
+
 /** "decimal" or "american". */
 export function oddsFormat() {
   return me().odds_format === "american" ? "american" : "decimal";
@@ -274,7 +294,8 @@ export function onPriced(fn) {
  * Errors land in priced().error (an ApiError) and are not thrown.
  */
 export async function priceSlip({ force = false } = {}) {
-  if (!state.legs.length) {
+  // An empty slip, or a break (the server prices nothing then): drop the old price without asking
+  if (!state.legs.length || onBreak()) {
     pricing.controller?.abort();
     pricing = { body: null, result: null, error: null, busy: false, controller: null };
     emit("priced", priced());

@@ -12,7 +12,10 @@ that keep something per person (settings, saved bets, plans, chat) use person():
 a Telegram user is "tg:<id>", and everyone on the shared password is told apart
 by the random id their browser keeps and sends as X-Player ("web:<id>"), which
 is why no route shows one person's id to another (the leaderboard marks rows
-"mine" instead). Bet
+"mine" instead). The password is the owner's alone, though, so for the
+responsible-gambling gates (a break, the pause on picks after a warning sign,
+the weekly budget) every password browser is one person: a new X-Player id
+can't shed them (dashboard/lab.py's Gates). Bet
 slips send only which picks were chosen; prices and probabilities are looked
 up on the server.
 """
@@ -21,9 +24,12 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import ipaddress
 import json
 import logging
+import math
 import re
+import threading
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -37,9 +43,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
 from .auth import (
+    INIT_DATA_EXPIRED,
     MAX_INIT_DATA_LENGTH,
     WEB_UID,
     InitDataError,
+    InitDataExpired,
     private_app_message,
     session_key,
     session_token,
@@ -69,6 +77,29 @@ INIT_DATA_HEADER = "X-Telegram-Init-Data"
 PLAYER_HEADER = "X-Player"
 PLAYER_ID = re.compile(r"[A-Za-z0-9-]{8,64}")
 NO_ODDS_KEY = "Add THE_ODDS_API_KEY to the .env file and restart the dashboard"
+# The largest real request is a 2,000-character chat message with a 12-leg slip: a few kilobytes
+MAX_BODY_BYTES = 64 * 1024
+TOO_LARGE = "The request is too large"
+LOGIN_FAILURES = 10  # wrong passwords from one address (an IPv6 /64) before it is locked out ...
+LOGIN_LOCKOUT = 15 * 60  # ... for this many seconds (failures older than this are forgotten)
+LOGIN_QUEUE = 20  # password checks waiting their turn; past this, more are refused straight away ...
+LOGIN_KEPT = 5  # ... except for these few more, kept for addresses with no recent wrong password, and as
+# many again for those of them that signed in before (a flood from many fresh addresses can take the first few)
+LOGIN_TRACKED = 10_000  # addresses remembered at most, so a flood of addresses can't fill the memory
+
+
+def login_key(address: str) -> str:
+    """Whose wrong passwords add up: an IPv4 address, or an IPv6 address's /64. A home line or a server has a
+    whole /64, so a new address inside it mustn't mean a fresh count."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:  # not an address ("unknown", a test client's name)
+        return address
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            return str(ip.ipv4_mapped)
+        return str(ipaddress.IPv6Network((int(ip), 64), strict=False))
+    return str(ip)
 
 
 class Pick(BaseModel):
@@ -199,6 +230,8 @@ class MeUpdate(BaseModel):
     weekly_budget: Optional[Decimal] = Field(None, ge=0, le=Decimal("1000000"), decimal_places=2)
     reality_check_minutes: Optional[Literal[15, 30, 60]] = None
     confirm_age: Optional[bool] = None
+    # The person's IANA time zone (the app sends Intl.DateTimeFormat().resolvedOptions().timeZone); null clears it
+    timezone: Optional[str] = Field(None, min_length=1, max_length=64)
 
 
 class CooloffBody(BaseModel):
@@ -253,6 +286,142 @@ class AsciiJSONResponse(JSONResponse):
         return json.dumps(content, ensure_ascii=True, allow_nan=False, separators=(",", ":")).encode("ascii")
 
 
+class LimitBody:
+    """ASGI middleware: a request body over ``limit`` bytes gets a 413 before anything reads it.
+
+    FastAPI reads and parses a route's JSON body before its sign-in dependency runs, so without this
+    anyone, signed in or not, could make the process parse (and hold) megabytes of JSON. A declared
+    Content-Length over the limit is refused at once; a chunked body is counted as it arrives.
+    """
+
+    def __init__(self, app: Any, limit: int = MAX_BODY_BYTES) -> None:
+        self.app = app
+        self.limit = limit
+
+    async def __call__(self, scope: Dict[str, Any], receive: Callable[[], Any], send: Callable[[Any], Any]) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        declared = next((value for name, value in scope.get("headers") or () if name == b"content-length"), None)
+        if declared is not None and (not declared.isdigit() or int(declared) > self.limit):
+            await JSONResponse({"detail": TOO_LARGE}, status_code=413)(scope, receive, send)
+            return
+        received = 0
+
+        async def counted() -> Any:
+            nonlocal received
+            message = await receive()
+            if message.get("type") == "http.request":
+                received += len(message.get("body") or b"")
+                if received > self.limit:
+                    # FastAPI passes an HTTPException from the body read straight through: a plain 413
+                    raise HTTPException(413, TOO_LARGE)
+            return message
+
+        await self.app(scope, counted, send)
+
+
+class LoginGuard:
+    """Slows down password guessing for everyone, not only inside each request.
+
+    Every password check gets its own turn, ``delay`` seconds after the one before, and is made only
+    when its turn comes, so guesses sent side by side still go through at most one per ``delay`` in
+    all (a right guess waits its turn like the rest), and a wrong one is answered ``delay`` later. The
+    turns are kept by the clock, so this holds across threads and event loops. When the line is
+    ``queue`` turns long, more attempts are refused at once, except that ``kept`` more turns are kept
+    for an address with no recent wrong password and nothing in the line, and ``kept`` more again for
+    such an address that has signed in before, so a flood of wrong guesses (even from a fresh address
+    each time) can't shut the owner out. An address with ``failures`` wrong passwords within ``lockout``
+    seconds is refused for ``lockout`` seconds, right password or not. An IPv6 address counts as its /64
+    for all of this (login_key). Behind Caddy the address is the real client's: uvicorn takes
+    X-Forwarded-For from 127.0.0.1.
+    """
+
+    def __init__(self, delay: float, failures: int = LOGIN_FAILURES, lockout: float = LOGIN_LOCKOUT,
+                 queue: int = LOGIN_QUEUE, now: Callable[[], float] = time.monotonic, kept: int = LOGIN_KEPT) -> None:
+        self.delay = delay
+        self.failures = failures
+        self.lockout = lockout
+        self.queue = queue
+        self.kept = kept
+        self.now = now
+        self._failed: Dict[str, List[float]] = {}  # address -> times of its recent wrong passwords
+        self._locked: Dict[str, float] = {}  # address -> when its lockout ends
+        self._waiting: Dict[str, int] = {}  # address -> its checks in the line now
+        self._known: Dict[str, float] = {}  # address -> when it last signed in (the right password)
+        self._free_at = 0.0  # when the next check's turn comes
+        self._mutex = threading.Lock()  # held only for bookkeeping, never across an await
+
+    def _refuse_if_locked(self, address: str) -> None:
+        until = self._locked.get(address)
+        if until is None:
+            return
+        left = until - self.now()
+        if left <= 0:
+            del self._locked[address]
+            return
+        minutes = max(1, math.ceil(left / 60))
+        raise HTTPException(429, f"Too many wrong passwords: try again in {minutes} minute{'s' if minutes != 1 else ''}")
+
+    def _failed_from(self, address: str) -> None:
+        now = self.now()
+        recent = [t for t in self._failed.get(address, ()) if now - t < self.lockout] + [now]
+        if len(recent) >= self.failures:
+            self._failed.pop(address, None)
+            self._locked[address] = now + self.lockout
+        else:
+            self._failed[address] = recent
+        if len(self._failed) + len(self._locked) > LOGIN_TRACKED:
+            self._locked = {a: until for a, until in self._locked.items() if until > now}
+            self._failed = {a: times for a, times in self._failed.items() if now - times[-1] < self.lockout}
+            if len(self._failed) > LOGIN_TRACKED // 2:  # still a flood: keep the most recent half
+                newest = sorted(self._failed.items(), key=lambda item: item[1][-1])[-(LOGIN_TRACKED // 2):]
+                self._failed = dict(newest)
+
+    def _clean(self, address: str, now: float) -> bool:
+        """No wrong password from the address lately and none of its checks in the line."""
+        return not self._waiting.get(address) and not any(now - t < self.lockout for t in self._failed.get(address, ()))
+
+    async def attempt(self, address: str, right: Callable[[], bool]) -> bool:
+        """Whether the password is right, checked in its turn; a 429 when the address is locked out or the
+        line is full."""
+        address = login_key(address)
+        with self._mutex:
+            self._refuse_if_locked(address)
+            now = self.now()
+            turn = max(now, self._free_at)
+            line = self.queue
+            if self._clean(address, now):
+                line += self.kept * (2 if address in self._known else 1)
+            if self.delay > 0 and turn - now >= line * self.delay:
+                raise HTTPException(429, "Too many sign-in attempts right now: try again in a minute")
+            self._free_at = turn + self.delay
+            self._waiting[address] = self._waiting.get(address, 0) + 1
+        try:
+            if turn > now:
+                await asyncio.sleep(turn - now)
+            with self._mutex:
+                self._refuse_if_locked(address)  # it may have been locked out while this waited
+                ok = right()
+                if ok:
+                    self._failed.pop(address, None)
+                    self._known[address] = self.now()
+                    if len(self._known) > LOGIN_TRACKED:  # only the password's holder adds to it; still bounded
+                        self._known = dict(sorted(self._known.items(), key=lambda item: item[1])[-LOGIN_TRACKED // 2:])
+                    if self._free_at == turn + self.delay:
+                        self._free_at = turn  # nobody queued behind a right password: give its turn back
+                else:
+                    self._failed_from(address)
+        finally:
+            with self._mutex:
+                waiting = self._waiting.pop(address, 1) - 1
+                if waiting > 0:
+                    self._waiting[address] = waiting
+        if not ok:
+            await asyncio.sleep(self.delay)
+        return ok
+
+
 async def invalid_request(request: Request, exc: RequestValidationError) -> Response:
     """FastAPI's usual 422 reply, which repeats the bad input back.
 
@@ -267,15 +436,20 @@ def request_uid(request: Request) -> Optional[str]:
 
     Fresh initData in the header wins over the cookie: it is Telegram's word for who has the app
     open right now, even if the webview still holds an older session. A genuine Telegram user who
-    isn't on the owner's list gets a 403 that tells them their id.
+    isn't on the owner's list gets a 403 that tells them their id. Bad initData falls back to the
+    cookie; when that fails too and the initData was genuine but too old (the app was left open over
+    a day), the 401 says so (INIT_DATA_EXPIRED), since only reopening the app from Telegram renews it.
     """
     state = request.app.state
     init_data = request.headers.get(INIT_DATA_HEADER)
+    expired = False
     if init_data and state.bot_token:
         try:
             user = verify_init_data(init_data, state.bot_token)
+        except InitDataExpired:
+            user, expired = None, True  # the session cookie may still be good
         except InitDataError:
-            user = None  # e.g. the app was left open over a day: the cookie may still be good
+            user = None
         if user is not None:
             uid = telegram_uid(user)
             if not uid_allowed(uid, state.telegram_ids):
@@ -283,7 +457,9 @@ def request_uid(request: Request) -> Optional[str]:
             return uid
     uid = session_uid(state.session_key, request.cookies.get(SESSION_COOKIE))
     if uid is not None and not uid_allowed(uid, state.telegram_ids):
-        return None  # signed in before the owner took them off the list
+        uid = None  # signed in before the owner took them off the list
+    if uid is None and expired:
+        raise HTTPException(401, INIT_DATA_EXPIRED)
     return uid
 
 
@@ -302,7 +478,8 @@ def person(request: Request) -> str:
     """Dependency for routes that keep something per person: "tg:<id>", or "web:<X-Player>" on the password.
 
     The password is shared, so a password session alone can't say whose bets these are: the
-    browser's own random id (X-Player) does. Missing or malformed, it's a 400.
+    browser's own random id (X-Player) does. Missing or malformed, it's a 400. (The Lab still treats
+    every password browser as one person for a break, the pause on picks and the weekly budget.)
     """
     uid = current_uid(request)
     if uid != WEB_UID:
@@ -346,12 +523,14 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     """
     app = FastAPI(title="SportsBet AI", docs_url=None, redoc_url=None, openapi_url=None)
     app.add_exception_handler(RequestValidationError, invalid_request)  # type: ignore[arg-type]
+    app.add_middleware(LimitBody)  # before routing, so before any body is read or parsed
     key = session_key(password, bot_token)
     allowed = frozenset(telegram_ids)
     # Read by current_uid, so routes defined in other modules can depend on it too
     app.state.session_key = key
     app.state.bot_token = bot_token
     app.state.telegram_ids = allowed
+    guard = app.state.login_guard = LoginGuard(login_delay)
 
     def get_service() -> DashboardService:
         if service is None:
@@ -376,8 +555,10 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     async def login(body: Login, request: Request, response: Response) -> Dict[str, bool]:
         # "surrogatepass": JSON can carry a lone surrogate ("\ud800"), which plain UTF-8 can't encode.
         # Usually the length limit already refuses it, but that depends on the pydantic version
-        if not hmac.compare_digest(body.password.encode("utf-8", "surrogatepass"), password.encode()):
-            await asyncio.sleep(login_delay)  # slows down password guessing
+        given = body.password.encode("utf-8", "surrogatepass")
+        address = request.client.host if request.client else "unknown"
+        # One check at a time, a wrong one holding the line, and a lockout per address or IPv6 /64 (LoginGuard)
+        if not await guard.attempt(address, lambda: hmac.compare_digest(given, password.encode())):
             raise HTTPException(401, "Wrong password")
         set_session(response, request, key, WEB_UID, SESSION_SECONDS)
         return {"ok": True}
@@ -411,36 +592,51 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         except RuntimeError as exc:
             raise HTTPException(502, str(exc)) from None
 
-    @app.get("/api/games", dependencies=signed_in)
+    def lab_call(action: Callable[[], Any]) -> Any:
+        """Run a Lab call, turning its refusals into plain answers: 400 with the reason, 404, or 502 when
+        the odds feed or ESPN failed."""
+        try:
+            return action()
+        except NotFound as exc:
+            raise HTTPException(404, str(exc)) from None
+        except (CallRejected, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from None
+        except RuntimeError as exc:
+            raise HTTPException(502, str(exc)) from None
+
+    def gated(lab: Lab, uid: str, action: Callable[[], Any], picks: bool = False) -> Any:
+        """The first dashboard's routes behind the same gates as the Lab's (age confirmed, not on a break
+        and, with ``picks``, not in the pause after a warning sign in the chat): a 400 with the reason."""
+        def run() -> Any:
+            lab.ready(uid, picks=picks)
+            return action()
+        return lab_call(run)
+
+    @app.get("/api/games")
     def games(
         league: str = Query(pattern=LEAGUE_KEY),
         refresh: bool = False,
+        uid: str = Depends(person),
         svc: DashboardService = Depends(get_service),
+        lab: Lab = Depends(get_lab),
     ) -> Dict[str, Any]:
-        try:
-            return svc.games(league, refresh)
-        except RuntimeError as exc:
-            raise HTTPException(502, str(exc)) from None
+        return gated(lab, uid, lambda: svc.games(league, refresh))
 
-    @app.get("/api/game", dependencies=signed_in)
+    @app.get("/api/game")
     def game(
         league: str = Query(pattern=LEAGUE_KEY),
         id: str = Query(max_length=64),
+        uid: str = Depends(person),
         svc: DashboardService = Depends(get_service),
+        lab: Lab = Depends(get_lab),
     ) -> Dict[str, Any]:
-        try:
-            return svc.game(league, id)
-        except NotFound as exc:
-            raise HTTPException(404, str(exc)) from None
-        except RuntimeError as exc:
-            raise HTTPException(502, str(exc)) from None
+        return gated(lab, uid, lambda: svc.game(league, id))
 
-    @app.post("/api/slip", dependencies=signed_in)
-    def slip(body: SlipRequest, svc: DashboardService = Depends(get_service)) -> Dict[str, Any]:
-        try:
-            return svc.price_slip([p.model_dump() for p in body.picks], body.mode, body.stake, body.stakes)
-        except RuntimeError as exc:
-            raise HTTPException(502, str(exc)) from None
+    @app.post("/api/slip")
+    def slip(body: SlipRequest, uid: str = Depends(person), svc: DashboardService = Depends(get_service),
+             lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        return gated(lab, uid, lambda: svc.price_slip([p.model_dump() for p in body.picks], body.mode, body.stake,
+                                                      body.stakes))
 
     def calls_errors(action: Any) -> Any:
         try:
@@ -452,14 +648,16 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         except RuntimeError as exc:
             raise HTTPException(502, str(exc)) from None
 
-    @app.post("/api/judge", dependencies=signed_in)
-    def judge(body: JudgeRequest, svc: DashboardService = Depends(get_service)) -> Dict[str, Any]:
+    @app.post("/api/judge")
+    def judge(body: JudgeRequest, uid: str = Depends(person), svc: DashboardService = Depends(get_service),
+              lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
         """The AI's view of a call while it's being made (nothing is saved)."""
-        return calls_errors(lambda: svc.judge(body.league, body.id, body.call.model_dump()))
+        return gated(lab, uid, lambda: svc.judge(body.league, body.id, body.call.model_dump()))
 
-    @app.post("/api/calls", dependencies=signed_in)
-    def save_call(body: CallRequest, svc: DashboardService = Depends(get_service)) -> Dict[str, Any]:
-        return calls_errors(lambda: svc.save_call(
+    @app.post("/api/calls")
+    def save_call(body: CallRequest, uid: str = Depends(person), svc: DashboardService = Depends(get_service),
+                  lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        return gated(lab, uid, lambda: svc.save_call(
             f"web:{body.player}", body.name.strip(), body.league, body.id, body.call.model_dump()
         ))
 
@@ -475,14 +673,17 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
             raise HTTPException(404, "No pending call with that id")
         return {"ok": True}
 
-    @app.get("/api/ai-bets", dependencies=signed_in)
+    @app.get("/api/ai-bets")
     def ai_bets(
         league: str = Query(pattern=LEAGUE_KEY),
         source: Literal["all", "mine"] = "all",
         player: Optional[str] = Query(None, pattern=r"^[A-Za-z0-9-]{8,64}$"),
+        uid: str = Depends(person),
         svc: DashboardService = Depends(get_service),
+        lab: Lab = Depends(get_lab),
     ) -> Dict[str, Any]:
-        return calls_errors(lambda: svc.ai_bets(league, source, f"web:{player}" if player else None))
+        """The AI's Safe / Risky / Crazy tickets: picks, so the pause after a warning sign applies too."""
+        return gated(lab, uid, lambda: svc.ai_bets(league, source, f"web:{player}" if player else None), picks=True)
 
     @app.get("/api/leaderboard")
     def leaderboard(own: FrozenSet[str] = Depends(own_ids),
@@ -494,10 +695,11 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         return [{**row, "player": row["player"] if row["player"] in own else None, "mine": row["player"] in own}
                 for row in rows]
 
-    @app.post("/api/analysts/ask", dependencies=signed_in)
-    def ask_analyst(body: AskRequest, svc: DashboardService = Depends(get_service)) -> Dict[str, Any]:
+    @app.post("/api/analysts/ask")
+    def ask_analyst(body: AskRequest, uid: str = Depends(person), svc: DashboardService = Depends(get_service),
+                    lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
         """Ask one AI analyst about a game now (it can take a minute; each call costs money)."""
-        return calls_errors(lambda: svc.ask_analyst(body.league, body.id, body.analyst))
+        return gated(lab, uid, lambda: svc.ask_analyst(body.league, body.id, body.analyst), picks=True)
 
     @app.get("/api/track-record", dependencies=signed_in)
     def track_record(league: str = Query("basketball_nba", pattern=LEAGUE_KEY),
@@ -505,18 +707,6 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         return calls_errors(lambda: svc.track_record(league))
 
     # --- version 2: per person (settings, tickets, saved bets, plans, players, chat) -----------------
-
-    def lab_call(action: Callable[[], Any]) -> Any:
-        """Run a Lab call, turning its refusals into plain answers: 400 with the reason, 404, or 502 when
-        the odds feed or ESPN failed."""
-        try:
-            return action()
-        except NotFound as exc:
-            raise HTTPException(404, str(exc)) from None
-        except (CallRejected, ValueError) as exc:
-            raise HTTPException(400, str(exc)) from None
-        except RuntimeError as exc:
-            raise HTTPException(502, str(exc)) from None
 
     @app.get("/api/me")
     def me(uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:

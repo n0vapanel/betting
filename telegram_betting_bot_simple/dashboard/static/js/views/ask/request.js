@@ -5,7 +5,7 @@
 // person chose; it never proposes a bigger stake. Its choices are kept in this browser between visits.
 
 import { prefs } from "../../api.js";
-import { me, leagueTitle, sportEmoji } from "../../app.js";
+import { me, favouriteSports, leagueTitle, sportEmoji } from "../../app.js";
 import { esc, chip, segmented, explain } from "../../ui.js";
 import { icon } from "../../icons.js";
 import { amountText } from "./format.js";
@@ -20,7 +20,7 @@ const MONEY = /^\d{1,7}(\.\d{1,2})?$/;
 /** The bar's saved choices, checked (a broken or old copy falls back to the defaults). */
 export function loadRequest() {
   const saved = prefs.get(KEY, null) || {};
-  const favourites = me().favourite_sports?.length ? me().favourite_sports : ["basketball_nba"];
+  const favourites = favouriteSports();
   const leagues = Array.isArray(saved.leagues) ? saved.leagues.filter((k) => /^[a-z0-9_]{2,64}$/.test(k)).slice(0, MAX_SPORTS) : [];
   const legs = Number(saved.max_legs);
   const tier = TIERS.includes(saved.tier) ? saved.tier : TIERS.includes(me().risk_tier) ? me().risk_tier : null;
@@ -69,7 +69,7 @@ export function requestSummary(request) {
 }
 
 function sportChips(request) {
-  const favourites = me().favourite_sports?.length ? me().favourite_sports : ["basketball_nba"];
+  const favourites = favouriteSports();
   const shown = [...new Set([...favourites, ...request.leagues])];
   return shown.map((key) => chip(`${sportEmoji(key)} ${leagueTitle(key)}`, {
     active: request.leagues.includes(key), attrs: `data-req-sport="${esc(key)}"`,

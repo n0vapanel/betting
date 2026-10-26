@@ -15,17 +15,46 @@ import anthropic
 from .forecast import FORECAST_SCHEMA, NEWS_PROMPT, SYSTEM_PROMPT, AnalystError, Reply, parse_forecast
 
 DEFAULT_MODEL = "claude-opus-5-5"
-# US dollars per million tokens: input, output, cache read (a cache write costs 1.25x input)
+# US dollars per million tokens: input, output, cache read (a cache write costs 1.25x input). Claude Opus 5
+# and Opus 4.8 are where a refusal fallback ("default") can send a request, and they cost more than Opus 5.5
 PRICES = {
     "claude-fable-5-1": (10.0, 50.0, 0.25),
     "claude-opus-5-5": (4.0, 20.0, 0.20),
+    "claude-opus-5": (5.0, 25.0, 0.50),
+    "claude-opus-4-8": (5.0, 25.0, 0.50),
     "claude-sonnet-5-5": (2.0, 10.0, 0.20),
     "claude-haiku-5-5": (0.10, 0.50, 0.01),
 }
+# A model missing above is priced at the dearest known rates, so spending is never under-counted
+UNKNOWN_PRICE = tuple(max(price[i] for price in PRICES.values()) for i in range(3))
 WEB_SEARCH_PRICE = 0.01  # per search
 # Models that accept server-side refusal fallbacks ("default" picks the substitute by refusal reason)
 FALLBACK_MODELS = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+
+
+def usage_cost(requested: str, usage: Any, served: Optional[str] = None) -> Tuple[float, int, int]:
+    """(estimated dollars, input tokens, output tokens) of one response, from its usage.
+
+    With a refusal fallback, ``usage.iterations`` lists every attempt (a request declined mid-answer is
+    billed too) while the top-level counts cover only the attempt that answered. So each attempt is priced
+    at the rates of the model that ran it: the entry's model, else the requested one. Without iterations
+    the top-level counts are priced at the model that served the answer.
+    """
+    iterations = list(getattr(usage, "iterations", None) or [])
+    parts = [(getattr(entry, "model", None) or requested, entry) for entry in iterations]
+    parts = parts or [(served or requested, usage)]
+    dollars, tokens_in, tokens_out = 0.0, 0, 0
+    for model, part in parts:
+        price_in, price_out, price_read = PRICES.get(str(model), UNKNOWN_PRICE)
+        fresh = getattr(part, "input_tokens", 0) or 0
+        written = getattr(part, "cache_creation_input_tokens", 0) or 0
+        read = getattr(part, "cache_read_input_tokens", 0) or 0
+        out = getattr(part, "output_tokens", 0) or 0
+        dollars += (fresh * price_in + written * price_in * 1.25 + read * price_read + out * price_out) / 1e6
+        tokens_in += fresh + written + read
+        tokens_out += out
+    return dollars, tokens_in, tokens_out
 
 
 class ClaudeAnalyst:
@@ -59,16 +88,12 @@ class ClaudeAnalyst:
         except anthropic.APIConnectionError:
             raise AnalystError("Couldn't reach Claude's API") from None
 
-    def _cost(self, usage: Any) -> Tuple[float, int, int]:
-        """(estimated dollars, input tokens, output tokens) of one response."""
-        price_in, price_out, price_read = PRICES.get(self.model, PRICES[DEFAULT_MODEL])
-        fresh = usage.input_tokens or 0
-        written = usage.cache_creation_input_tokens or 0
-        read = usage.cache_read_input_tokens or 0
-        searches = (usage.server_tool_use.web_search_requests or 0) if usage.server_tool_use else 0
-        dollars = (fresh * price_in + written * price_in * 1.25 + read * price_read
-                   + usage.output_tokens * price_out) / 1e6 + searches * WEB_SEARCH_PRICE
-        return dollars, fresh + written + read, usage.output_tokens
+    def _cost(self, usage: Any, served: Optional[str] = None) -> Tuple[float, int, int]:
+        """(estimated dollars, input tokens, output tokens) of one response, refusal fallbacks included."""
+        dollars, tokens_in, tokens_out = usage_cost(self.model, usage, served)
+        tool_use = getattr(usage, "server_tool_use", None)
+        searches = (getattr(tool_use, "web_search_requests", 0) or 0) if tool_use else 0
+        return dollars + searches * WEB_SEARCH_PRICE, tokens_in, tokens_out
 
     def check_news(self, request: str) -> Tuple[str, List[Dict[str, str]], float]:
         """Late injury and lineup news for one game: (plain-text note, sources, cost)."""
@@ -84,7 +109,7 @@ class ClaudeAnalyst:
                 tools=[tool],
                 output_config={"effort": "low"},
             )
-            cost += self._cost(response.usage)[0]
+            cost += self._cost(response.usage, getattr(response, "model", None))[0]
             if response.stop_reason != "pause_turn":
                 break
             # A long search turn pauses; sending it back lets the server carry on where it stopped
@@ -107,7 +132,7 @@ class ClaudeAnalyst:
             messages=[{"role": "user", "content": dossier}],
             output_config={"effort": self.effort, "format": {"type": "json_schema", "schema": FORECAST_SCHEMA}},
         )
-        cost, tokens_in, tokens_out = self._cost(response.usage)
+        cost, tokens_in, tokens_out = self._cost(response.usage, getattr(response, "model", None))
         if response.stop_reason == "refusal":
             raise AnalystError("Claude declined to forecast this game", cost)
         if response.stop_reason == "max_tokens":

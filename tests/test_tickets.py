@@ -371,6 +371,17 @@ def test_ai_far_from_the_market_is_flagged() -> None:
     assert view["chance_label"] == "favourite"
 
 
+def test_the_ai_and_the_market_are_compared_like_for_like_on_a_line_that_can_push() -> None:
+    # A 6% push: the AI's 0.5226 outright is 0.5226 / 0.94 = 0.556 given no push, 5.6 points above the
+    # market's 0.50 (which is given no push); 0.5226 - 0.50 would have read as 2 points
+    far = "The AI is far from the market on Team 0: check the injury news."
+    assert far in price_ticket([leg(0, "1.91", ai=0.5226, market=0.50, push=0.06)], "single", Decimal(10),
+                               now=NOW)["warnings"]
+    # With a 12% push, 0.44 outright is 0.50 given no push: the two agree, though the raw numbers are 6 apart
+    assert far not in price_ticket([leg(0, "1.91", ai=0.44, market=0.50, push=0.12)], "single", Decimal(10),
+                                   now=NOW)["warnings"]
+
+
 def test_push_aware_fair_odds() -> None:
     # 45% win, 10% push at 2.0: 0.45 * 2 + 0.10 = 1.0 back per unit, so the fair price is 0.9 / 0.45 = 2.0
     view = price_ticket([leg(0, "2.0", ai=0.45, push=0.10)], "single", Decimal(10), now=NOW)["legs"][0]

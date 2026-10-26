@@ -13,8 +13,7 @@
 // The words live in help/content.js. Numbers there are fixed teaching examples worked out by hand; the
 // only live number is the "Your slip" line, which is the server's pricing of the person's own slip.
 
-import { me, priced, setTitle } from "../app.js";
-import * as shell from "../app.js"; // for replaceAddress() once the shell exports it (see setAddress)
+import { me, priced, setTitle, replaceAddress } from "../app.js";
 import { esc, section, notice, emptyState } from "../ui.js";
 import { icon } from "../icons.js";
 import { ensureStyles } from "./help/styles.js";
@@ -25,13 +24,11 @@ import {
 const chevron = () => icon("chevron", { size: 18 });
 
 /**
- * Change the address without a new history entry. Through the shell's own replaceAddress() when app.js
- * exports it, so its in-app history (and the scroll position Back restores) follows the new address;
- * until then, directly.
+ * Change the address without a new history entry, through the shell, so its in-app history (and the
+ * scroll position Back restores) follows the new address.
  */
 function setAddress(hash) {
-  if (typeof shell.replaceAddress === "function") shell.replaceAddress(hash);
-  else if (location.hash !== hash) history.replaceState(history.state, "", hash);
+  if (location.hash !== hash) replaceAddress(hash);
 }
 
 // --- search -------------------------------------------------------------------------------------------
@@ -298,7 +295,7 @@ function rolloverHtml() {
       <div class="small" style="margin-top:6px"><span class="muted">At market odds (47% a day):</span> ${esc(s.market[0])} chance of a profit · typical end ${esc(s.market[1])} · ${esc(s.market[2])} end at half or less</div>
       <div class="small"><span class="muted">With a real edge (53%):</span> ${esc(s.edge[0])} · ${esc(s.edge[1])} · ${esc(s.edge[2])}</div>
     </div>`).join("")}</div>
-    <p class="note">30-day runs, one bet a day at 2.00, 200,000 simulated runs; the bankroll starts at 1, so “typical end 0.90” means 90% of the start. The pot-and-ladder never wipes the bankroll out, and flat stakes do the least damage of all.</p>`;
+    <p class="note">30-day runs, one bet a day at 2.00, worked out exactly with the rollover planner's own maths; the bankroll starts at 1, so “typical end 0.90” means 90% of the start. The pot-and-ladder never wipes the bankroll out, and flat stakes do the least damage of all.</p>`;
   return `<div class="page-head"><span class="eyebrow">Guide</span><h1>Rollover explained</h1>
       <p>Stake an amount, then re-stake everything it wins each day. One loss ends it.</p></div>
     <section class="card">

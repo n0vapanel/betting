@@ -24,6 +24,14 @@ across the Telegram Mini App, the bot and a browser ("tg:<id>" or "web:<id>"):
   no stake past what their weekly budget has left. A person's money-moving
   writes (saving a bet, starting a plan, playing or stopping a day) run one
   at a time, so a double tap can't pass a check twice.
+- The dashboard password is the owner's alone, and each browser on it makes up
+  its own X-Player id, so for the gates every password browser is one person:
+  a break, the 24-hour pause on picks after a warning sign, the weekly budget
+  (over everything they all staked) and the break after a failed plan live in
+  one shared row (Gates), and the plan rules (one at a time, a stopped plan's
+  day still in play, repeated failures) count every password browser's plans,
+  so a new X-Player id can't shed any of them. Age is confirmed in each
+  browser, and slips, plans, chats and calls stay each browser's own.
 
 Odds quota is precious (about 500 requests a month, 3 per league fetch), so
 only the leagues a person asks for are loaded, leagues out of season are
@@ -35,6 +43,7 @@ Money is Decimal in whole cents, rounded once; chances are floats.
 from __future__ import annotations
 
 import datetime
+import functools
 import logging
 import math
 import re
@@ -44,6 +53,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from zoneinfo import ZoneInfo, available_timezones
 
 from ..data.espn_client import ESPN_DAY_TZ, LEAGUES as ESPN_LEAGUES, normalize_team
 from ..data.espn_players import PlayerData, hit_rates
@@ -80,6 +90,15 @@ AGE_MESSAGE = "Confirm you're 18+ (21+ in the US) in Settings"
 NO_CHAT = "AI chat isn't set up: add ANTHROPIC_API_KEY on the server"
 NO_STORE = "This needs the server's state folder (STATE_DIRECTORY)."
 PAUSE_SETTING = "picks_paused_until"  # users.settings: picks stay off until then after a warning sign in the chat
+PLAN_FAILED_SETTING = "plan_failed_at"  # users.settings: when a plan's run last failed (the break before a new one)
+# Times in the settings of the row holding the gates (see gates_id): each only ever moves later
+GATE_SETTINGS = (PAUSE_SETTING, PLAN_FAILED_SETTING)
+TIMEZONE_SETTING = "timezone"  # users.settings: the person's IANA time zone, sent by the app (the late-night note)
+# The users row holding the break, picks pause, weekly budget and the break after a failed plan every password
+# browser shares (see gates_id)
+SHARED_WEB = "*web"
+WEB_PREFIX = "web:"
+GATE_FIELDS = ("cooloff_until", "weekly_budget_cents", "pending_budget_cents", "budget_raise_at")
 BREAK_SUGGESTION = (
     "Most rollover runs end early, and starting another straight away is how losses grow. Take a break: "
     f"new plans open again in {PLAN_RESTART_HOURS} hours, and Settings has longer breaks if you want one."
@@ -271,9 +290,107 @@ def _share(cents: int, share: float) -> int:
 def paused_until(user: Optional[Mapping[str, Any]], now: float) -> Optional[float]:
     """When picks come back on for a person after a strong warning sign (epoch seconds), or None if they're on.
 
-    The pause lives in the person's settings (``PAUSE_SETTING``), so the chat and the Lab both honour it."""
+    The pause lives in the settings of the row holding the person's gates (``PAUSE_SETTING``; see gates_id),
+    so the chat and the Lab both honour it."""
     until = ((user or {}).get("settings") or {}).get(PAUSE_SETTING)
     return float(until) if isinstance(until, (int, float)) and not isinstance(until, bool) and until > now else None
+
+
+def gates_id(uid: str) -> str:
+    """The users row holding a person's break, picks pause and weekly budget: their own, except that every
+    password browser ("web:<X-Player>") shares SHARED_WEB. The dashboard password is the owner's alone and
+    the X-Player id is whatever the browser makes up, so a new one mustn't shed a break, a pause or a limit.
+    Telegram users ("tg:<id>") keep their own."""
+    return SHARED_WEB if uid.startswith(WEB_PREFIX) else uid
+
+
+# An IANA zone's shape ("Europe/London", "America/Argentina/Buenos_Aires", "Etc/GMT+5", "UTC"): this leaves
+# out the files beside the zones on some systems ("localtime", "posixrules", "posix/...", "right/...")
+ZONE_NAME = re.compile(r"[A-Z][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+)*")
+
+
+@functools.lru_cache(maxsize=1)
+def _zone_names() -> frozenset:
+    return frozenset(available_timezones())
+
+
+def check_timezone(name: Any) -> Optional[str]:
+    """An IANA time zone name the app sent (Intl's resolvedOptions().timeZone), or None to clear it."""
+    if name is None:
+        return None
+    zones = _zone_names()
+    try:
+        ok = (isinstance(name, str) and len(name) <= 64 and ZONE_NAME.fullmatch(name) is not None
+              and bool(ZoneInfo(name)) and (not zones or name in zones))
+    except (ValueError, KeyError, OSError):  # unknown (ZoneInfoNotFoundError is a KeyError) or malformed
+        ok = False
+    if not ok:
+        raise CallRejected("Unknown time zone: send an IANA name such as Europe/London")
+    return name
+
+
+class Gates:
+    """Where the responsible-gambling gates' state is read and written: the one source of truth for the Lab,
+    the chat assistant and the bot. A break and the pause on picks can only be lengthened; the weekly budget
+    follows Store.set_weekly_budget (lowering at once, raising after 24 hours). Needs ``store`` and ``_now``.
+    """
+
+    store: Store
+    _now: Callable[[], float]
+
+    def gates(self, uid: str, now: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        """The row holding the person's gates, with any budget raise that has waited 24 hours applied: their
+        own account (None if unknown), or for a password browser the row all of them share (made on first
+        use from their own rows, so no limit set before is lost)."""
+        now = self._now() if now is None else now
+        key = gates_id(uid)
+        if key == uid:
+            return self.store.user(uid, now=now)
+        return self.store.shared_user(key, WEB_PREFIX, carry=GATE_SETTINGS, now=now)
+
+    def break_until(self, uid: str, now: Optional[float] = None) -> Optional[float]:
+        """When the person's break ends (epoch seconds), or None when they aren't on one."""
+        now = self._now() if now is None else now
+        until = (self.gates(uid, now) or {}).get("cooloff_until")
+        return float(until) if until is not None and until > now else None
+
+    def picks_paused_until(self, uid: str, now: Optional[float] = None) -> Optional[float]:
+        """When picks come back on after a warning sign (epoch seconds), or None if they're on."""
+        now = self._now() if now is None else now
+        return paused_until(self.gates(uid, now), now)
+
+    def pause_picks(self, uid: str, until: float) -> float:
+        """Switch picks off until ``until`` (epoch seconds) after a strong warning sign, for every password
+        browser at once when one said it; a pause already running longer is kept. The only place the pause
+        is written (the chat assistant and the bot come here). Returns when picks come back on."""
+        self.store.get_or_create_user(uid)
+        key = gates_id(uid)
+        if key != uid:
+            self.gates(uid)
+        stored = self.store.extend_setting(key, PAUSE_SETTING, until)
+        return float(until) if stored is None else stored
+
+    def with_gates(self, uid: str, user: Dict[str, Any]) -> Dict[str, Any]:
+        """The person's account with the gates' fields (break, budget, pause, when a plan last failed) from the
+        row holding them."""
+        if gates_id(uid) == uid:
+            return user
+        shared = self.gates(uid) or {}
+        settings = dict(user.get("settings") or {})
+        for key in GATE_SETTINGS:
+            settings.pop(key, None)
+            value = (shared.get("settings") or {}).get(key)
+            if value is not None:
+                settings[key] = value
+        return {**user, **{field: shared.get(field) for field in GATE_FIELDS}, "settings": settings}
+
+    def gate_plans(self, uid: str, status: Any = None, limit: Optional[int] = 50) -> List[Dict[str, Any]]:
+        """The plans the plan rules (one at a time, a stopped plan's day in play, repeated failures) look at:
+        the person's own, or for a password browser every password browser's, since they are one person (each
+        plan still belongs to, and is shown in, the browser that started it: see its "user")."""
+        if gates_id(uid) != uid:
+            return self.store.plans(status=status, limit=limit, members=WEB_PREFIX)
+        return self.store.plans(uid, status=status, limit=limit)
 
 
 def next_stake(plan: Mapping[str, Any], run: Run) -> int:
@@ -321,7 +438,11 @@ def play_day(plan: Mapping[str, Any], run: Run, stake: int, returns: int) -> Tup
             ended = "below_half"
     elif bankroll < _share(start, rollover.FLAT_SHARE):
         ended = "broke"  # flat: can't cover another stake
-    return Run(bankroll, run.banked + banked, rolled, pot_wins, run.days + 1, ended), banked, rolled
+    # Money banked earlier stays banked only while it isn't staked again: the ladder pays each fresh pot
+    # from all the plan's money, so a pot that can't come out of the rest comes out of the banked part,
+    # and banked never reads more than the money not riding on the day
+    kept = min(run.banked, max(0, run.bankroll - stake))
+    return Run(bankroll, kept + banked, rolled, pot_wins, run.days + 1, ended), banked, rolled
 
 
 def replay(plan: Mapping[str, Any]) -> Run:
@@ -339,7 +460,7 @@ def replay(plan: Mapping[str, Any]) -> Run:
 
 # --- the lab --------------------------------------------------------------------------------------
 
-class Lab:
+class Lab(Gates):
     """Per-person features on top of the games service (see the module docstring).
 
     ``assistant`` is the Claude assistant (ai/assistant.py) or None; it needs
@@ -384,9 +505,9 @@ class Lab:
         day has a result" or "the budget has room" before either saved. The dashboard is one process and
         the bot never saves bets or plans, so a lock here is enough. It is re-entrant (settling a plan's
         day takes it too, inside plan_day), and nothing holding it starts a grading run, which takes
-        other people's locks.
+        other people's locks. Password browsers share one budget, so they share one lock too.
         """
-        return self._write_locks[hash(uid) % len(self._write_locks)]
+        return self._write_locks[hash(gates_id(uid)) % len(self._write_locks)]
 
     def _when(self, ts: float) -> str:
         local = datetime.datetime.fromtimestamp(ts, self.service.tz)
@@ -395,9 +516,10 @@ class Lab:
     # --- people and the responsible-gambling gates -------------------------------------------------
 
     def user(self, uid: str) -> Dict[str, Any]:
-        """The person's account, made on first use."""
+        """The person's account, made on first use, with the gates (break, picks pause, weekly budget) read
+        from the row holding them: for a password browser, the one every password browser shares."""
         try:
-            return self.store.get_or_create_user(uid, now=self._now())
+            return self.with_gates(uid, self.store.get_or_create_user(uid, now=self._now()))
         except ValueError as exc:
             raise CallRejected(str(exc)) from None
 
@@ -429,11 +551,11 @@ class Lab:
         return monday.timestamp()
 
     def budget_used(self, uid: str, since: float) -> int:
-        """Cents staked on bets since a time. A paper plan's days are play money, so they don't count."""
-        store = self.store
-        paper = sum(row["stake_cents"] for row in store.slips(uid, status=("saved", "settled"), limit=500)
-                    if row["created_at"] >= since and ((row.get("payload") or {}).get("plan") or {}).get("mode") == "paper")
-        return max(0, store.staked_since(uid, since) - paper)
+        """Cents staked on bets since a time, by the person or, for a password browser, by every password
+        browser (they share one budget). A paper plan's days are play money, so they don't count."""
+        if gates_id(uid) != uid:
+            return self.store.budget_staked_since(since, members=WEB_PREFIX)
+        return self.store.budget_staked_since(since, user=uid)
 
     def budget(self, uid: str, user: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
         """{weekly, used, left, resets, pending} in money strings, or None without a budget."""
@@ -489,16 +611,22 @@ class Lab:
             "cooloff_until": _iso(until) if on_break else None,
             "on_break": on_break,
             "picks_paused_until": _iso(paused_until(user, self._now())),
+            # A break, the picks pause and the budget (staked by all of them) cover every password browser
+            "shared_limits": gates_id(uid) != uid,
+            "timezone": (user.get("settings") or {}).get(TIMEZONE_SETTING),
             "credits": self.credits(uid),
             "public_url": self.public_url,
             "ai_enabled": self.assistant is not None,
         }
 
     def update_me(self, uid: str, body: Mapping[str, Any]) -> Dict[str, Any]:
-        """Change settings. Only keys present in ``body`` change; a budget raise waits 24 hours."""
+        """Change settings. Only keys present in ``body`` change; a budget raise waits 24 hours. A password
+        browser's budget is the one all password browsers share; its age confirmation is its own."""
         self.user(uid)
         store = self.store
         changes: Dict[str, Any] = {}
+        if "timezone" in body:  # None clears it
+            changes["settings"] = {TIMEZONE_SETTING: check_timezone(body["timezone"])}
         for field in ("name", "risk_tier", "reality_check_minutes"):  # None clears these
             if field in body:
                 changes[field] = body[field]
@@ -513,8 +641,8 @@ class Lab:
             if changes:
                 store.update_user(uid, changes, now=self._now())
             if body.get("weekly_budget") is not None:
-                store.set_weekly_budget(uid, _cents(_amount(body["weekly_budget"], "weekly budget", MAX_BUDGET,
-                                                            least=Decimal(0))), now=self._now())
+                store.set_weekly_budget(gates_id(uid), _cents(_amount(body["weekly_budget"], "weekly budget",
+                                                                      MAX_BUDGET, least=Decimal(0))), now=self._now())
             if body.get("confirm_age"):
                 store.confirm_age(uid, now=self._now())
         except ValueError as exc:
@@ -522,11 +650,12 @@ class Lab:
         return self.me(uid)
 
     def cooloff(self, uid: str, hours: int) -> Dict[str, Any]:
-        """Start a break: picks, building and plans switch off until it ends (it can't be cut short)."""
+        """Start a break: picks, building and plans switch off until it ends (it can't be cut short). Taken in
+        one password browser, it covers them all."""
         if hours not in COOLOFF_CHOICES:
             raise CallRejected("A break lasts 24 hours, 3 days, a week, 30 days or 90 days")
         self.user(uid)
-        self.store.start_cooloff(uid, hours, now=self._now())
+        self.store.start_cooloff(gates_id(uid), hours, now=self._now())
         return self.me(uid)
 
     # --- the board: games and their prices ----------------------------------------------------------
@@ -822,12 +951,16 @@ class Lab:
             notes.append(f"{(leg.get('chance_label') or '').capitalize()}: wins about {_chance_words(chance)} "
                          f"by {whose} chance.")
         if p is not None and q is not None:
-            gap = p - q
+            # The AI's chance is outright and the market's is given no push: compare them like for like
+            push = leg.get("push_prob") or 0.0
+            ai = tickets.ai_given_no_push(p, push)
+            gap = ai - q
+            basis = " (both given no push)" if push > 0 else ""
             if abs(gap) > tickets.AI_GAP:
-                notes.append(f"The AI ({_pct(p)}) is {abs(gap) * 100:.0f} points {'above' if gap > 0 else 'below'} "
-                             f"the market ({_pct(q)}): check the injury news before trusting the gap.")
+                notes.append(f"The AI ({_pct(ai)}) is {abs(gap) * 100:.0f} points {'above' if gap > 0 else 'below'} "
+                             f"the market ({_pct(q)}){basis}: check the injury news before trusting the gap.")
             else:
-                notes.append(f"The AI ({_pct(p)}) and the market ({_pct(q)}) roughly agree.")
+                notes.append(f"The AI ({_pct(ai)}) and the market ({_pct(q)}) roughly agree{basis}.")
         elif q is not None:
             notes.append(f"No AI model for this pick: the market's {_pct(q)} is the only view.")
         odds = (leg.get("odds") or {}).get("decimal")
@@ -1018,7 +1151,8 @@ class Lab:
         self.user(uid)
         self._grade_now()
         try:
-            rows = self.store.slips(uid, status=status)
+            # Every one: the app's results (net, ROI) and Upcoming add up this list, so a cap would drop bets
+            rows = self.store.slips(uid, status=status, limit=None)
         except ValueError as exc:
             raise CallRejected(str(exc)) from None
         return [self._slip_view(row) for row in rows]
@@ -1168,16 +1302,20 @@ class Lab:
         mode = body.get("mode") or "paper"
         if strategy not in rollover.STRATEGIES:
             raise CallRejected(f"strategy is one of {', '.join(rollover.STRATEGIES)}")
-        if store.plans(uid, status="active", limit=1):
-            raise CallRejected("You already have a plan running: finish or stop it before starting another.")
-        for stopped in store.plans(uid, status="stopped", limit=10):
+        # One person's plans: for a password browser, every password browser's (see gate_plans)
+        running = self.gate_plans(uid, status="active", limit=1)
+        if running:
+            where = "" if running[0]["user"] == uid else " in another browser signed in with the password"
+            raise CallRejected(f"You already have a plan running{where}: finish or stop it before starting another.")
+        for stopped in self.gate_plans(uid, status="stopped", limit=10):
             # Stopping mid-day mustn't skip the break that day's loss would bring
-            days = self._synced(uid, stopped).get("days_played") or []
+            days = self._synced(stopped["user"], stopped).get("days_played") or []
             if days and days[-1].get("result") is None:
-                raise CallRejected(f"Day {days[-1]['day']} of the plan you stopped is still in play: a new plan can "
-                                   "start once its result is in.")
+                where = "" if stopped["user"] == uid else " in another browser signed in with the password"
+                raise CallRejected(f"Day {days[-1]['day']} of the plan you stopped{where} is still in play: a new "
+                                   "plan can start once its result is in.")
         user = self.user(uid)  # again: settling that day may have just ended a run
-        failed_at = (user.get("settings") or {}).get("plan_failed_at")
+        failed_at = (user.get("settings") or {}).get(PLAN_FAILED_SETTING)
         if failed_at and self._now() - failed_at < PLAN_RESTART_HOURS * 3600:
             raise CallRejected(f"Your last plan's run ended recently, so take a break: new plans open again "
                                f"{self._when(failed_at + PLAN_RESTART_HOURS * 3600)}.")
@@ -1210,7 +1348,11 @@ class Lab:
             if day.get("result") is None and day.get("slip_id"):
                 slip = self.store.slip(uid, day["slip_id"])
                 if slip and slip["status"] in ("settled", "void") and slip.get("result"):
-                    self._settle_plan_day(uid, plan["id"], day["day"], slip["result"])
+                    try:
+                        self._settle_plan_day(uid, plan["id"], day["day"], slip["result"])
+                    except Exception:  # the plan must stay viewable (and stoppable) whatever went wrong
+                        log.exception("Couldn't settle day %s of plan %s", day["day"], plan["id"])
+                        continue
                     changed = True
         return self.store.plan(uid, plan["id"]) if changed else plan
 
@@ -1218,7 +1360,7 @@ class Lab:
         self.user(uid)
         self._grade_now()
         try:
-            plans = self.store.plans(uid, status=status)
+            plans = self.store.plans(uid, status=status, limit=None)  # every one, as for list_slips
         except ValueError as exc:
             raise CallRejected(str(exc)) from None
         return [self._plan_view(uid, self._synced(uid, plan)) for plan in plans]
@@ -1259,9 +1401,17 @@ class Lab:
         priced, found = self._price_refs(refs, "single" if len(refs) == 1 else "multi", _dollars(stake))
         need = Decimal(plan["min_odds"])
         combined = math.prod((leg.price for _, leg, _ in found), start=Decimal(1))
-        if found and not priced["removed"] and combined < need:
-            raise CallRejected(f"Today's pick pays {combined.quantize(CENTS)}; this plan needs odds of {need} or more. "
+        # Checked at the odds the person is shown (2 decimals, half up, as the priced ticket says), so a
+        # multi at 1.995 shown as 2.00 meets a 2.00 plan rather than being refused at "2.00"
+        shown = combined.quantize(CENTS, rounding=ROUND_HALF_UP)
+        if found and not priced["removed"] and shown < need:
+            raise CallRejected(f"Today's pick pays {shown}; this plan needs odds of {need} or more. "
                                f"Choose a pick at {need} or above.")
+        # The plan's money after a win must stay within what the app can record
+        if found and run.bankroll - stake + _cents(_dollars(stake) * combined) > MAX_CENTS:
+            raise CallRejected(f"A win at these odds would take this plan past {_say(MAX_CENTS)}, more than the app "
+                               f"can record. Choose shorter odds (still {need} or more), or stop the plan: stopping "
+                               "keeps the result.")
         day = plan["day"] + 1
         slip = self._save(uid, user, priced, found,
                           plan={"id": plan["id"], "day": day, "mode": plan["mode"], "strategy": plan["strategy"]})
@@ -1295,22 +1445,29 @@ class Lab:
             run, banked, rolled = play_day(plan, before, day["stake_cents"], _cents(grade["returns"]))
             result = {"status": grade.get("status"), "returns": grade.get("returns"), "profit": grade.get("profit"),
                       "slip_id": day.get("slip_id")}
-            store.settle_plan_day(uid, plan_id, day_no, result, bankroll_cents=run.bankroll, banked_cents=banked,
-                                  rolled_cents=rolled)
+            # Past what the store can hold ($1bn; playing a day refuses a win that would get there): the
+            # result is still recorded, the money columns stop at the cap and the plan stops there
+            capped = max(run.bankroll, banked, rolled) > MAX_CENTS
+            store.settle_plan_day(uid, plan_id, day_no, result, bankroll_cents=min(run.bankroll, MAX_CENTS),
+                                  banked_cents=min(banked, MAX_CENTS), rolled_cents=min(rolled, MAX_CENTS))
             if run.ended and plan["status"] in ("active", "stopped"):
                 self._fail_plan(uid, plan)
             elif plan["status"] == "active" and run.days >= plan["days"]:
                 store.finish_plan(uid, plan_id, "done")
+            elif plan["status"] == "active" and capped:
+                store.finish_plan(uid, plan_id, "stopped")
 
     def _fail_plan(self, uid: str, plan: Mapping[str, Any]) -> None:
         """End a run that failed: no automatic restart, a break before the next plan, and repeated
-        failures logged as a warning sign for the owner. A stopped plan keeps its status."""
+        failures logged as a warning sign for the owner. A stopped plan keeps its status. The break and the
+        count cover every password browser at once (see gate_plans); the warning is logged as the browser's."""
         store = self.store
         if plan["status"] == "active":
             store.finish_plan(uid, plan["id"], "failed")
         now = self._now()
-        store.update_user(uid, {"settings": {"plan_failed_at": now}}, now=now)
-        recent = [p for p in store.plans(uid, status=("failed", "stopped"), limit=20)
+        self.gates(uid, now)  # a password browser's shared row exists before it is written
+        store.extend_setting(gates_id(uid), PLAN_FAILED_SETTING, now)
+        recent = [p for p in self.gate_plans(uid, status=("failed", "stopped"), limit=20)
                   if p["created_at"] >= now - WEEK and (p["status"] == "failed" or replay(p).ended)]
         if len(recent) >= REPEATED_FAILURES:
             store.add_rg_event(uid, "failed_rollovers", {"plans": len(recent), "plan_id": plan["id"]},

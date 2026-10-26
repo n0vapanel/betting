@@ -16,6 +16,9 @@ The search then works only with numbers the brain already has:
   and models are least reliable);
 - the 40 best of them by cautious expected return, where the cautious chance
   is the AI's pulled halfway back to the market's: p_c = market + 0.5 * (ai - market).
+  Both are chances of a win outright: on a line that can push, the market's
+  margin-free chance is a chance given no push (see tickets.py), so it is
+  scaled by (1 - push) first, and the push itself counts once, as stake back.
   Each game gives at most its three best legs (as engine/bets.py does), so a
   game with dozens of player props can't crowd every other game out of a
   search that may only use one leg from it anyway;
@@ -87,22 +90,30 @@ def no_edge_chance(multiple: float, legs: int = 1, cut: float = CUT) -> float:
 
 
 def _market(leg: TicketLeg) -> float:
-    """The market's margin-free chance, or, when it is missing, the price less a typical cut."""
+    """The market's margin-free chance given no push, or, when it is missing, the price less a typical cut.
+
+    This is the chance the 25-90% filter reads; the search itself uses _market_outright."""
     if leg.market_prob is not None:
         return leg.market_prob
     return (1.0 - CUT) / float(leg.price)
 
 
-def cautious_probability(leg: TicketLeg) -> Optional[float]:
-    """The leg's cautious chance: the AI's pulled halfway back to the market's.
+def _market_outright(leg: TicketLeg) -> float:
+    """The market's chance of a win outright, the AI's footing: a push takes its share of the no-push chance."""
+    return _market(leg) * (1.0 - leg.push_prob)
 
-    p_c = market + 0.5 * (ai - market). Without an AI chance it is the market's;
-    without a market chance the price less a typical cut stands in for it. None
-    when the leg has neither chance.
+
+def cautious_probability(leg: TicketLeg) -> Optional[float]:
+    """The leg's cautious chance of a win outright: the AI's pulled halfway back to the market's.
+
+    p_c = market + 0.5 * (ai - market), with the market's chance made outright first
+    (q * (1 - push)) so a push is never counted in it and again as stake back.
+    Without an AI chance it is the market's; without a market chance the price
+    less a typical cut stands in for it. None when the leg has neither chance.
     """
     if leg.ai_prob is None and leg.market_prob is None:
         return None
-    market = _market(leg)
+    market = _market_outright(leg)
     if leg.ai_prob is None:
         return market
     return market + PULL * (leg.ai_prob - market)
@@ -198,8 +209,8 @@ class _Option:
     leg: TicketLeg
     price: float
     cautious: float  # p_c
-    brain: float  # the AI's chance, else the market's: what sets the ticket's tier
-    market: float  # the market's chance, or the price less a typical cut
+    brain: float  # the AI's chance, else the market's (outright): what sets the ticket's tier
+    market: float  # the market's chance of a win outright, or the price less a typical cut
     push: float  # capped so win + push never passes 1
 
     @property
@@ -215,7 +226,7 @@ class _Option:
 
 def _option(leg: TicketLeg) -> _Option:
     cautious = cautious_probability(leg)
-    market = _market(leg)
+    market = _market_outright(leg)
     brain = leg.ai_prob if leg.ai_prob is not None else market
     return _Option(leg, float(leg.price), cautious, brain, market, min(leg.push_prob, 1.0 - cautious))
 

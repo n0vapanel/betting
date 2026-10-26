@@ -7,16 +7,11 @@
 // chip tap's answer is drawn: a slow "All" can't land on top of the single sport tapped after it.
 
 import { api, prefs, isQuiet, qs } from "../api.js";
-import { me, loadSports, leagueTitle, sportEmoji, openOnboarding, openSportsSheet, setQuota, rerender } from "../app.js";
+import { me, favouriteSports, loadSports, leagueTitle, sportEmoji, openOnboarding, openSportsSheet, setQuota, rerender } from "../app.js";
 import { esc, chip, gameCard, dayHeading, emptyState, errorState, skeleton, notice, explain, sheet } from "../ui.js";
 import { icon } from "../icons.js";
 
-const DEFAULT_SPORTS = ["basketball_nba"];
-
-function favourites() {
-  const list = me().favourite_sports || [];
-  return list.length ? list : DEFAULT_SPORTS;
-}
+const favourites = () => favouriteSports();
 
 function selected(favs) {
   const saved = prefs.get("todaySport", "all");

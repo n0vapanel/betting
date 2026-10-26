@@ -10,7 +10,10 @@ scored after the game next to the AI's score; /start also leads to the
 AI's Safe/Risky/Crazy bets, your calls and the leaderboard, and (when
 PUBLIC_URL is set) to the web app opened as a Telegram Mini App. Each
 screen edits the same message. Plain text messages go to the AI chat
-(bot/chat.py), which is private to the owner's friends.
+(bot/chat.py), which is private to the owner's friends. The AI's bets
+follow the same gates as the chat and the app, read from the person's
+account: confirmed age, no break, no pause on picks after a warning sign;
+a break also switches payouts and the slip off. Browsing games stays open.
 
 Buttons carry what they need (league, game id prefix, pick), so menus
 keep working after a restart, and prices are always re-read from the
@@ -22,8 +25,10 @@ a worker thread so a slow load doesn't stall other chats.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import html
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from telegram import (
@@ -43,11 +48,13 @@ from telegram.ext import (
     filters,
 )
 
+from ..ai.assistant import HELPLINE
 from ..config import Config
+from ..dashboard.lab import paused_until
 from ..data.leagues import SPORTS, pick_leagues
 from ..engine import calls
 from ..services import build_service
-from .chat import setup_chat
+from .chat import AGE_BUTTON, setup_chat
 
 MAX_GAMES = 10
 STAKES = (5, 10, 25, 50)
@@ -281,6 +288,63 @@ def _app_rows(update: Update, context: ContextTypes.DEFAULT_TYPE) -> List[List[I
     return [[InlineKeyboardButton("📱 Open app", web_app=WebAppInfo(url))]]
 
 
+# --- the responsible-gambling gates, from the person's account (the same "tg:<id>" as the chat and the app) ---
+
+Refusal = Tuple[str, List[List[InlineKeyboardButton]]]
+
+
+def _when(ts: float, tz: Any) -> str:
+    local = datetime.datetime.fromtimestamp(ts, tz)
+    return f"{local:%a %b} {local.day}, {local:%-I:%M %p %Z}"
+
+
+async def _account(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """(the person's account or None, whether accounts are kept at all)."""
+    store = getattr(context.application.bot_data.get("service"), "store", None)
+    user = getattr(update, "effective_user", None)
+    if store is None or user is None:
+        return None, False
+    return await asyncio.to_thread(store.user, f"tg:{user.id}"), True
+
+
+def _on_break(account: Optional[Dict[str, Any]], context: ContextTypes.DEFAULT_TYPE, what: str) -> Optional[Refusal]:
+    """A break the person chose (a cool-off) switches betting screens off until it ends."""
+    until = (account or {}).get("cooloff_until")
+    if until is None or until <= time.time():
+        return None
+    tz = context.application.bot_data.get("timezone") or ZoneInfo("America/New_York")
+    return (f"⏸ You're on a break until {html.escape(_when(until, tz))}, so {what} until then.\n\n"
+            f"{html.escape(HELPLINE)}", [[InlineKeyboardButton("« Home", callback_data="home")]])
+
+
+async def _ai_bets_refusal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Optional[Refusal]:
+    """Why the AI's bets can't be shown to this person now, or None. The same gates as the chat and the app:
+    a break they chose, the 24-hour pause on picks after a warning sign in the chat, and the age check.
+    Browsing games stays open to anyone."""
+    account, kept = await _account(update, context)
+    if not kept:
+        return None
+    home = [[InlineKeyboardButton("« Home", callback_data="home")]]
+    on_break = _on_break(account, context, "the AI's bets are off")
+    if on_break:
+        return on_break
+    paused = paused_until(account, time.time())
+    if paused:
+        tz = context.application.bot_data.get("timezone") or ZoneInfo("America/New_York")
+        return (f"⏸ Picks are paused until {html.escape(_when(paused, tz))} after an earlier message about losses "
+                "or money worries, so the AI won't suggest bets until then. Browsing games stays open.\n\n"
+                f"{html.escape(HELPLINE)}", home)
+    if not (account or {}).get("age_confirmed_at"):
+        return ("🔞 The AI's bets are for adults: confirm you're 18 or older (21+ in the US) to see them.",
+                [[InlineKeyboardButton(AGE_BUTTON, callback_data="age:bets")]] + home)
+    return None
+
+
+async def _break_refusal(update: Update, context: ContextTypes.DEFAULT_TYPE, what: str) -> Optional[Refusal]:
+    account, kept = await _account(update, context)
+    return _on_break(account, context, what) if kept else None
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """The home screen: browse games (Single or Multi), AI bets, your calls and the leaderboard."""
     rows = _app_rows(update, context)
@@ -447,6 +511,11 @@ async def pick_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if pick is None:
         await query.answer("This menu has expired. Send /start to begin again.", show_alert=True)
         return
+    refusal = await _break_refusal(update, context, "picks and the slip are off")
+    if refusal:
+        await query.answer()
+        await _show(update, *refusal)
+        return
     if _mode(context) == "multi":
         picks = _picks(context)
         existing = next((c for c in picks if same_pick(pick, c)), None)
@@ -482,6 +551,10 @@ async def show_single(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if service is None or not pick:
         await start(update, context)
         return
+    refusal = await _break_refusal(update, context, "picks and the slip are off")
+    if refusal:
+        await _show(update, *refusal)
+        return
     context.user_data["view"] = "single"
     back = [InlineKeyboardButton("« Game", callback_data=f"g:{pick['league']}:{pick['id'][:GAME_ID_CHARS]}"),
             InlineKeyboardButton("« Games", callback_data=f"league:{pick['league']}")]
@@ -504,6 +577,10 @@ async def show_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     service = context.application.bot_data.get("service")
     if service is None:
         await _no_service(update)
+        return
+    refusal = await _break_refusal(update, context, "picks and the slip are off")
+    if refusal:
+        await _show(update, *refusal)
         return
     context.user_data["view"] = "slip"
     league = context.user_data.get("league")
@@ -737,10 +814,14 @@ def bets_text(data: Dict[str, Any], tier: Optional[str], league_title: str) -> s
 async def show_bets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    tier = query.data.split(":", 1)[1] if ":" in query.data else None
+    tier = query.data.split(":", 1)[1] if query.data.startswith("bets:") else None
     service = context.application.bot_data.get("service")
     if service is None:
         await _no_service(update)
+        return
+    refusal = await _ai_bets_refusal(update, context)
+    if refusal:
+        await _show(update, *refusal)
         return
     league = context.user_data.get("league") or "basketball_nba"
     try:
@@ -754,6 +835,18 @@ async def show_bets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
              for key in ("safe", "risky", "crazy")],
             [InlineKeyboardButton("« Home", callback_data="home")]]
     await _show(update, bets_text(data, tier, title), rows)
+
+
+async def confirm_age_for_bets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The AI bets' age button: the person confirms they're an adult, then sees the bets (anyone may: no AI
+    is called, so it isn't limited to the chat's allowlist)."""
+    store = getattr(context.application.bot_data.get("service"), "store", None)
+    user = update.effective_user
+    if store is not None and user is not None:
+        uid, name = _player(update)
+        await asyncio.to_thread(store.get_or_create_user, uid, name)
+        await asyncio.to_thread(store.confirm_age, uid)
+    await show_bets(update, context)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -814,6 +907,7 @@ def setup_handlers(application: Application, config: Config) -> None:
     application.add_handler(CallbackQueryHandler(my_calls, pattern=r"^mycalls$"))
     application.add_handler(CallbackQueryHandler(leaderboard, pattern=r"^board$"))
     application.add_handler(CallbackQueryHandler(show_bets, pattern=r"^bets(:(safe|risky|crazy))?$"))
+    application.add_handler(CallbackQueryHandler(confirm_age_for_bets, pattern=r"^age:bets$"))
     # The AI chat: plain messages, its buttons and the Ask AI button (before the catch-all below)
     setup_chat(application, config)
     # Any other button comes from an older version of the menu

@@ -18,10 +18,18 @@ from telegram import CallbackQuery, Chat, InlineKeyboardMarkup, Message, Update,
 from telegram.error import BadRequest
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler
 
-from telegram_betting_bot_simple.ai.assistant import DISCLOSURE, Assistant
+from telegram_betting_bot_simple.ai.assistant import (
+    DISCLOSURE,
+    DISTRESS_EXTRA,
+    HELPLINE,
+    SUPPORT_MESSAGE,
+    Assistant,
+    note_warning_sign,
+)
 from telegram_betting_bot_simple.bot import chat, handlers
 from telegram_betting_bot_simple.bot.chat import AGE_BUTTON, NO_AI_MESSAGE, PRIVATE_MESSAGE, THINKING
 from telegram_betting_bot_simple.config import Config
+from telegram_betting_bot_simple.dashboard.lab import paused_until
 from telegram_betting_bot_simple.data.store import Store
 
 from test_assistant import NOW, NY, FakeClaude, FakeLab, message, route, text, tool_use
@@ -97,7 +105,7 @@ def build_turn():
 def setup(store, service, claude, bot=None, lab_class=FakeLab):
     application = Application.builder().token(CONFIG.telegram_token).build()
     handlers.setup_handlers(application, CONFIG)  # no odds key here: no games service, no assistant
-    application.bot_data["assistant"] = Assistant(claude, lab_class(service), store, tz=NY, clock=lambda: NOW)
+    application.bot_data["assistant"] = Assistant(claude, lab_class(service, store), store, tz=NY, clock=lambda: NOW)
     return application, SimpleNamespace(application=application, user_data={}, bot=bot or FakeBot())
 
 
@@ -148,6 +156,30 @@ def test_without_an_api_key_the_chat_says_so(service, store) -> None:
     assert sent.replies == [NO_AI_MESSAGE]
 
 
+def test_a_warning_sign_gets_the_support_message_from_anyone_ai_or_not(service, store) -> None:
+    claude = FakeClaude()
+    _, context = setup(store, service, claude)
+    # Someone off the allowlist: no AI, but code's rules see the warning sign and answer it, with no pointer to games
+    update, sent = typed("I lost my rent money on parlays and I want to kill myself", user_id=777)
+    asyncio.run(chat.chat_message(update, context))
+    [reply] = sent.replies
+    assert reply == SUPPORT_MESSAGE + "\n\n" + DISTRESS_EXTRA and "/start" not in reply
+    assert not claude.requests
+    event = store.rg_events("tg:777")[0]
+    assert event["action"] == "support_message,picks_off_24h" and event["detail"]["source"].startswith("rules")
+    assert paused_until(store.user("tg:777"), time.time())  # the bot's AI bets honour it too
+    # Without an API key, the same for the owner's friends
+    context.application.bot_data["assistant"] = None
+    update, sent = typed("I'm in debt and need to win my money back tonight")
+    asyncio.run(chat.chat_message(update, context))
+    assert sent.replies == [SUPPORT_MESSAGE] and "GAMBLER" in sent.replies[0]
+    # Ordinary messages still get the usual pointers
+    for user_id, expected in ((777, PRIVATE_MESSAGE), (42, NO_AI_MESSAGE)):
+        update, sent = typed("who wins tonight?", user_id=user_id)
+        asyncio.run(chat.chat_message(update, context))
+        assert sent.replies == [expected]
+
+
 # --- a turn ------------------------------------------------------------------------------------------------
 
 def test_a_message_shows_progress_then_the_answer_with_cards_chips_and_the_app(service, store, monkeypatch) -> None:
@@ -165,6 +197,7 @@ def test_a_message_shows_progress_then_the_answer_with_cards_chips_and_the_app(s
     assert "Two tickets fit your $10 to about $40 back." in answer.text
     assert "🧾 <b>Single</b>" in answer.text and "Chance it wins: AI 1 in" in answer.text
     assert "of today's AI credits left" in answer.text
+    assert f"<i>{html.escape(HELPLINE)}</i>" in answer.text  # under tickets, the helpline (as in the app)
     labels = buttons(answer.markup)
     thread = context.user_data["ai_thread"]
     # thread : this answer's place in the thread (message 1, after the question) : card or chip
@@ -368,3 +401,46 @@ def test_a_ticket_card_shows_the_code_s_numbers_and_never_a_negative_cut() -> No
     assert "Stake $10.00 → up to $13.80 (odds 1.38)" in text
     assert "Best prices beat the market's view by 5.0% · expected result -$0.20 (AI)" in text
     assert "keeps" not in text
+
+
+# --- the bot's AI bets and betting screens follow the same account gates ------------------------------------
+
+def test_the_bot_s_ai_bets_honour_the_pause_the_break_and_the_age_check(service, store) -> None:
+    service.store = store
+    application, context = setup(store, service, FakeClaude())
+    application.bot_data["service"] = service
+    shown = []
+
+    def tap(handler, data, user_id=42):
+        async def answer(*args, **kwargs):
+            pass
+
+        async def edit_message_text(text, reply_markup=None, **kwargs):
+            shown.append((text, buttons(reply_markup) if reply_markup else []))
+
+        query = SimpleNamespace(data=data, answer=answer, edit_message_text=edit_message_text)
+        update = SimpleNamespace(callback_query=query, message=None, effective_chat=SimpleNamespace(id=user_id, type="private"),
+                                 effective_user=SimpleNamespace(id=user_id, first_name="Sam", username=None))
+        asyncio.run(handler(update, context))
+        return shown[-1]
+
+    # tg:42 has confirmed their age and has no pause or break: the AI's bets show
+    assert "🛡 <b>Safe</b>" in tap(handlers.show_bets, "bets")[0]
+    # After a warning sign in the chat, picks are paused: no bets, the helpline instead (browsing stays open)
+    note_warning_sign(application.bot_data["assistant"].lab, "tg:42", ["chasing"], "rules", "I need to win my money back")
+    text, labels = tap(handlers.show_bets, "bets:safe")
+    assert text.startswith("⏸ Picks are paused until") and "GAMBLER" in text and "Safe" not in text
+    assert "Clippers @ Thunder" in tap(handlers.league_selected, "league:basketball_nba")[0]
+    # A break the person chose: no AI bets, no payouts, no slip
+    store.get_or_create_user("tg:43")
+    store.confirm_age("tg:43")
+    store.start_cooloff("tg:43", 72)
+    assert tap(handlers.show_bets, "bets", user_id=43)[0].startswith("⏸ You're on a break until")
+    pick = handlers.pick_data("basketball_nba", "g2", "h2h", "away")
+    assert tap(handlers.pick_selected, pick, user_id=43)[0].startswith("⏸ You're on a break until")
+    assert tap(handlers.show_slip, "slip", user_id=43)[0].startswith("⏸ You're on a break until")
+    # No age confirmed yet: the age button, and once confirmed the bets
+    text, labels = tap(handlers.show_bets, "bets", user_id=44)
+    assert "18 or older" in text and labels[0] == (AGE_BUTTON, "age:bets", None)
+    assert "🛡 <b>Safe</b>" in tap(handlers.confirm_age_for_bets, "age:bets", user_id=44)[0]
+    assert store.user("tg:44")["age_confirmed_at"] is not None

@@ -13,7 +13,7 @@
 import { api, isQuiet, prefs } from "../api.js";
 import {
   me, loadMe, updateMe, setMe, onMeChange, openSportsSheet, openOnboarding, signOut, leagueTitle, sportEmoji, loadSports,
-  inTelegram, applyTheme,
+  inTelegram, applyTheme, favouriteSports,
 } from "../app.js";
 import { esc, money, notice, segmented, toast, confirmSheet, explain, section } from "../ui.js";
 import { icon } from "../icons.js";
@@ -83,7 +83,7 @@ function displayHtml(p) {
 }
 
 function sportsHtml(p) {
-  const list = p.favourite_sports?.length ? p.favourite_sports : ["basketball_nba"];
+  const list = favouriteSports(p);
   return section("Your sports", `<p class="small muted">Shown first on Today. Only these are fetched, because each one uses some of the odds feed's monthly requests.</p>
     <div class="chip-row wrap" style="margin-top:10px">${list.map((key) => `<span class="chip">${esc(sportEmoji(key))} ${esc(leagueTitle(key))}</span>`).join("")}
       <button type="button" class="chip add" data-sports>${icon("edit", { size: 14 })}Change</button></div>`, { info: "quota" });

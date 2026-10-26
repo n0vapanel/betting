@@ -103,8 +103,9 @@ let secondaryHandler = null;
 
 /**
  * Show Telegram's main bottom button for a screen's main action, or hide it with null.
- *   setMainButton({ text: "Analyse with AI", onClick, disabled, progress })
- * Returns true when Telegram shows it (the page can then skip drawing its own button).
+ *   setMainButton({ text: "Analyse with AI", onClick, disabled, progress, analyse })
+ * Returns true when Telegram shows it (the page can then skip drawing its own button). ``analyse`` marks
+ * the slip's Analyse, which app.js uses to step the slip bar's own Analyse aside.
  */
 export function setMainButton(config) {
   if (!inTelegram) return false;
@@ -116,13 +117,14 @@ export function setMainButton(config) {
     return false;
   }
   mainHandler = () => config.onClick?.();
-  safely(() => {
+  // True only once Telegram took it: an old client without the button leaves the page's own buttons in place
+  return Boolean(safely(() => {
     button.setParams({ text: config.text, is_active: !config.disabled, is_visible: true });
     button.onClick(mainHandler);
     if (config.progress) button.showProgress(false);
     else button.hideProgress();
-  });
-  return true;
+    return true;
+  }));
 }
 
 /** Telegram's second bottom button (Bot API 7.10+), e.g. "Clear"; null hides it. */

@@ -277,6 +277,9 @@ def test_earned_trust_moves_the_ai_and_the_dossier_keeps_the_ais_own_numbers(ser
 def test_the_ask_endpoint(service, store, desk) -> None:
     client = TestClient(create_app(service, "s3cret", login_delay=0))
     client.post("/api/login", json={"password": "s3cret"})
+    # Asking an analyst is behind the app's gates: one browser on the password, its age confirmed
+    client.headers.update({"X-Player": "browser-1234"})
+    assert client.put("/api/me", json={"confirm_age": True}).status_code == 200
     asked = client.post("/api/analysts/ask", json={"league": "basketball_nba", "id": "g2", "analyst": "deepseek"})
     assert asked.status_code == 200 and asked.json()["analysts"][1]["forecast"]["home_win_prob"] == 0.88
     again = client.post("/api/analysts/ask", json={"league": "basketball_nba", "id": "g2", "analyst": "deepseek"})

@@ -1,7 +1,8 @@
 """Tests for the stake-and-target builder: the honest ceiling, the search, the scoring and the verdict.
 
 Every candidate is synthetic, and every expected number is worked by hand in the comment next to it.
-The cautious chance is p_c = market + 0.5 * (ai - market); a leg's cautious return is p_c * odds + push.
+The cautious chance is p_c = market + 0.5 * (ai - market), both outright (the market's no-push chance times
+1 - push); a leg's cautious return is p_c * odds + push.
 """
 
 from __future__ import annotations
@@ -168,24 +169,44 @@ def test_no_edge_verdict_states_the_expected_cost() -> None:
 
 
 def test_a_push_counts_as_stake_back_in_the_cautious_return() -> None:
-    out = build([leg(1, 2.0, market=0.45, ai=0.45, push=0.05)], 10, 20)
+    # The market's 0.50 is given no push: with a 6% push it wins 0.50 x 0.94 = 0.47 outright, which is
+    # exactly the AI's chance, so p_c = 0.47 and the return is 0.47 x 1.95 + 0.06 (stake back) = 0.9765
+    out = build([leg(1, 1.95, market=0.50, ai=0.47, push=0.06)], 10, Decimal("19.50"))
     ticket = out["tickets"][0]
-    assert ticket["cautious"]["ev"] == -0.05  # 0.45 x 2.0 + 0.05 = 0.95
-    assert ticket["cautious"]["expected"] == "-0.50" and out["expected_cost"] == "0.50"
+    assert ticket["cautious"]["chance"] == 0.47 and ticket["cautious"]["ev"] == -0.0235
+    assert ticket["cautious"]["expected"] == "-0.24" and out["expected_cost"] == "0.24"
+
+
+def test_the_market_chance_on_a_line_that_can_push_counts_the_push_once() -> None:
+    # The AI and the market agree (0.47 outright is 0.47 / 0.94 = 0.50 given no push), so there is no edge,
+    # and the cost is what the ticket's own pricing says. Read as an outright chance, the market's 0.50 used
+    # to count the push twice: "Edge on paper: +$0.06"
+    out = build([leg(1, 1.95, market=0.50, ai=0.47, push=0.06)], 10, Decimal("19.50"))
+    ticket = out["tickets"][0]
+    assert out["edge"] is False and ticket["edge"] is False
+    assert out["verdict"] == "No edge found: entertainment with an expected cost of $0.24."
+    assert ticket["expected"]["ai"] == ticket["expected"]["market"] == "-0.24" == f"-{out['expected_cost']}"
+    # The Safe note's market loss chance counts the push once too: 1 - (0.55 x 0.94 + 0.06) = 42.3%, as the
+    # ticket's own pricing says (its market "any return" is 57.7%); read outright it was 1 - 0.55 - 0.06 = 39%
+    out = build([leg(1, 1.6, market=0.55, ai=0.62, push=0.06)], 10, 16, tier="safe")
+    assert out["notes"][-1] == ("Safe is a tier name, not a promise: by the AI's chance these tickets still lose "
+                                "up to 40% of the time; by the market's chance the Single loses about 42%.")
+    assert out["tickets"][0]["chance"]["any_return"]["market"] == pytest.approx(1 - 0.423, abs=1e-3)
 
 
 def test_a_push_is_stake_back_not_a_loss_in_the_loss_chances() -> None:
-    # p_c = 0.47 + 0.5 x (0.60 - 0.47) = 0.535; it pushes 8% of the time, so it loses 1 - 0.535 - 0.08 = 38.5%,
-    # not the 46.5% a push counted as a loss would give
-    out = build([leg(1, 2.0, market=0.47, ai=0.60, push=0.08)], 10, 20)
+    # The market's 0.50 given no push is 0.46 outright with an 8% push, so p_c = 0.46 + 0.5 x (0.60 - 0.46)
+    # = 0.53; it pushes 8% of the time, so it loses 1 - 0.53 - 0.08 = 39%, not the 47% a push counted as a
+    # loss would give
+    out = build([leg(1, 2.0, market=0.50, ai=0.60, push=0.08)], 10, 20)
     assert out["verdict"].endswith("the ticket still loses about 39% of the time.")
     # By the AI's chance it loses 1 - 0.60 - 0.08 = 32%, not 40%
     assert out["tickets"][0]["tier"] == {"key": "safe", "title": "Safe", "chance": 0.6, "loses": 0.32}
-    # A double loses only when some leg loses: 1 - (0.50 + 0.10) x 0.55 = 67% at the cautious chances,
-    # 1 - (0.50 + 0.10) x 0.60 = 64% at the AI's
+    # A double loses only when some leg loses. The pushy leg's p_c is 0.45 + 0.5 x (0.50 - 0.45) = 0.475, so
+    # 1 - (0.475 + 0.10) x 0.55 = 68% at the cautious chances; 1 - (0.50 + 0.10) x 0.60 = 64% at the AI's
     pushy, plain = leg(1, 1.9, market=0.50, ai=0.50, push=0.10), leg(2, 1.9, market=0.50, ai=0.60)
-    out = build([pushy, plain], 10, Decimal("36.10"))  # (0.95 + 0.10) x 1.045 = 1.097: an edge on paper
-    assert out["verdict"].endswith("the ticket still loses about 67% of the time.")
+    out = build([pushy, plain], 10, Decimal("36.10"))  # (0.9025 + 0.10) x 1.045 = 1.048: an edge on paper
+    assert out["verdict"].endswith("the ticket still loses about 68% of the time.")
     assert out["tickets"][0]["tier"]["loses"] == 0.64
 
 

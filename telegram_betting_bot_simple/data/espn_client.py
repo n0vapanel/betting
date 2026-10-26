@@ -204,7 +204,14 @@ class EspnClient:
 
     def game_result(self, league: str, event_id: str) -> Dict[str, Any]:
         """How a game stands: {"state": "final", "home": pts, "away": pts}, {"state": "void"} if it
-        was postponed or cancelled, or {"state": "pending"} while it hasn't finished."""
+        was postponed or cancelled, or {"state": "pending"} while it hasn't finished.
+
+        Soccer bets (the three-way moneyline, spreads and totals) settle on 90 minutes plus stoppage
+        time, but ESPN's headline score after extra time or penalties includes the extra-time goals.
+        Then the score is the two halves' (the first two linescores), with the full one under
+        "after_extra_time"; if the halves can't be read the game stays pending, so it is voided in the
+        end rather than graded on the wrong score.
+        """
         competition = (self.summary(league, event_id).get("header", {}).get("competitions") or [{}])[0]
         status = (competition.get("status") or {}).get("type") or {}
         name = status.get("name", "")
@@ -214,9 +221,22 @@ class EspnClient:
             return {"state": "pending", "status": name}
         sides = {c.get("homeAway"): c for c in competition.get("competitors", [])}
         try:
-            return {"state": "final", "home": int(sides["home"]["score"]), "away": int(sides["away"]["score"])}
+            final = {"state": "final", "home": int(sides["home"]["score"]), "away": int(sides["away"]["score"])}
         except (KeyError, TypeError, ValueError):
             return {"state": "pending", "status": name}
+        extra_time = name in ("STATUS_FINAL_AET", "STATUS_FINAL_PEN") or any(
+            len(sides[side].get("linescores") or []) > 2 for side in ("home", "away"))
+        if LEAGUES.get(league, ("",))[0] == "soccer" and extra_time:
+            try:
+                halves = {side: sum(_goals(period) for period in (sides[side].get("linescores") or [])[:2])
+                          for side in ("home", "away")}
+                if any(len(sides[side].get("linescores") or []) < 2 for side in ("home", "away")):
+                    raise ValueError("no score for each half")
+            except (TypeError, ValueError):
+                return {"state": "pending", "status": name}
+            return {**final, **halves, "after_extra_time": {"home": final["home"], "away": final["away"]},
+                    "status": name}
+        return final
 
     def box_score(self, league: str, event_id: str) -> Dict[str, Dict[str, Any]]:
         """Each player's stat line in a basketball game, keyed by ESPN athlete id."""
@@ -256,6 +276,15 @@ class EspnClient:
             for event in events
             for competitor in event.get("competitions", [{}])[0].get("competitors", [])
         }
+
+
+def _goals(period: Any) -> int:
+    """Goals in one linescore entry ({"displayValue": "1"} or {"value": 1.0}); ValueError if unreadable."""
+    value = period.get("value", period.get("displayValue")) if isinstance(period, dict) else None
+    number = float(value)  # TypeError/ValueError for None or text
+    if not number.is_integer() or number < 0:
+        raise ValueError(f"not a goal count: {value!r}")
+    return int(number)
 
 
 def _number(text: Any) -> float:

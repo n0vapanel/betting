@@ -7,9 +7,13 @@ and the Lab is a small fake over the shared fake games board that prices with th
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import json
+import sqlite3
+import threading
 import time
+from contextlib import closing
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -37,10 +41,11 @@ from telegram_betting_bot_simple.ai.explain import (
     template_explanation,
     ClaudeCaller,
 )
-from telegram_betting_bot_simple.ai.tools import PICK_TOOLS, TOOLS, Toolbox, bet_count
+from telegram_betting_bot_simple.ai.tools import PICK_TOOLS, TOOLS, Toolbox, bet_count, ticket_facts
 from telegram_betting_bot_simple.config import Config
+from telegram_betting_bot_simple.dashboard import lab as lab_module
 from telegram_betting_bot_simple.dashboard.service import CallRejected, NotFound
-from telegram_betting_bot_simple.data.store import Store
+from telegram_betting_bot_simple.data.store import AI_HOLD_SECONDS, Store
 from telegram_betting_bot_simple.engine import rollover, target, tickets
 from telegram_betting_bot_simple.engine.tickets import TicketLeg
 
@@ -52,11 +57,14 @@ NY = __import__("zoneinfo").ZoneInfo("America/New_York")
 
 # --- fakes ---------------------------------------------------------------------------------------
 
-class FakeLab:
-    """The Lab's methods the tools call, over the shared fake board, priced by the real engine."""
+class FakeLab(lab_module.Gates):
+    """The Lab's methods the tools call, over the shared fake board, priced by the real engine. The gates (a
+    break, the pause on picks) are the real Lab's (lab.Gates), over the test's store."""
 
-    def __init__(self, service):
+    def __init__(self, service, store=None):
         self.service = service
+        self.store = store
+        self._now = lambda: NOW
         self.calls = []
 
     def today(self, uid, leagues, day=None):
@@ -177,8 +185,8 @@ def store(tmp_path):
 
 
 @pytest.fixture()
-def lab(service):
-    return FakeLab(service)
+def lab(service, store):
+    return FakeLab(service, store)
 
 
 def make(store, lab, claude, clock=NOW, daily=100):
@@ -463,6 +471,33 @@ def test_a_cool_off_switches_the_chat_off(store, lab) -> None:
     assert out["reply"]["kind"] == "gate" and "on a break until" in out["reply"]["text"]
 
 
+def test_password_browsers_share_the_pause_and_the_break_in_the_chat(store, lab) -> None:
+    # Every "web:<X-Player>" is the owner on the shared password: what one browser said or chose covers all
+    for uid in ("web:browser-a1", "web:browser-b2"):
+        store.get_or_create_user(uid, now=NOW)
+        store.confirm_age(uid, now=NOW)
+    claude = FakeClaude(router=[build_route()])
+    assistant = make(store, lab, claude)
+    said = assistant.reply("web:browser-a1", message="I need to win my money back tonight")
+    assert said["reply"]["kind"] == "support"
+    assert assistant.picks_paused_until("web:browser-b2") == pytest.approx(NOW + 24 * 3600)
+    assert store.user("web:browser-b2")["settings"] == {}  # kept in the one shared row, not per browser
+    other = assistant.reply("web:browser-b2", message="ok just build me $10 to $40 NBA")
+    assert other["reply"]["kind"] == "paused" and not claude.chat_requests()
+    with pytest.raises(CallRejected, match="Picks are paused until"):
+        assistant.explain("web:browser-b2", _fact_sheet(lab))
+    assert assistant.picks_paused_until(UID) is None  # a Telegram user isn't one of them
+    # The warning sign said in one browser puts the helpline, not the odds, on another's gate too
+    store.add_ai_usage("web:browser-b2", 100, now=NOW)
+    gated = assistant.reply("web:browser-b2", message="who wins tonight?")["reply"]
+    assert gated["kind"] == "gate" and HELPLINE in gated["text"] and "odds" not in gated["text"]
+    assert assistant._flagged_recently("web:browser-b2") and not assistant._flagged_recently(UID)
+    # A break taken in one browser switches the chat off in the others
+    store.start_cooloff(lab_module.SHARED_WEB, 72, now=NOW)
+    out = assistant.reply("web:browser-a1", message="hi")
+    assert out["reply"]["kind"] == "gate" and "on a break until" in out["reply"]["text"]
+
+
 def test_when_the_credits_are_used_up_no_model_is_called(store, lab) -> None:
     store.add_ai_usage(UID, 100, now=NOW)
     claude = FakeClaude()
@@ -477,6 +512,257 @@ def test_when_the_credits_are_used_up_no_model_is_called(store, lab) -> None:
     assert not claude.requests
 
 
+class HeldClaude(FakeClaude):
+    """Opus calls wait until released, so a second call can arrive while the first is still running."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.started, self.release = threading.Event(), threading.Event()
+
+    def _create(self, **request):
+        if request["model"] != "claude-haiku-5-5":
+            self.started.set()
+            assert self.release.wait(5)
+        return super()._create(**request)
+
+
+def test_one_ai_call_at_a_time_per_person(store, lab) -> None:
+    claude = HeldClaude(router=[route("chat"), route("chat")],
+                        chat=[message([text("Hi.")]), message([text("Odds show what a bet pays.")])])
+    assistant = make(store, lab, claude)
+    done = {}
+    first = threading.Thread(target=lambda: done.update(out=assistant.reply(UID, message="hello")))
+    first.start()
+    assert claude.started.wait(5)
+    # Sent while the first is running: refused before any model call, so two can't share what's left today
+    with pytest.raises(CallRejected, match="still working on your last message"):
+        assistant.reply(UID, message="what do odds mean?")
+    with pytest.raises(CallRejected, match="still working on your last request"):
+        assistant.explain(UID, _fact_sheet(lab))
+    # A warning sign is answered all the same: code's rules, no AI
+    assert assistant.reply(UID, message="I need to win my money back")["reply"]["kind"] == "support"
+    claude.release.set()
+    first.join(5)
+    assert done["out"]["reply"]["kind"] == "answer"
+    assert len(claude.chat_requests()) == 1
+    assert assistant.reply(UID, message="what do odds mean?")["reply"]["kind"] == "answer"  # one at a time, not one
+
+
+class GreedyClaude(FakeClaude):
+    """Every Opus answer uses every output token it may ask for, on a prompt of a token per 4 characters."""
+
+    def _create(self, **request):
+        reply = super()._create(**request)
+        if request["model"] != "claude-haiku-5-5":
+            prompt = len(json.dumps(request, default=str)) // 4
+            reply = SimpleNamespace(**{**reply.__dict__, "usage": SimpleNamespace(
+                input_tokens=prompt, output_tokens=request["max_tokens"], cache_creation_input_tokens=0,
+                cache_read_input_tokens=0)})
+        return reply
+
+
+def test_a_turn_never_spends_past_what_is_left_today(store, lab) -> None:
+    store.add_ai_usage(UID, 90, now=NOW)  # 10 cents left today
+    events = {"leagues": ["basketball_nba"], "query": "", "when": "today"}
+    claude = GreedyClaude(router=[route("lookup", leagues=["basketball_nba"])],
+                    chat=[message([tool_use("sports_find_events", events, f"t{i}")], stop="tool_use") for i in range(5)]
+                    + [message([text("The Thunder play the Clippers tonight.")])])
+    out = make(store, lab, claude).reply(UID, message="who plays tonight?")
+    requests = claude.chat_requests()
+    assert requests[0]["max_tokens"] < 16000  # asked for no more than what's left can pay for
+    assert len(requests) < 6  # and stopped when not even a short answer fit
+    assert out["credits"]["used_cents"] <= 100 and out["reply"]["kind"] in ("template", "gate")
+    # Under MIN_TURN_CENTS left: the gate answers and no model is called
+    store.add_ai_usage(UID, 100 - out["credits"]["used_cents"] - 1, now=NOW)
+    before = len(claude.requests)
+    gated = make(store, lab, claude).reply(UID, message="and tomorrow?")
+    assert gated["reply"]["kind"] == "gate" and len(claude.requests) == before
+
+
+def test_a_ticket_explanation_never_spends_past_what_is_left_today(store, lab) -> None:
+    store.add_ai_usage(UID, 100 - assistant_module.MIN_TURN_CENTS, now=NOW)  # just enough for one short try
+    bad = {"verdict": "A lock at 1 in 2.", "per_leg": [], "case_against": "None."}
+    claude = GreedyClaude(chat=[message([text(json.dumps(bad))]), message([text(json.dumps(bad))])])
+    out = make(store, lab, claude).explain(UID, _fact_sheet(lab))
+    assert out["source"] == "template" and claude.requests[0]["max_tokens"] < 8000
+    assert len(claude.requests) == 1  # the retry didn't fit in what was left
+    assert store.ai_used_today(UID, now=NOW) <= 100
+
+
+def test_password_users_share_one_allowance_and_the_app_has_a_daily_cap(store, lab) -> None:
+    claude = FakeClaude(router=[route("explain")] * 10, chat=[message([text("Odds show what a bet pays.")])] * 10)
+    assistant = Assistant(claude, lab, store, daily_cents=100, web_cents=10, total_cents=1000, tz=NY,
+                          clock=lambda: NOW)
+    # A new X-Player id is a new browser, not a fresh allowance: they all draw on the password's one
+    kinds = []
+    for i in range(8):
+        uid = f"web:rotate-{i:08d}"
+        store.get_or_create_user(uid, now=NOW)
+        store.confirm_age(uid, now=NOW)
+        kinds.append(assistant.reply(uid, message="what do odds mean?")["reply"]["kind"])
+    assert kinds.count("answer") < 8 and kinds[-1] == "gate"
+    shared = store.ai_used_today(assistant_module.WEB_POOL, now=NOW)
+    assert shared <= 10
+    last = assistant.reply("web:rotate-00000007", message="hello?")
+    assert "everyone signed in with the password" in last["reply"]["text"]
+    assert last["credits"]["left_cents"] == pytest.approx(10 - shared, abs=0.01)
+    assert store.ai_used_today(assistant_module.WEB_POOL, now=NOW) == shared  # a gated turn costs nothing
+    # Telegram users have their own allowances, within the whole app's cap
+    assert assistant.reply(UID, message="what do odds mean?")["reply"]["kind"] == "answer"
+    assert store.ai_used_today(assistant_module.ALL_POOL, now=NOW) == pytest.approx(
+        store.ai_used_today(assistant_module.WEB_POOL, now=NOW) + store.ai_used_today(UID, now=NOW))
+    store.add_ai_usage(assistant_module.ALL_POOL, 1000, now=NOW)
+    capped = assistant.reply(UID, message="and a parlay?")
+    assert capped["reply"]["kind"] == "gate" and "whole app" in capped["reply"]["text"]
+
+
+def test_a_running_turn_holds_its_share_of_the_password_allowance(store, lab) -> None:
+    claude = HeldClaude(router=[route("chat")] * 2, chat=[message([text("Hi.")])] * 2)
+    # 44 cents for every password user together: a running turn holds up to 40 of them
+    assistant = Assistant(claude, lab, store, daily_cents=100, web_cents=44, tz=NY, clock=lambda: NOW)
+    for uid in ("web:browser-a1", "web:browser-b2"):
+        store.get_or_create_user(uid, now=NOW)
+        store.confirm_age(uid, now=NOW)
+    first = threading.Thread(target=lambda: assistant.reply("web:browser-a1", message="hello"))
+    first.start()
+    assert claude.started.wait(5)
+    other = assistant.reply("web:browser-b2", message="hello")
+    assert other["reply"]["kind"] == "gate" and "everyone signed in with the password" in other["reply"]["text"]
+    claude.release.set()
+    first.join(5)
+    assert assistant.reply("web:browser-b2", message="hello")["reply"]["kind"] == "answer"  # released after it
+
+
+def test_the_bot_and_the_dashboard_share_the_one_call_rule_and_the_holds(store, lab) -> None:
+    # Two processes (the bot and the dashboard), each with its own Store on the one SQLite file
+    bot_store = Store(store.path)
+    held = HeldClaude(router=[route("chat")], chat=[message([text("Hi.")])])
+    dashboard = Assistant(held, lab, store, daily_cents=100, web_cents=44, tz=NY, clock=lambda: NOW)
+    bot = Assistant(FakeClaude(router=[route("chat")] * 2, chat=[message([text("Odds show what a bet pays.")])] * 2),
+                    FakeLab(lab.service, bot_store), bot_store, daily_cents=100, web_cents=44, tz=NY,
+                    clock=lambda: NOW)
+    for uid in ("web:browser-a1", "web:browser-b2"):
+        store.get_or_create_user(uid, now=NOW)
+        store.confirm_age(uid, now=NOW)
+    done = {}
+    first = threading.Thread(target=lambda: done.update(out=dashboard.reply(UID, message="hello")))
+    first.start()
+    assert held.started.wait(5)
+    # The same person in the other process: refused before any model call, as within one process
+    with pytest.raises(CallRejected, match="still working on your last message"):
+        bot.reply(UID, message="what do odds mean?")
+    with pytest.raises(CallRejected, match="still working on your last request"):
+        bot.explain(UID, _fact_sheet(lab))
+    assert bot.credits(UID)["left_cents"] == 100  # their own hold isn't taken off what they see
+    held.release.set()
+    first.join(5)
+    assert done["out"]["reply"]["kind"] == "answer"
+    spent = store.ai_used_today(UID, now=NOW)
+    assert spent > 0 and bot.credits(UID)["used_cents"] == round(spent, 2)
+    assert bot.reply(UID, message="what do odds mean?")["reply"]["kind"] == "answer"  # released: next one runs
+    with closing(sqlite3.connect(store.path)) as db:
+        assert db.execute("SELECT COUNT(*) FROM ai_holds").fetchone()[0] == 0
+    # A password browser's running call holds its share of the password allowance in the other process too
+    held = HeldClaude(router=[route("chat")], chat=[message([text("Hi.")])])
+    dashboard = Assistant(held, lab, store, daily_cents=100, web_cents=44, tz=NY, clock=lambda: NOW)
+    first = threading.Thread(target=lambda: dashboard.reply("web:browser-a1", message="hello"))
+    first.start()
+    assert held.started.wait(5)
+    other = bot.reply("web:browser-b2", message="hello")
+    assert other["reply"]["kind"] == "gate" and "everyone signed in with the password" in other["reply"]["text"]
+    held.release.set()
+    first.join(5)
+
+
+def test_a_long_turn_keeps_its_hold_and_one_that_lost_it_stops(store, lab) -> None:
+    # A slow API, a retry and a few tool rounds can take a turn past AI_HOLD_SECONDS: each request renews its
+    # hold, so the same person still can't start another turn (here in the bot's process) meanwhile
+    clock = [NOW]
+    bot_store = Store(store.path)
+    bot = Assistant(FakeClaude(router=[route("chat")], chat=[message([text("Hi.")])]),
+                    FakeLab(lab.service, bot_store), bot_store, daily_cents=100, tz=NY, clock=lambda: clock[0])
+    seen = {}
+    events = {"leagues": ["basketball_nba"], "query": "", "when": "today"}
+
+    class SlowClaude(FakeClaude):
+        def _create(self, **request):
+            clock[0] += 0.6 * AI_HOLD_SECONDS  # every request takes 6 minutes
+            if len(self.chat_requests()) == 2 and "second" not in seen:  # 18 minutes into the turn
+                with pytest.raises(CallRejected, match="still working on your last message") as busy:
+                    bot.reply(UID, message="what do odds mean?")
+                seen["second"] = busy.value
+            return super()._create(**request)
+
+    slow = SlowClaude(router=[route("lookup", leagues=["basketball_nba"])],
+                      chat=[message([tool_use("sports_find_events", events, f"t{i}")], stop="tool_use")
+                            for i in range(2)] + [message([text("The Thunder play the Clippers tonight.")])])
+    assistant = Assistant(slow, lab, store, daily_cents=100, tz=NY, clock=lambda: clock[0])
+    assert assistant.reply(UID, message="who plays tonight?")["reply"]["kind"] == "answer" and "second" in seen
+    # A turn whose hold lapsed anyway (one request outlived it) stops before its next request: others may
+    # have counted what it held as free
+    class StalledClaude(FakeClaude):
+        def _create(self, **request):
+            if request["model"] != "claude-haiku-5-5":
+                clock[0] += AI_HOLD_SECONDS + 1
+            return super()._create(**request)
+
+    stalled = StalledClaude(router=[route("lookup", leagues=["basketball_nba"])],
+                            chat=[message([tool_use("sports_find_events", events)], stop="tool_use"),
+                                  message([text("Never sent.")])])
+    out = Assistant(stalled, lab, store, daily_cents=100, tz=NY, clock=lambda: clock[0]).reply(
+        UID, message="who plays tonight?")
+    assert out["reply"]["kind"] == "error" and "took too long" in out["reply"]["text"]
+    assert len(stalled.chat_requests()) == 1 and stalled.chat  # the second round was never sent
+    bad = json.dumps({"verdict": "A lock at 1 in 2.", "per_leg": [], "case_against": "None."})
+    explained = StalledClaude(chat=[message([text(bad)]), message([text(bad)])])  # the retry is never sent
+    result = Assistant(explained, lab, store, daily_cents=100, tz=NY, clock=lambda: clock[0]).explain(
+        UID, _fact_sheet(lab))
+    assert result["source"] == "template" and len(explained.chat_requests()) == 1
+    with closing(sqlite3.connect(store.path)) as db:
+        assert db.execute("SELECT COUNT(*) FROM ai_holds").fetchone()[0] == 0
+
+
+def test_a_failed_turn_releases_its_hold(store, lab, monkeypatch) -> None:
+    assistant = make(store, lab, FakeClaude(router=[route("chat")], chat=[message([text("Hi.")])]))
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("the disk is full")
+
+    monkeypatch.setattr(store, "add_message", broken)
+    with pytest.raises(RuntimeError):
+        assistant.reply(UID, message="hello")
+    with closing(sqlite3.connect(store.path)) as db:
+        assert db.execute("SELECT COUNT(*) FROM ai_holds").fetchone()[0] == 0  # the person isn't stuck as busy
+
+
+def test_the_support_chips_are_answered_by_code_even_with_no_credits_left(store, lab) -> None:
+    store.add_ai_usage(UID, 100, now=NOW)  # today's allowance is used up
+    claude = FakeClaude()
+    assistant = make(store, lab, claude)
+    first = assistant.reply(UID, message="I need to win my money back tonight")
+    assert first["reply"]["chips"] == assistant_module.SUPPORT_CHIPS
+    for chip in assistant_module.SUPPORT_CHIPS:
+        out = assistant.reply(UID, thread_id=first["thread_id"], message=chip)
+        assert out["reply"]["kind"] == "support" and out["reply"]["text"] == assistant_module.SUPPORT_ANSWERS[chip]
+        assert "GAMBLER" in out["reply"]["text"] and chip not in out["reply"]["chips"]
+        assert not banned_phrases(out["reply"]["text"])
+    assert "Settings, then Limits, then Weekly budget" in assistant_module.SUPPORT_ANSWERS["How do I set a budget?"]
+    assert not claude.requests
+
+
+def test_a_gate_after_a_warning_sign_shows_the_helpline_not_the_odds(store, lab) -> None:
+    store.add_ai_usage(UID, 100, now=NOW)
+    assistant = make(store, lab, FakeClaude())
+    out = assistant.reply(UID, message="been chasing losses all week, one more parlay")
+    assert out["reply"]["kind"] == "gate" and HELPLINE in out["reply"]["text"]
+    assert "odds" not in out["reply"]["text"]
+    [event] = store.rg_events(UID)
+    assert event["kind"] == "possible_chasing" and event["detail"]["source"] == "rules, at a gate"
+    # Without a warning sign the gate points to what still works, as before
+    plain = assistant.reply(UID, message="who wins tonight?")
+    assert "ticket pricing still work" in plain["reply"]["text"] and HELPLINE not in plain["reply"]["text"]
+
+
 def test_while_picks_are_paused_the_ai_won_t_explain_tickets(store, lab) -> None:
     claude = FakeClaude()
     assistant = make(store, lab, claude)
@@ -485,8 +771,8 @@ def test_while_picks_are_paused_the_ai_won_t_explain_tickets(store, lab) -> None
         assistant.explain(UID, _fact_sheet(lab))
     assert HELPLINE in str(rejected.value) and not banned_phrases(str(rejected.value))
     assert not claude.requests
-    assert assistant_module.paused_until(store.user(UID), NOW) == pytest.approx(NOW + 24 * 3600)
-    assert assistant_module.paused_until(store.user(UID), NOW + 25 * 3600) is None
+    assert lab_module.paused_until(store.user(UID), NOW) == pytest.approx(NOW + 24 * 3600)
+    assert lab_module.paused_until(store.user(UID), NOW + 25 * 3600) is None
 
 
 def test_the_disclosure_comes_once_per_thread(store, lab) -> None:
@@ -672,8 +958,24 @@ def test_late_at_night_the_reply_carries_a_note_and_the_owner_sees_it(store, lab
     night = datetime.datetime(2027, 1, 15, 7, 30, tzinfo=datetime.timezone.utc).timestamp()  # 2:30 AM ET
     claude = FakeClaude(router=[route("chat")], chat=[message([text("Hi there.")])])
     out = make(store, lab, claude, clock=night).reply(UID, message="hi")
-    assert "It's late where you are" in out["reply"]["text"]
+    # Without the person's own timezone the note says whose clock it read, not "where you are"
+    assert "It's 2:30 AM EST on the app's clock" in out["reply"]["text"]
+    assert "where you are" not in out["reply"]["text"]
     assert store.rg_events(UID, kind="late_night")
+
+
+def test_the_late_night_note_follows_the_person_s_own_timezone(store, lab) -> None:
+    store.update_user(UID, {"settings": {"timezone": "Europe/London"}})
+    morning = datetime.datetime(2027, 1, 15, 7, 30, tzinfo=datetime.timezone.utc).timestamp()  # 7:30 AM in London
+    claude = FakeClaude(router=[route("chat"), route("chat")],
+                        chat=[message([text("Morning!")]), message([text("Still up?")])])
+    out = make(store, lab, claude, clock=morning).reply(UID, message="good morning from London")
+    assert out["reply"]["text"] == "Morning!" and not store.rg_events(UID, kind="late_night")
+    late = datetime.datetime(2027, 1, 15, 2, 30, tzinfo=datetime.timezone.utc).timestamp()  # 2:30 AM in London
+    out = make(store, lab, claude, clock=late).reply(UID, message="can't sleep")
+    assert out["reply"]["text"].endswith(assistant_module.LATE_NOTE)
+    store.update_user(UID, {"settings": {"timezone": "Not/AZone"}})  # a bad name falls back to the app's clock
+    assert make(store, lab, claude, clock=late)._late_note(store.user(UID), late) is None  # 9:30 PM in New York
 
 
 # --- the tools ----------------------------------------------------------------------------------------
@@ -747,23 +1049,168 @@ def test_numbers_must_trace_to_the_sources() -> None:
     assert invented_numbers("a 1-in-9 shot", sources) == ["1-in-9"]
 
 
+def test_a_loss_can_t_be_written_as_a_profit() -> None:
+    sources = source_numbers({"expected": {"market": "-0.26", "ai": -0.26}, "max_profit": "3.80", "stake": "10.00"})
+    for honest in ("You'd lose about $0.26 on average.", "The expected result is -$0.26.",
+                   "an expected loss of $0.26", "A win pays a profit of $3.80 on your $10.", "Lose and you lose $10."):
+        assert invented_numbers(honest, sources) == [], honest
+    for flipped in ("an expected profit of +$0.26", "expected result +$0.26", "you'd make about $0.26 on average",
+                    "a profit of $0.26", "-$3.80 if it wins"):
+        assert invented_numbers(flipped, sources), flipped
+    # A code-written sentence counts its losses as negative too ("expected cost $3.20")
+    assert invented_numbers("you'd make $3.20", source_numbers({"summary": "expected cost $3.20"})) == ["$3.20"]
+
+
+@pytest.mark.parametrize("honest", [
+    "A break can last 24 hours, 3 days, a week, 30 days or 90 days and can't be cut short; raising your weekly "
+    "budget only takes effect after 24 hours.",
+    "The Celtics went all in on defence last night and the market agrees with the AI on this one.",
+    "Nothing in betting is guaranteed: help is there twenty-four seven at 1-800-GAMBLER.",
+])
+def test_honest_answers_reach_the_person(store, lab, honest) -> None:
+    claude = FakeClaude(router=[route("help")], chat=[message([text(honest)]), message([text(honest)])])
+    out = make(store, lab, claude).reply(UID, message="how do breaks work, and how did Boston play?")
+    assert out["reply"]["kind"] == "answer" and out["reply"]["text"].startswith(honest)
+    assert len(claude.chat_requests()) == 1  # no retry needed
+    # The app's rules are exempt only as durations: a chance or an amount is still checked
+    made_up = "This one wins 90% of the time, so it's worth $24."
+    claude = FakeClaude(router=[route("help")], chat=[message([text(made_up)]), message([text(made_up)])])
+    assert make(store, lab, claude).reply(UID, message="is it good?")["reply"]["kind"] == "template"
+
+
+def test_a_loss_written_as_a_profit_never_reaches_the_person(store, lab) -> None:
+    ref = {"league": "basketball_nba", "id": "g1", "market": "h2h", "side": "away"}
+    loss = Decimal(lab.price(UID, {"type": "single", "stake": "10", "legs": [ref]})["expected"]["market"])
+    assert loss < 0
+    flipped = f"Good news: by the market's own chances this single has an expected profit of +${abs(loss)}."
+    claude = FakeClaude(router=[route("analyse", leagues=["basketball_nba"], stake=10)],
+                        chat=[message([tool_use("ticket_price", {"type": "single", "stake": 10, "legs": [ref]})],
+                                      stop="tool_use"),
+                              message([text(flipped)]), message([text(flipped)])])
+    out = make(store, lab, claude).reply(UID, message="price $10 on the Clippers")
+    assert out["reply"]["kind"] == "template" and "profit of" not in out["reply"]["text"]
+
+
+def test_numbers_in_words_and_small_multiples_are_checked() -> None:
+    sources = source_numbers({"chance": {"ai": 0.7, "ai_one_in": 3}, "odds": {"decimal": 7.25}, "stake": "20.00",
+                              "hit_rates": {"last8": "5/8"}})
+    for fine in ("about one in three", "a seventy percent chance", "seventy per cent", "it went over in 6 of 10",
+                 "hit 5/8", "leg 2 of 3, day 10", "2 to 4 legs", "one leg", "three games", "the Big Ten"):
+        assert invented_numbers(fine, sources) == [], fine
+    for invented in ("about one in eleven", "pays nine to one", "pays 9 to 1", "wins 3 times in 4", "3 out of 4",
+                     "expect 12x your money", "ten times your stake", "doubles your money", "sixty percent",
+                     "a quarter of the time", "twenty-five dollars back", "It returns 11 dollars.", "eleven bucks",
+                     "It wins three quarters of the time.", "It cashes two-thirds of the time.", "3/4 of the time"):
+        assert invented_numbers(invented, sources), invented
+    for helpline in ("Help is there 24/7.", "Help is there 24-7.", "Free help is there twenty-four seven."):
+        assert invented_numbers(helpline, set()) == [], helpline
+    # Words join only as numbers are written: "twenty-four seven" is never 31, "one hundred twenty-five" is 125
+    assert [f.value for f in numbers_in("a hundred and thirty-five twenty, one hundred twenty-five dollars")] == [
+        100, 35, 20, 125]
+    assert invented_numbers("about twenty-six cents, or 26 cents", source_numbers({"profit": "0.26"})) == []
+
+
+def test_the_other_side_of_a_spread_is_not_an_invented_number() -> None:
+    sources = source_numbers({"legs": [{"label": "Boston Celtics +4.5", "point": 4.5, "price": "1.91"}]})
+    assert invented_numbers("Boston gets 4.5 points: the Lakers are -4.5 favourites.", sources) == []
+    assert invented_numbers("The Lakers are -5.5 favourites.", sources) == ["-5.5"]
+    # Money keeps its sign: a loss is never a profit
+    assert invented_numbers("a profit of +$0.26", source_numbers({"expected": "-0.26"})) == ["+$0.26"]
+
+
+def test_the_template_compares_the_ai_and_the_market_like_for_like() -> None:
+    now = datetime.datetime(2026, 10, 26, tzinfo=datetime.timezone.utc)
+    leg = TicketLeg(key="k1", league="basketball_nba", event_id="e1", market="spreads", side="home", point=-3.0,
+                    price=Decimal("1.91"), label="Boston Celtics -3", game="LAL @ BOS", ai_prob=0.50,
+                    market_prob=0.52, push_prob=0.06, start="2026-10-27T00:00:00Z")
+    priced = tickets.price_ticket([leg], "single", Decimal("10"), now=now)
+    text_ = template_explanation({"ticket": priced, "legs": [{"index": 0, "notes": []}]})["per_leg"][0]["text"]
+    # Outright the AI's 50% is above the market's 48.9%: given no push, 53% beside the market's 52%
+    assert "AI 53%, market 52% (both given no push)" in text_, text_
+    plain = dataclasses.replace(leg, push_prob=0.0)
+    priced = tickets.price_ticket([plain], "single", Decimal("10"), now=now)
+    assert "AI 50%, market 52% (" in template_explanation({"ticket": priced})["per_leg"][0]["text"]
+    # Claude gets the AI's chance on the market's footing too, to set beside it
+    facts = ticket_facts(tickets.price_ticket([leg], "single", Decimal("10"), now=now))["legs"][0]
+    assert (facts["ai_chance"], facts["market_chance"], facts["ai_chance_given_no_push"]) == (0.5, 0.52, 0.5319)
+    assert ticket_facts(priced)["legs"][0].get("ai_chance_given_no_push") is None  # no push, nothing to adjust
+
+
+def test_the_context_s_housekeeping_numbers_don_t_count_as_sources(store, lab) -> None:
+    # The only 100 anywhere is "AI credits left today 100.0 of 100 cents" in the context block
+    made_up = "A three-leg NBA multi at these prices would pay about $100 back."
+    claude = FakeClaude(router=[route("lookup", leagues=["basketball_nba"])],
+                        chat=[message([text(made_up)]), message([text(made_up)])])
+    out = make(store, lab, claude).reply(UID, message="what would a 3 leg NBA parlay pay?")
+    assert "AI credits left today 100.0 of 100 cents" in claude.chat_requests()[0]["messages"][-1]["content"][0]["text"]
+    assert out["reply"]["kind"] == "template" and "$100" not in out["reply"]["text"]
+
+
+def test_a_fallback_answer_is_priced_at_its_own_model_and_the_declined_attempt_counts() -> None:
+    def part(kind, model, fresh, out):
+        return SimpleNamespace(type=kind, model=model, input_tokens=fresh, output_tokens=out,
+                               cache_creation_input_tokens=0, cache_read_input_tokens=0)
+
+    usage = SimpleNamespace(input_tokens=10000, output_tokens=2000, cache_creation_input_tokens=0,
+                            cache_read_input_tokens=0, iterations=[part("message", None, 10000, 1500),
+                                                                   part("fallback_message", "claude-opus-5", 10000, 2000)])
+    dollars, tokens_in, tokens_out = ClaudeCaller.cost("claude-opus-5-5", usage, "claude-opus-5")
+    declined, served = (10000 * 4 + 1500 * 20) / 1e6, (10000 * 5 + 2000 * 25) / 1e6
+    assert dollars == pytest.approx(declined + served) and (tokens_in, tokens_out) == (20000, 3500)
+    # No iterations: the top-level usage at the rates of the model that answered (Opus 4.8 costs $5/$25)
+    plain = SimpleNamespace(input_tokens=1000, output_tokens=100, cache_creation_input_tokens=0, cache_read_input_tokens=0)
+    assert ClaudeCaller.cost("claude-opus-5-5", plain, "claude-opus-4-8")[0] == pytest.approx((1000 * 5 + 100 * 25) / 1e6)
+    # A model the price list doesn't know is never priced below the dearest one it does
+    assert ClaudeCaller.cost("claude-opus-5-5", plain, "claude-new-9")[0] == pytest.approx((1000 * 10 + 100 * 50) / 1e6)
+
+
 def test_banned_phrases_and_every_fixed_message_pass_the_filter() -> None:
     for bad in ("a lock", "Guaranteed", "sure thing", "risk-free", "can't lose", "win it back", "win back your losses",
                 "make your money back", "chasing losses", "it's safe",
-                "a safe bet", "bet more", "raise your stake", "bigger stake"):
+                "a safe bet", "bet more", "raise your stake", "bigger stake", "a can't-lose parlay",
+                "Double down on the Knicks", "Go all in on the Thunder", "Put more on it this time",
+                "Load up on the over", "Add another leg to boost the payout", "Chase it with a bigger parlay",
+                "A win here would get your money back", "This gets back what you lost last night",
+                "Max out your stake here.", "Put your whole bankroll on it.", "Go big on Boston.",
+                "Add a third leg to juice the payout.", "Try a bigger parlay tonight.",
+                # A refund word elsewhere in the sentence doesn't excuse chasing, and losses are never refunded
+                "A win tonight gets your money back, and a push just returns the stake.",
+                "This parlay could get your losses back even if one leg is voided."):
         assert banned_phrases(bad), bad
     for fine in ("the Safe tier", "won back-to-back games", "can win back to back titles", "Denver won back home",
                  "they can make it back to the playoffs", "Denver recovered after losses on the road",
                  "Tatum has to make up for the loss of Brown", "you get your stake back if it's void",
                  "make sure", "blocks", "Nothing is guaranteed.",
                  "Never bet more than you can afford to lose.", "You can't lose more than your $10 stake.",
-                 "Don't raise your stake to catch up.", "There's no such thing as a risk-free bet."):
+                 "Don't raise your stake to catch up.", "There's no such thing as a risk-free bet.",
+                 "If the game is postponed you get your money back.", "No bet is without risk.",
+                 "Never double down after a loss.", "Each extra leg adds the bookmaker's cut again.",
+                 "The Knicks put up 120 points.", "This is not guaranteed.", "I won't suggest a bigger stake.",
+                 # Honest disclaimers with the subject between the negation and the phrase
+                 "Nothing in betting is guaranteed.", "No result in sports is guaranteed.",
+                 "None of these picks is guaranteed.", "Nothing in sport is risk-free.",
+                 "Not even a heavy favourite is guaranteed.", "No bet can ever be guaranteed.",
+                 # Sports talk and honest warnings aren't "bet more"
+                 "The Celtics went all in on defence last night.", "They loaded up the paint and held Denver to 98.",
+                 "Jokic put more pressure on the rim in the second half.", "Tatum put more shots up in the fourth.",
+                 "A bigger parlay pays more but wins far less often.",
+                 "I wouldn't add another leg: each one adds the bookmaker's cut.",
+                 "Never put your whole bankroll on one bet.", "The Lakers go big with Davis at center.",
+                 "If a leg is voided, you get your money back.", "It's never a good idea to go all in."):
         assert not banned_phrases(fine), fine
-    for still_bad in ("Not a lock, but close.", "This is guaranteed. Not kidding.", "Don't worry, it can't lose."):
+    # A negation word nearby isn't enough: it must govern the phrase
+    for still_bad in ("Not a lock, but close.", "This is guaranteed. Not kidding.", "Don't worry, it can't lose.",
+                      "No doubt about it, this one is guaranteed to cash.", "Don't hold back: bet more on the Knicks.",
+                      "Don't be shy, raise your stake on this one.", "Not gonna lie, this is a bigger stake spot.",
+                      "No question: it's risk-free money.", "Don't hold back and bet more tonight.",
+                      "No one can deny this is guaranteed.", "No matter what anyone says this is guaranteed.",
+                      "No doubt this one is guaranteed.", "Don't worry. Go all in on the Thunder."):
         assert banned_phrases(still_bad), still_bad
     fixed = [SUPPORT_MESSAGE, assistant_module.DISTRESS_EXTRA, DISCLOSURE, HELPLINE, assistant_module.LATE_NOTE,
              assistant_module.SYSTEM_PROMPT.split("How to talk")[0]]
     fixed += assistant_module.TICKET_CHIPS + assistant_module.PLAN_CHIPS + assistant_module.SUPPORT_CHIPS
+    fixed += list(assistant_module.SUPPORT_ANSWERS.values()) + [assistant_module.LATE_NOTE_APP_CLOCK,
+                                                                assistant_module.BUSY_MESSAGE]
     assert all(not banned_phrases(message) for message in fixed)
 
 
@@ -839,6 +1286,18 @@ def test_build_assistant_needs_a_key_and_reads_the_config(store, lab) -> None:
     defaults = Config(TELEGRAM_BOT_TOKEN="1:x")
     assert (defaults.ai_chat_daily_cents, defaults.ai_chat_model, defaults.ai_router_model) == (
         100, "claude-opus-5-5", "claude-haiku-5-5")
+    # The shared daily caps: unset, 3 and 10 people's allowance; set, as given (0 switches a group off)
+    assert (built.web_cents, built.total_cents) == (150, 500)
+    assert (defaults.ai_chat_web_daily_cents, defaults.ai_chat_daily_total_cents) == (None, None)
+    capped = Config(TELEGRAM_BOT_TOKEN="1:x", ANTHROPIC_API_KEY="sk-ant-test", AI_CHAT_WEB_DAILY_CENTS="30",
+                    AI_CHAT_DAILY_TOTAL_CENTS=0)
+    built = build_assistant(capped, lab, store, client=FakeClaude())
+    assert (built.web_cents, built.total_cents) == (30, 0)
+    assert built.credits(UID)["left_cents"] == 0  # the whole app's cap is 0
+    for name in ("AI_CHAT_WEB_DAILY_CENTS", "AI_CHAT_DAILY_TOTAL_CENTS"):
+        with pytest.raises(ValueError):
+            Config(TELEGRAM_BOT_TOKEN="1:x", **{name: -1})
+        assert getattr(Config(TELEGRAM_BOT_TOKEN="1:x", **{name: ""}), name.lower()) is None  # blank: unset
 
 
 # --- with the real Lab ------------------------------------------------------------------------------------

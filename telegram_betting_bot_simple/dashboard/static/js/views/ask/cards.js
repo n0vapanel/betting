@@ -274,7 +274,7 @@ export function planCardHtml(card) {
   }).join("");
   const classic = strategies.classic?.market;
   const query = new URLSearchParams({ start: String(body.start ?? compare.start ?? ""), days: String(body.days ?? compare.days ?? ""),
-    min_odds: String(body.min_odds ?? compare.min_odds ?? ""), legs: String(body.legs_per_day ?? compare.legs_per_day ?? 1) });
+    min_odds: String(body.min_odds ?? compare.min_odds ?? ""), legs_per_day: String(body.legs_per_day ?? compare.legs_per_day ?? 1) });
   const aiLine = compare.p_ai != null && strategies.classic?.ai
     ? `<p class="small muted">By the AI's daily chance (${esc(pct(compare.p_ai))}) a classic run finishes ${esc(pct(strategies.classic.ai.chance_complete))}; the market's is the safer guide.</p>` : "";
   return `<article class="card ask-card ask-plan" aria-label="${esc(`Rollover plan: ${card.title || ""}`)}">

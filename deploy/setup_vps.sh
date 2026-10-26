@@ -50,6 +50,13 @@
 #   AI_DAILY_LIMIT=25             calls per analyst per 24 hours
 #   AI_EFFORT=medium              how hard Claude thinks: low, medium, high, xhigh or max
 #   ANTHROPIC_MODEL, DEEPSEEK_MODEL to pick other models
+# The AI chat (uses ANTHROPIC_API_KEY), in US cents of Claude a day:
+#   AI_CHAT_DAILY_CENTS=100       each person's allowance
+#   AI_CHAT_WEB_DAILY_CENTS=300   everyone signed in with the dashboard password, together (default: 3 people's)
+#   AI_CHAT_DAILY_TOTAL_CENTS=1000  the whole app (default: 10 people's)
+#
+# The dashboard password should be 12 or more characters: a shorter one still works, but the setup
+# warns about it.
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/n0vapanel/betting.git}"
@@ -80,6 +87,9 @@ declare -A PATTERNS=(
   [AI_WEB_SEARCH]='^(0|1|true|false)$'
   [AI_DAILY_LIMIT]='^[0-9]{1,4}$'
   [AI_EFFORT]='^(low|medium|high|xhigh|max)$'
+  [AI_CHAT_DAILY_CENTS]='^[0-9]{1,6}$'
+  [AI_CHAT_WEB_DAILY_CENTS]='^[0-9]{1,6}$'
+  [AI_CHAT_DAILY_TOTAL_CENTS]='^[0-9]{1,7}$'
   [ANTHROPIC_MODEL]='^claude-[a-z0-9.-]{3,60}$'
   [DEEPSEEK_MODEL]='^deepseek-[a-z0-9.-]{2,60}$'
   [TELEGRAM_ALLOWED_IDS]='^[0-9]{1,20}(,[0-9]{1,20})*$'
@@ -110,6 +120,17 @@ ask() {
     done
   fi
   printf -v "$var" '%s' "$value"
+}
+
+# warn_short_password VALUE: passwords of 8-11 characters keep working, but say plainly that 12+ is safer.
+# Only the length is printed, never the password
+MIN_SAFE_PASSWORD=12
+warn_short_password() {
+  if [ "${#1}" -lt "$MIN_SAFE_PASSWORD" ]; then
+    echo "  WARNING: the dashboard password is only ${#1} characters long. It works, but anyone who finds the"
+    echo "  dashboard's address can try to guess it: use $MIN_SAFE_PASSWORD or more characters. To change it, run"
+    echo "  this script again with DASHBOARD_PASSWORD=<new password> in front (start the line with a space)."
+  fi
 }
 
 # set_env VAR VALUE: save VAR=VALUE in the .env file, replacing an earlier value
@@ -208,19 +229,26 @@ EOF
   # The dashboard's settings (added to older installs too)
   local generated=""
   if ! grep -q '^DASHBOARD_PASSWORD=' "$ENV_FILE"; then
-    ask DASHBOARD_PASSWORD "Dashboard password (8+ letters/digits, Enter to generate one)" '^([A-Za-z0-9_.@%+=:-]{8,64})?$' secret
+    ask DASHBOARD_PASSWORD "Dashboard password (12+ letters/digits, Enter to generate one)" '^([A-Za-z0-9_.@%+=:-]{8,64})?$' secret
     if [ -z "$DASHBOARD_PASSWORD" ]; then
       DASHBOARD_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(12))')"
       generated="$DASHBOARD_PASSWORD"
+    else
+      warn_short_password "$DASHBOARD_PASSWORD"
     fi
     printf 'DASHBOARD_PASSWORD=%s\nDASHBOARD_PORT=%s\n' "$DASHBOARD_PASSWORD" "${DASHBOARD_PORT:-8787}" >> "$ENV_FILE"
   fi
   # Keys given on the command line replace the saved ones
-  local var
+  local var saved_password
+  saved_password="$(grep -E '^DASHBOARD_PASSWORD=' "$ENV_FILE" | tail -1 | cut -d= -f2- || true)"
   for var in ${PRESET[@]+"${PRESET[@]}"}; do
     [[ "${!var}" =~ ${PATTERNS[$var]} ]] || { echo "  $var looks wrong."; exit 1; }
     set_env "$var" "${!var}"
   done
+  # A password given on the command line replaces the saved one: warn when the new one is short
+  if [ -n "${DASHBOARD_PASSWORD:-}" ] && [ "$DASHBOARD_PASSWORD" != "$saved_password" ]; then
+    warn_short_password "$DASHBOARD_PASSWORD"
+  fi
   if [ ${#PRESET[@]} -gt 0 ]; then echo "  Saved from the command line: ${PRESET[*]}"; fi
   # Behind Caddy: the bot links to the HTTPS address, and the dashboard only listens to Caddy
   if [ -n "$DOMAIN" ]; then
@@ -403,6 +431,10 @@ setup_caddy() {
 # Written by setup_vps.sh: the betting dashboard over HTTPS. Caddy gets and renews the certificate.
 $DOMAIN {
 	encode gzip
+	# The app's largest real request is a few kilobytes; the app refuses bigger ones too
+	request_body {
+		max_size 64KB
+	}
 	reverse_proxy 127.0.0.1:$port
 }
 CADDY

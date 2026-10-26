@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime
 import sqlite3
+import threading
 from contextlib import closing
 from decimal import Decimal
 
@@ -59,7 +60,7 @@ def test_new_tables_sit_beside_the_old_ones(tmp_path) -> None:
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     assert {"odds_snapshots", "predictions", "analyses", "users", "slips", "slip_legs", "plans", "plan_days",
-            "chat_threads", "chat_messages", "ai_credits", "rg_events"} <= tables
+            "chat_threads", "chat_messages", "ai_credits", "ai_holds", "rg_events"} <= tables
 
 
 def test_the_stores_limits_match_the_engines() -> None:
@@ -401,6 +402,21 @@ def test_stakes_count_against_the_budget_from_when_the_bet_was_saved(store) -> N
     assert store.staked_since("tg:404", 0) == 0
 
 
+def test_the_budget_counts_real_stakes_by_one_person_or_every_password_browser(store) -> None:
+    save(store, stake=1000, now=NOW)
+    save(store, stake=700, now=NOW, payload={"plan": {"id": 1, "mode": "paper"}})  # play money
+    save(store, stake=200, now=NOW, payload={"plan": {"id": 2, "mode": "tracked"}, "note": "paper"})
+    for user, stake in (("web:browser-a1", 300), ("web:browser-b2", 40), ("webby:x", 9), ("tg:2", 5000)):
+        store.get_or_create_user(user, now=NOW)
+        save(store, user=user, stake=stake, now=NOW)
+    save(store, user="web:browser-a1", stake=60, now=NOW, payload={"plan": {"mode": "paper"}})
+    assert store.budget_staked_since(NOW, user="tg:1") == 1000 + 200
+    assert store.budget_staked_since(NOW, members="web:") == 300 + 40  # not "webby:", not a paper day
+    assert store.budget_staked_since(NOW + 1, members="web:") == 0
+    with pytest.raises(ValueError):
+        store.budget_staked_since(NOW, user="tg:1", members="web:")
+
+
 # --- plans ---------------------------------------------------------------------------------------
 
 
@@ -447,6 +463,15 @@ def test_plans_belong_to_their_owner(store) -> None:
     assert store.record_plan_day("tg:1", stopped["id"], 50, 500, now=NOW) is None  # not active
     their_slip = save(store, user="tg:2")
     assert store.record_plan_day("tg:1", mine["id"], 50, 1000, slip_id=their_slip["id"], now=NOW) is None
+    # Every password browser's plans, for the rules that cover them all (each plan keeps its own user)
+    web_a = store.create_plan("web:browser-a1", 1000, 5, "2", 1, "classic", now=NOW + 2)
+    web_b = store.create_plan("web:browser-b2", 1000, 5, "2", 1, "classic", now=NOW + 3)
+    assert [(p["id"], p["user"]) for p in store.plans(members="web:")] == [
+        (web_b["id"], "web:browser-b2"), (web_a["id"], "web:browser-a1")]
+    assert [p["id"] for p in store.plans(members="web:", status="active", limit=1)] == [web_b["id"]]
+    for bad in ({}, {"user": "tg:1", "members": "web:"}):
+        with pytest.raises(ValueError, match="a user or an id prefix"):
+            store.plans(**bad)
     assert store.settle_plan_day("tg:2", mine["id"], 1, "won", 1000) is False
     assert store.finish_plan("tg:2", mine["id"], "stopped") is False
     assert store.plan("tg:1", mine["id"])["day"] == 0 and store.plan("tg:2", theirs["id"])["status"] == "active"
@@ -566,6 +591,101 @@ def test_ai_credits_add_up_per_person_per_day(store) -> None:
     assert store.ai_used_today("tg:1", now=NOW) == 1.75
 
 
+def test_an_ai_hold_is_one_call_at_a_time_across_processes(tmp_path) -> None:
+    path = str(tmp_path / "betting.db")
+    bot, dashboard = Store(path), Store(path)  # two processes on one file
+    caps = {"web:a": 100, "*web": 50, "*all": 1000}
+    token, cents = dashboard.reserve_ai("web:a", caps, 40, 5, now=NOW)
+    assert cents == 40
+    assert bot.reserve_ai("web:a", caps, 40, 5, now=NOW) is None  # busy, whichever process asks
+    # Another password browser gets only what the shared allowance has left after the hold
+    other = bot.reserve_ai("web:b", {"web:b": 100, "*web": 50, "*all": 1000}, 40, 5, now=NOW)
+    assert other[1] == 10
+    assert bot.ai_left("web:c", {"web:c": 100, "*web": 50, "*all": 1000}, now=NOW) == 0
+    assert bot.ai_left("tg:1", {"tg:1": 100, "*all": 1000}, now=NOW) == 100  # "*all" has 950 left
+    assert dashboard.ai_left("web:a", caps, now=NOW) == 40  # a person's own hold isn't taken off
+    # The real cost moves from held to used in one write; the person stays busy until released
+    dashboard.settle_ai("web:a", token, 12.5, ["*web", "*all"], now=NOW)
+    assert [bot.ai_used_today(who, now=NOW) for who in ("web:a", "*web", "*all")] == [12.5, 12.5, 12.5]
+    assert bot.ai_left("web:c", {"web:c": 100, "*web": 50}, now=NOW) == 50 - 12.5 - 10
+    assert bot.reserve_ai("web:a", caps, 40, 5, now=NOW) is None
+    dashboard.release_ai("web:a", token)
+    again, cents = bot.reserve_ai("web:a", caps, 40, 5, now=NOW)
+    assert cents == 50 - 12.5 - 10
+    dashboard.release_ai("web:a", token)  # a late release of the old call never frees the new one
+    assert dashboard.reserve_ai("web:a", caps, 40, 5, now=NOW) is None
+    # A hold left by a process that died lapses: it stops counting, and the person may start again
+    later = NOW + store_module.AI_HOLD_SECONDS + 1
+    assert bot.ai_left("web:c", {"web:c": 100, "*web": 50}, now=later) == 50 - 12.5
+    assert bot.reserve_ai("web:a", caps, 40, 5, now=later)[1] == 37.5
+    # A call still running renews its hold before each request; one that has lapsed can't be renewed
+    held, _ = dashboard.reserve_ai("web:d", {"web:d": 100}, 40, 5, now=NOW)
+    middle = NOW + store_module.AI_HOLD_SECONDS - 1
+    assert dashboard.renew_ai("web:d", held, now=middle) and not dashboard.renew_ai("web:d", "stale", now=middle)
+    assert bot.reserve_ai("web:d", {"web:d": 100}, 40, 5, now=later) is None  # still busy past the first lapse
+    assert not dashboard.renew_ai("web:d", held, now=middle + store_module.AI_HOLD_SECONDS)
+    # Under the least a call needs, nothing is held, but the person still counts as busy
+    dashboard.add_ai_usage("tg:2", 98, now=NOW)
+    low = dashboard.reserve_ai("tg:2", {"tg:2": 100, "*all": 1000}, 40, 5, now=NOW)
+    assert low[1] == 2 and dashboard.reserve_ai("tg:2", {"tg:2": 100}, 40, 5, now=NOW) is None
+    assert bot.ai_left("tg:1", {"tg:1": 100, "*all": 1000}, now=NOW) == 100
+
+
+def test_racing_ai_holds_never_pass_a_shared_cap(tmp_path) -> None:
+    path = str(tmp_path / "betting.db")
+    stores = [Store(path) for _ in range(3)]
+    start = threading.Barrier(12)
+    got: dict = {}
+
+    def call(i: int, uid: str) -> None:
+        start.wait(5)
+        got[i] = stores[i % 3].reserve_ai(uid, {uid: 100, "*web": 100, "*all": 1000}, 40, 5, now=NOW)
+
+    # Twelve password browsers at once against a 100-cent shared allowance: 40 + 40 + 20, then nothing
+    threads = [threading.Thread(target=call, args=(i, f"web:racer-{i}")) for i in range(12)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+    assert sorted(cents for _, cents in got.values()) == [0] * 9 + [20, 40, 40]
+    with closing(sqlite3.connect(path)) as db:
+        assert db.execute("SELECT SUM(cents) FROM ai_holds").fetchone()[0] == 100
+    # The same person from twelve places at once: exactly one call starts
+    start, got = threading.Barrier(12), {}
+    threads = [threading.Thread(target=call, args=(i, "tg:7")) for i in range(12)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+    assert len(got) == 12 and sum(hold is not None for hold in got.values()) == 1
+
+
+def test_a_shared_row_holds_the_gates_and_is_no_ones_account(store) -> None:
+    for uid in ("web:a1", "web:b2"):
+        store.get_or_create_user(uid, now=NOW)
+    store.set_weekly_budget("web:a1", 4000, now=NOW)
+    store.set_weekly_budget("web:b2", 2500, now=NOW - 30 * HOUR)
+    store.set_weekly_budget("web:b2", 3000, now=NOW - 25 * HOUR)  # waited its 24 hours: it counts
+    store.start_cooloff("web:b2", 24, now=NOW - 48 * HOUR)  # long over
+    store.update_user("web:a1", {"settings": {"pause": NOW + HOUR, "theme": "dark"}})
+    store.update_user("web:b2", {"settings": {"pause": NOW + 2 * HOUR}})
+    shared = store.shared_user("*web", "web:", carry=("pause",), now=NOW)
+    assert (shared["weekly_budget_cents"], shared["pending_budget_cents"]) == (3000, None)
+    assert shared["cooloff_until"] == NOW - 24 * HOUR and shared["settings"] == {"pause": NOW + 2 * HOUR}
+    # Made once: later changes to a browser's own row don't move it
+    store.set_weekly_budget("web:a1", 100, now=NOW)
+    assert store.shared_user("*web", "web:", carry=("pause",), now=NOW)["weekly_budget_cents"] == 3000
+    # The pause only ever lengthens, in one write
+    assert store.extend_setting("*web", "pause", NOW + HOUR) == NOW + 2 * HOUR
+    assert store.extend_setting("*web", "pause", NOW + 5 * HOUR) == NOW + 5 * HOUR
+    assert store.extend_setting("tg:404", "pause", NOW) is None
+    for bad in ("*web", "*anything"):
+        with pytest.raises(ValueError, match="reserved"):
+            store.get_or_create_user(bad)
+    with pytest.raises(ValueError):
+        store.shared_user("web:x", "web:")
+
+
 # --- responsible gambling ------------------------------------------------------------------------
 
 
@@ -587,3 +707,7 @@ def test_warning_signs_are_logged_and_reviewed_once(store) -> None:
     assert [e["id"] for e in store.rg_events(reviewed=True)] == [chasing]
     with pytest.raises(ValueError):
         store.add_rg_event("tg:1", "", now=NOW)
+    # Every password browser's, for the warnings that cover them all
+    web = [store.add_rg_event(uid, "chasing", now=NOW + i) for i, uid in enumerate(("web:a1", "web:b2"))]
+    assert [e["id"] for e in store.rg_events(members="web:")] == web[::-1]
+    assert [e["id"] for e in store.rg_events(members="web:", kind="chasing", since=NOW + 1)] == [web[1]]

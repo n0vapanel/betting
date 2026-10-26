@@ -18,6 +18,7 @@
 //   #/bets  #/help  #/help/<topic>  #/settings        (?query parts are passed in params.query)
 // Deep links in use: #/ask?game=<league>:<id>  #/ask?player=<league>:<id>&name=..  #/build?analyse=1
 //   #/game/<league>/<id>?section=analysts  #/bets?tab=calls|leaders|record|slips
+//   #/build/rollover?start=10&days=5&min_odds=2.00&legs_per_day=1 (the planner takes these once, then tidies them)
 // One-shot requests: "analyse the slip" costs AI credits, so it must run once per tap and never again
 // from Back, Forward or a reload. The shell keeps it out of the address: analyseSlip() remembers the
 // request in memory and opens plain #/build, and a #/build?analyse=1 link is tidied to #/build before the
@@ -25,11 +26,11 @@
 // put the flag back into the address (navigate("#/build?analyse=1")); call analyseSlip().
 //
 // ── Shared helpers screens use ────────────────────────────────────────────────────────────────────
-// From this file:   navigate(hash), goBack(), setTitle(text), refreshMainButton(), rerender(),
+// From this file:   navigate(hash), goBack(), replaceAddress(hash), setTitle(text), refreshMainButton(), rerender(),
 //                   analyseSlip(), openSlipSheet(), openOnboarding(), openSportsSheet(), setQuota(quota), signOut(),
 //                   applyTheme(choice), inTelegram, and re-exported from store.js: slip, priceSlip, priced,
-//                   onPriced, me, loadMe, setMe, updateMe, onMeChange, oddsFormat, loadSports, leagueTitle, sportEmoji,
-//                   legKey, legFromOffer, session
+//                   onPriced, me, loadMe, setMe, updateMe, onMeChange, onBreak, oddsFormat, favouriteSports, loadSports, leagueTitle,
+//                   sportEmoji, legKey, legFromOffer, session
 // From ../ui.js:    esc, pct, chanceText, money, signedMoney, priceText, pointText, shortName, timeLabel,
 //                   dayHeading, ago, chip, linkChip, segmented, badge, injuryBadge, section, notice,
 //                   skeleton, emptyState, errorState, toast, sheet, confirmSheet, explain, GLOSSARY,
@@ -43,21 +44,21 @@
 // are shown in the server's own words; every leg is added by the person's own tap; the helpline footer
 // is on every screen.
 
-import { setInitData, onUnauthorized, passwordLogin, telegramLogin, logout, isQuiet, prefs } from "./api.js";
+import { api, setInitData, onUnauthorized, passwordLogin, telegramLogin, logout, isQuiet, prefs } from "./api.js";
 import * as tg from "./telegram.js";
 import {
-  slip, priceSlip, priced, onPriced, me, loadMe, setMe, updateMe, onMeChange, oddsFormat, loadSports, leagueTitle,
-  sportEmoji, legKey, legFromOffer, session,
+  slip, priceSlip, priced, onPriced, me, loadMe, setMe, updateMe, onMeChange, onBreak, oddsFormat, favouriteSports, loadSports,
+  leagueTitle, sportEmoji, legKey, legFromOffer, session,
 } from "./store.js";
 import {
   esc, pct, chanceText, money, signedMoney, priceText, toast, sheet, explain, skeleton, errorState, installUi,
-  setExplainContext, notice, segmented, timeLabel, openExplainer,
+  setExplainContext, notice, segmented, timeLabel, openExplainer, holdPage,
 } from "./ui.js";
 import { icon, logo } from "./icons.js";
 
 export {
-  slip, priceSlip, priced, onPriced, me, loadMe, setMe, updateMe, onMeChange, oddsFormat, loadSports, leagueTitle,
-  sportEmoji, legKey, legFromOffer, session,
+  slip, priceSlip, priced, onPriced, me, loadMe, setMe, updateMe, onMeChange, onBreak, oddsFormat, favouriteSports, loadSports,
+  leagueTitle, sportEmoji, legKey, legFromOffer, session,
 };
 export const inTelegram = tg.inTelegram;
 
@@ -133,9 +134,13 @@ function parseHash() {
   return { path: path || "today", query: params };
 }
 
-/** Change the address without a new history entry (the in-app history follows). */
-function replaceAddress(hash) {
+/**
+ * Change the address without a new history entry: the in-app history and the screen's scroll key follow, so
+ * Back to this screen later restores where it was scrolled. Screens use this rather than history.replaceState.
+ */
+export function replaceAddress(hash) {
   if (visited.length && visited[visited.length - 1] === location.hash) visited[visited.length - 1] = hash;
+  if (active && active.hash === location.hash) active.hash = hash;
   history.replaceState(history.state, "", hash);
 }
 
@@ -315,23 +320,27 @@ export function setTitle(text) {
   }
 }
 
-/** Ask the screen for its Telegram main button again (after its state changed). */
+/**
+ * Ask the screen for its Telegram main button again (after its state changed). A config with
+ * ``analyse: true`` is the slip's "Analyse": while Telegram shows that, the slip bar's own Analyse button
+ * steps aside (body.tg-analyse), so the screen never offers the same action twice. On a break there is no
+ * default "Analyse" (the server refuses it then).
+ */
 export function refreshMainButton() {
   if (!tg.inTelegram) return;
-  if (sheet.isOpen) {
-    tg.setMainButton(null);
-    return;
-  }
   let config = null;
-  try {
-    config = active?.module?.mainButton?.(active.params) || null;
-  } catch (error) {
-    console.warn(error);
+  if (!sheet.isOpen) {
+    try {
+      config = active?.module?.mainButton?.(active.params) || null;
+    } catch (error) {
+      console.warn(error);
+    }
+    if (!config && slip.count && active?.route?.name !== "build" && !onBreak()) {
+      config = { text: `Analyse slip with AI (${slip.count})`, onClick: analyseSlip, analyse: true };
+    }
   }
-  if (!config && slip.count && active?.route?.name !== "build") {
-    config = { text: `Analyse slip with AI (${slip.count})`, onClick: analyseSlip };
-  }
-  tg.setMainButton(config);
+  const shown = tg.setMainButton(config);
+  document.body.classList.toggle("tg-analyse", Boolean(shown && config?.analyse));
 }
 
 // --- header: quota pill and avatar -------------------------------------------------------------------------
@@ -382,6 +391,7 @@ function legsWord(n) {
 function slipSummary() {
   const n = slip.count;
   const { busy, result, error } = priced();
+  if (onBreak()) return { main: legsWord(n), detail: "on a break" }; // the server prices nothing then
   if (!result) {
     if (busy) return { main: legsWord(n), detail: "pricing…" };
     if (error) return { main: legsWord(n), detail: error.status === 404 ? "tap to review" : "check the slip", warn: true };
@@ -401,6 +411,11 @@ function renderSlipBar() {
   const n = slip.count;
   document.body.classList.toggle("has-slip", n > 0);
   bar.hidden = n === 0;
+  // On a break the server refuses an analysis: Analyse is off, and the break banner says why
+  const analyse = bar.querySelector(".slip-analyse");
+  analyse.disabled = onBreak();
+  if (analyse.disabled) analyse.setAttribute("aria-describedby", "banner");
+  else analyse.removeAttribute("aria-describedby");
   if (!n) return;
   const s = slipSummary();
   bar.querySelector(".slip-open").innerHTML = `<span class="slip-count" aria-hidden="true">${n}</span>
@@ -455,6 +470,8 @@ function slipTypeHtml() {
 /** The server's numbers for the slip: chances, payout, what the bookmaker keeps, expected result, warnings. */
 function slipNumbersHtml() {
   const { busy, result, error } = priced();
+  // On a break the server prices nothing: no numbers from before it, and the line Analyse points to
+  if (onBreak()) return `<div id="slip-break-note">${notice("You're on a break: pricing, analysing and saving a slip are off until it ends.", "info")}</div>`;
   let summary = "";
   if (result && result.bets) {
     const c = result.chance || {};
@@ -504,7 +521,12 @@ function slipSheetFooter() {
   if (!slip.count) return "";
   return `<button type="button" class="btn btn-secondary" data-slip="clear">${icon("trash", { size: 18 })}Clear</button>
     <button type="button" class="btn btn-secondary" data-slip="build">Open in Build</button>
-    <button type="button" class="btn btn-primary grow" data-slip="analyse">${icon("ask", { size: 18 })}Analyse with AI</button>`;
+    <button type="button" class="btn btn-primary grow" data-slip="analyse"${analyseOff()}>${icon("ask", { size: 18 })}Analyse with AI</button>`;
+}
+
+/** The slip sheet's Analyse is off on a break, described by the line in place of the numbers. */
+function analyseOff() {
+  return onBreak() ? ' disabled aria-describedby="slip-break-note"' : "";
 }
 
 let slipSheet = null;
@@ -575,6 +597,12 @@ function refreshSlipSheet() {
   const input = body.querySelector("#slip-stake");
   if (input && document.activeElement !== input) input.value = customStake();
   part("numbers").innerHTML = slipNumbersHtml();
+  const analyse = slipSheet.foot?.querySelector('[data-slip="analyse"]');
+  if (analyse && analyse.disabled !== onBreak()) { // a break started or ended with the sheet open
+    analyse.disabled = onBreak();
+    if (analyse.disabled) analyse.setAttribute("aria-describedby", "slip-break-note");
+    else analyse.removeAttribute("aria-describedby");
+  }
 }
 
 // --- sign-in ---------------------------------------------------------------------------------------------
@@ -583,10 +611,12 @@ let gateOpen = false;
 
 function showGate(html) {
   const gate = $("#gate");
-  gate.innerHTML = `<div class="gate-card" role="dialog" aria-modal="true" aria-labelledby="gate-title">
+  gate.innerHTML = `<div class="gate-card" role="dialog" aria-modal="true" aria-labelledby="gate-title" tabindex="-1">
     <div class="gate-brand">${logo(36)}<span class="brand">SportsBet <b>AI</b></span></div>${html}</div>`;
   gate.hidden = false;
   document.body.classList.add("gated");
+  holdPage("gate", true, ".sheet-layer"); // Tab stays in the gate: the page (and any sheet) behind it is inert
+  gate.querySelector(".gate-card").focus({ preventScroll: true });
   gateOpen = true;
 }
 
@@ -594,6 +624,7 @@ function hideGate() {
   $("#gate").hidden = true;
   $("#gate").innerHTML = "";
   document.body.classList.remove("gated");
+  holdPage("gate", false);
   gateOpen = false;
 }
 
@@ -645,6 +676,49 @@ function showRefused(message) {
   $("#gate [data-close-app]").addEventListener("click", () => tg.closeApp());
 }
 
+/**
+ * Inside Telegram a 401 means Telegram's sign-in data has run out: it lasts 24 hours, only Telegram can
+ * renew it (by opening the app again), and on Telegram Web the session cookie isn't sent from its frame.
+ * The dashboard password is no use to a friend, so this says what to do instead and offers to close the app.
+ */
+function showTelegramExpired(message = "") {
+  if (gateOpen) return;
+  if (sheet.isOpen) sheet.close();
+  const detail = message && !/^sign in/i.test(message) ? message : "";
+  const expired = !detail || /expired/i.test(detail); // else e.g. a wrong signature: the server's words say which
+  showGate(`<h1 id="gate-title">Open the app again</h1>
+    <p>${expired ? "Your Telegram sign-in has run out: it lasts 24 hours." : "Telegram's sign-in couldn't be checked."} Close the app and open it again from the bot to carry on where you left off${expired ? "" : "; if this keeps happening, tell the owner"}.</p>
+    ${detail ? notice(detail, "info") : ""}
+    <button type="button" class="btn btn-primary block" data-close-app>Close the app</button>
+    <p class="muted small">Gambling can be addictive · Help 24/7: 1-800-GAMBLER / 0808 8020 133</p>`);
+  $("#gate [data-close-app]").addEventListener("click", () => tg.closeApp());
+}
+
+let telegramRenewed = false; // one quiet sign-in again per visit, then the notice
+let renewing = false;
+
+/** A 401 inside Telegram: sign in again once with Telegram's data (it works while that is under a day old). */
+async function telegramUnauthorized() {
+  if (gateOpen || renewing) return;
+  if (telegramRenewed) {
+    showTelegramExpired();
+    return;
+  }
+  telegramRenewed = true;
+  renewing = true;
+  try {
+    await telegramLogin(tg.initData());
+    renewing = false;
+    if (started) rerender(); // signed in again: the screen that was refused draws again
+    else start(); // refused while starting up: start again
+  } catch (error) {
+    renewing = false;
+    if (error.status === 403) showRefused(error.message);
+    else if (error.status === 503) showSignIn(`Telegram sign-in didn't work: ${error.message}`);
+    else showTelegramExpired(error.message);
+  }
+}
+
 /** Sign out (password sessions) and show the sign-in form again. */
 export async function signOut() {
   await logout();
@@ -665,8 +739,7 @@ export async function openOnboarding() {
   } catch (error) {
     if (error.signIn) return;
   }
-  const profile = me();
-  const chosen = new Set(profile.favourite_sports?.length ? profile.favourite_sports : ["basketball_nba"]);
+  const chosen = new Set(favouriteSports());
   let format = oddsFormat();
   let showAll = false;
   // The big leagues first; the rest behind "More sports" so the form stays short
@@ -747,7 +820,7 @@ export async function openSportsSheet({ onDone } = {}) {
     if (!isQuiet(error)) toast(error.message, { kind: "error" });
     return;
   }
-  const chosen = new Set(me().favourite_sports || []);
+  const chosen = new Set(favouriteSports()); // what Today and Settings show, NBA until some are saved
   const groups = [];
   for (const s of sports) {
     let group = groups.find((g) => g.label === s.label);
@@ -785,10 +858,16 @@ export async function openSportsSheet({ onDone } = {}) {
 // --- reality check ----------------------------------------------------------------------------------------
 
 let realityTimer = null;
+let realityMinutes = null; // the interval the running timer was set for
 
 function scheduleRealityCheck() {
+  const minutes = me().reality_check_minutes || null;
+  // The profile reloads often (Build, Settings, a saved slip): only a new interval restarts the countdown,
+  // or every reload would push the next reality check back by a whole interval
+  if (minutes === realityMinutes && (realityTimer || !minutes)) return;
   clearInterval(realityTimer);
-  const minutes = me().reality_check_minutes;
+  realityTimer = null;
+  realityMinutes = minutes;
   if (!minutes) return;
   let started = Number(sessionStorage.getItem("sportsbet-session-start")) || Date.now();
   try {
@@ -798,7 +877,7 @@ function scheduleRealityCheck() {
   }
   realityTimer = setInterval(() => {
     const spent = Math.round((Date.now() - started) / 60000);
-    if (sheet.isOpen) return;
+    if (sheet.isOpen || gateOpen) return; // never a sheet behind the sign-in gate, where Tab could reach it
     sheet.open({
       title: "Reality check",
       body: `<p class="lead">You've had the app open for ${spent} minutes.</p><p>Take a moment: is this still fun? You can set a break in Settings.</p>`,
@@ -821,6 +900,39 @@ function drawShell() {
   $("#slipbar .slip-analyse").innerHTML = `${icon("ask", { size: 18 })}<span>Analyse</span>`;
 }
 
+// --- the person's time zone ---------------------------------------------------------------------------------
+
+let timezoneChecked = false;
+
+/** This device's IANA time zone ("Europe/London"), or "" when the browser doesn't say. */
+function deviceTimezone() {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof zone === "string" && /^[A-Za-z0-9_+\-/]{1,64}$/.test(zone) ? zone : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Once per load: when GET /api/me's "timezone" differs from this device's, PUT the device's, so the
+ * server's days, weeks and times follow the person's clock. Quiet: a failure changes nothing on screen,
+ * and a server whose profile has no "timezone" field isn't asked.
+ */
+async function syncTimezone() {
+  const profile = session.me;
+  if (timezoneChecked || !profile || !("timezone" in profile)) return;
+  timezoneChecked = true;
+  const zone = deviceTimezone();
+  if (!zone || zone === profile.timezone) return;
+  try {
+    const updated = await api("/api/me", { method: "PUT", body: { timezone: zone }, auth: false });
+    if (updated && typeof updated === "object" && "uid" in updated) setMe(updated);
+  } catch {
+    /* the server keeps the zone it had; nothing to show */
+  }
+}
+
 let started = false;
 
 async function start() {
@@ -830,6 +942,8 @@ async function start() {
     if (error.signIn) return; // the sign-in form is up; it calls start() again
     toast(error.message, { kind: "error" });
   }
+  // Before the first screen (whose days may follow the zone), but never holding it up for long
+  await Promise.race([syncTimezone(), new Promise((resolve) => { setTimeout(resolve, 1500); })]);
   updateAvatar();
   updateBreakBanner();
   scheduleRealityCheck();
@@ -855,7 +969,7 @@ export async function boot() {
   installUi();
   drawShell();
   setExplainContext(() => ({ priced: priced().result }));
-  onUnauthorized(() => showSignIn());
+  onUnauthorized(() => (tg.inTelegram ? telegramUnauthorized() : showSignIn()));
   slip.onChange(() => {
     renderSlipBar();
     schedulePricing();
@@ -866,10 +980,20 @@ export async function boot() {
     renderSlipBar();
     refreshSlipSheet();
   });
+  let wasOnBreak = onBreak();
   onMeChange(() => {
     updateAvatar();
     updateBreakBanner();
     scheduleRealityCheck();
+    // A break started or ended (here, in another password browser or in the bot): the slip's price from
+    // before is out of date: a break drops it (the server prices nothing then), its end asks again; Analyse follows
+    if (onBreak() !== wasOnBreak) {
+      wasOnBreak = onBreak();
+      if (slip.count) priceSlip({ force: true });
+      refreshMainButton();
+    }
+    renderSlipBar(); // prices in the person's odds format, as the screen behind shows them
+    refreshSlipSheet();
   });
   sheet.onToggle(() => {
     updateBackButton();
@@ -896,8 +1020,10 @@ export async function boot() {
         showRefused(error.message);
         return;
       }
-      // Telegram sign-in isn't set up on this server (503) or the data was stale (401): the password still works
-      if (error.status !== 0) showSignIn(`Telegram sign-in didn't work: ${error.message}`);
+      // Telegram's data is stale or wrong (401): only opening the app again from the bot renews it. Telegram
+      // sign-in isn't set up on this server (503): the owner's password still works.
+      if (error.status === 401) showTelegramExpired(error.message);
+      else if (error.status !== 0) showSignIn(`Telegram sign-in didn't work: ${error.message}`);
     }
   }
   if (!gateOpen) await start();
