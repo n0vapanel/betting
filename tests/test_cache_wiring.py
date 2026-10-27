@@ -100,7 +100,7 @@ def counting_espn(cache: TTLCache, answers: Dict[str, Any], clock: Optional[Cloc
 def test_one_cache_per_process_reaches_every_client_and_service(tmp_path, monkeypatch) -> None:
     for name in ("ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "MARKETS_ENABLED"):
         monkeypatch.delenv(name, raising=False)
-    config = Config(TELEGRAM_BOT_TOKEN="123456:test-token", THE_ODDS_API_KEY="odds-secret-0123456789",
+    config = Config(TELEGRAM_BOT_TOKEN="123456:test-token", THE_ODDS_API_KEY="odds-not-real-for-tests",  # gitleaks:allow (fake test values)
                     STATE_DIRECTORY=str(tmp_path), _env_file=None)
     service = services.build_service(config)
     cache = service.cache
@@ -109,7 +109,7 @@ def test_one_cache_per_process_reaches_every_client_and_service(tmp_path, monkey
     assert utils.shared_cache() is cache  # fetch_json and clients built without a cache
     # The settings' secrets can't reach a cache key
     with pytest.raises(SecretInKey):
-        cache.get(("odds", "odds-secret-0123456789"), 60, lambda: 1)
+        cache.get(("odds", "odds-not-real-for-tests"), 60, lambda: 1)
     # The slate drops a game's computed entries through the service
     slate = services.build_slate(config, service)
     assert slate.on_change == service.invalidate_game

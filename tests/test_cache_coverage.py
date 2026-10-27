@@ -272,8 +272,8 @@ def _drive_everything(cache: TTLCache) -> None:
     sports.get_injuries("soccer", league_id="39")
 
     utils.fetch_json("https://example.test/v1/feed", params={"apiKey": "never-in-a-key", "q": "x"})
-    TheOddsApiClient("legacy-odds-key-123").get_sports()
-    TheOddsApiClient("legacy-odds-key-123").get_odds(nba)
+    TheOddsApiClient("legacy-odds-not-real").get_sports()
+    TheOddsApiClient("legacy-odds-not-real").get_odds(nba)
     NewsApiClient("news-key-not-real-1").get_recent_articles("Lakers")
 
     Polymarket(cache).events(nba)
@@ -332,7 +332,7 @@ def test_every_data_fetch_has_a_policy_kind_and_ttl(recorder: Recorder) -> None:
 def test_no_secret_reaches_a_cache_key_or_the_shared_table(tmp_path, monkeypatch, recorder: Recorder) -> None:
     from telegram_betting_bot_simple.data.store import Store
     store = Store(str(tmp_path / "betting.db"))
-    keys = ("odds-key-not-real-123", "api-sports-key-not-real", "never-in-a-key", "legacy-odds-key-123",
+    keys = ("odds-key-not-real-123", "api-sports-key-not-real", "never-in-a-key", "legacy-odds-not-real",
             "news-key-not-real-1", "deepseek-key-not-real")
     monkeypatch.setattr(cache_module, "_SECRETS", cache_module._SECRETS)  # put back after the test
     cache_module.forbid_secrets(*keys)  # a key carrying one would raise SecretInKey

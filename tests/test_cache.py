@@ -523,7 +523,7 @@ def test_key_text_is_stable_json():
 
 
 def test_a_key_with_a_secret_is_refused_and_secrets_never_reach_the_log(db, caplog):
-    secret = "0123456789abcdef0123456789abcdef"
+    secret = "fake-secret-for-tests-not-real-0001"
     forbid_secrets(secret, "", "short")
     cache = TTLCache(Store(db), clock=Clock())
     with pytest.raises(SecretInKey) as refused:
