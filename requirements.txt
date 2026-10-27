@@ -1,4 +1,6 @@
 # telegram_betting_bot_simple/requirements.txt
+# The server installs requirements.lock (these, pinned with their hashes). After changing a line here, make the
+# lock again with the command at the top of requirements.lock.
 python-telegram-bot==22.8
 pydantic>=2.0
 pydantic-settings>=2.0

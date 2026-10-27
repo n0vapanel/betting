@@ -64,6 +64,11 @@
 #   WEATHER_ENABLED=0             no forecasts (the venue, rest and travel stay; on by default: WEATHER_ENABLED=1)
 #   WEATHER_DAILY_CAP=1000        Open-Meteo calls a day at most, the bot and the dashboard together (default 1000)
 #
+# Python packages are installed from requirements.lock as wheels, each checked against its pinned hash, so a
+# changed or swapped package is refused. If that install fails (say, on a CPU or Python the lock has no wheels for),
+# the update stops before restarting anything; ALLOW_UNPINNED=1 in front of bash installs from requirements.txt
+# without the hash check for that one run. It isn't saved: the next normal run builds a new, checked venv.
+#
 # The dashboard password should be 12 or more characters: a shorter one still works, but the setup
 # warns about it.
 set -euo pipefail
@@ -137,6 +142,97 @@ ask() {
   printf -v "$var" '%s' "$value"
 }
 
+# install_packages APP VENV MARKER OWNER AS...: the Python packages from APP's requirements.lock in VENV, every one a
+# wheel whose hash the lock lists (--require-hashes --only-binary: no unchecked source build). Commands run as AS...
+# (e.g. runuser -u bettingbot -- env HOME=...); new folders belong to OWNER (user:group).
+# MARKER (root's, outside the venv) holds the Python version and the lock's hash VENV was built from. When they
+# differ, a new venv is built and swapped in (new_venv): an older venv may hold unchecked packages (from
+# requirements.txt or an ALLOW_UNPINNED run), and its own interpreter would run their code, so it is replaced rather
+# than cleaned, and a failure leaves it as it was. A package that doesn't match its pinned hash stops the update
+# whatever ALLOW_UNPINNED says. Any other failure, or a missing lock, stops it too, unless ALLOW_UNPINNED=1: then a
+# new venv gets requirements.txt unchecked and MARKER is removed, so the next run builds a checked venv again.
+install_packages() {
+  local app="$1" venv="$2" marker="$3" owner="$4"
+  shift 4
+  local lock="$app/requirements.lock" built log status
+  if [ -f "$lock" ]; then
+    built="python $(python3 -I -c 'import sys; print("%d.%d" % sys.version_info[:2])') lock $(sha256sum < "$lock" | cut -d' ' -f1)"
+    if [ -x "$venv/bin/python" ] && [ "$(cat "$marker" 2>/dev/null)" = "$built" ]; then
+      return 0  # built from this lock on this Python, every package checked
+    fi
+    log="$(mktemp)"
+    new_venv "$venv" "$owner" "$log" "$@" -- --require-hashes --only-binary :all: -r "$lock"
+    status=$?
+    if [ "$status" -eq 0 ]; then
+      rm -f -- "$log"
+      printf '%s\n' "$built" > "$marker"
+      return 0
+    fi
+    if grep -q "DO NOT MATCH THE HASHES" "$log"; then
+      rm -f -- "$log"
+      echo "  A downloaded package didn't match the hash pinned for it: it may have been changed or damaged on the"
+      echo "  way (by a proxy or a package mirror, say). Nothing was changed or restarted. Check the server's"
+      echo "  connection and run this again later; ALLOW_UNPINNED doesn't skip this check."
+      return 1
+    fi
+    rm -f -- "$log"
+    [ "$status" -eq 2 ] && return 1  # the new venv was ready but couldn't be swapped in (said already)
+    echo "  Installing the checked Python packages failed (the error is above)."
+  else
+    echo "  $lock is missing, so the packages can't be checked."
+  fi
+  if [ "${ALLOW_UNPINNED:-0}" != "1" ]; then
+    echo "  Nothing was changed or restarted. To install the packages without the hash check this once, run this"
+    echo "  again with ALLOW_UNPINNED=1 in front of bash."
+    return 1
+  fi
+  echo "  WARNING: installing from requirements.txt without the hash check (ALLOW_UNPINNED=1)."
+  rm -f -- "${marker:?}"
+  log="$(mktemp)"
+  new_venv "$venv" "$owner" "$log" "$@" -- -r "$app/requirements.txt"
+  status=$?
+  rm -f -- "$log"
+  return "$status"
+}
+
+# new_venv VENV OWNER LOG AS... -- PIP_ARGS...: a venv built beside VENV (at VENV.new) from the system Python, run as
+# AS..., filled by "pip install PIP_ARGS" (whose messages are shown and kept in LOG), then swapped in for VENV.
+# Returns 1 if the build failed and 2 if the swap did; either way VENV is left as it was. Interpreters run with -I
+# (isolated mode: not the current folder, PYTHONPATH or user site-packages), and errexit is off in a function
+# called with "||", so each step is checked here.
+new_venv() {
+  local venv="$1" owner="$2" log="$3" fresh="$1.new" as=() from to files=()
+  shift 3
+  while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do as+=("$1"); shift; done
+  shift
+  rm -rf -- "${fresh:?}" "${venv:?}.old"
+  if ! { install -d -o "${owner%%:*}" -g "${owner##*:}" "$fresh" \
+         && "${as[@]}" python3 -I -m venv --clear --prompt "${venv##*/}" "$fresh" \
+         && "${as[@]}" "$fresh/bin/python" -I -m pip install --quiet --no-cache-dir --disable-pip-version-check \
+              "$@" 2> "$log"; }; then
+    cat -- "$log" >&2
+    rm -rf -- "${fresh:?}"
+    return 1
+  fi
+  cat -- "$log" >&2
+  # The scripts pip and venv wrote (pip, activate, uvicorn...) name the folder they were made in: point them at VENV
+  from="$(printf '%s' "$fresh" | sed 's/[][\\.*^$|]/\\&/g')"
+  to="$(printf '%s' "$venv" | sed 's/[&\\|]/\\&/g')"
+  mapfile -t files < <(grep -rlsIF -- "$fresh" "$fresh/bin" "$fresh/pyvenv.cfg")
+  if [ "${#files[@]}" -gt 0 ] && ! "${as[@]}" sed -i "s|$from|$to|g" "${files[@]}"; then
+    echo "  Couldn't finish the new Python packages. Nothing was restarted."
+    rm -rf -- "${fresh:?}"
+    return 2
+  fi
+  if { [ ! -e "$venv" ] || mv -- "$venv" "$venv.old"; } && mv -- "$fresh" "$venv"; then
+    rm -rf -- "${venv:?}.old"
+    return 0
+  fi
+  if [ ! -e "$venv" ] && [ -e "$venv.old" ]; then mv -- "$venv.old" "$venv"; fi
+  echo "  Couldn't put the new Python packages in place. Nothing was restarted."
+  return 2
+}
+
 # warn_short_password VALUE: passwords of 8-11 characters keep working, but say plainly that 12+ is safer.
 # Only the length is printed, never the password
 MIN_SAFE_PASSWORD=12
@@ -156,6 +252,9 @@ set_env() {
 
 main() {
   [ "$(id -u)" -eq 0 ] || { echo "Run this as root (or with sudo)."; exit 1; }
+  # Run from /: Python looks for modules in the current folder first, and the folder this was started from may be
+  # one other users can write to (/tmp, say)
+  cd /
   command -v systemctl >/dev/null || { echo "This needs a Linux server that uses systemd (Ubuntu, Debian, Fedora...)."; exit 1; }
   # The bot user must be able to read what root creates here, even if root's umask is stricter
   umask 022
@@ -188,7 +287,7 @@ main() {
   else
     echo "Couldn't find apt, dnf or yum. Install git and Python 3.10+, then run this again."; exit 1
   fi
-  python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' \
+  python3 -I -c 'import sys; sys.exit(sys.version_info < (3, 10))' \
     || { echo "The bot needs Python 3.10 or newer; this server has $(python3 --version 2>&1)."; exit 1; }
   # Before any settings change, so a server where Caddy can't be installed or can't have ports 80
   # and 443 is left as it was
@@ -214,10 +313,8 @@ main() {
   echo "[4/8] Installing Python packages (can take a minute)..."
   # Install as the bot user so package install scripts never run as root. The service
   # still can't modify its own packages: ProtectSystem=strict makes them read-only.
-  install -d -o "$BOT_USER" -g "$BOT_USER" "$VENV"
-  [ -x "$VENV/bin/python" ] || runuser -u "$BOT_USER" -- python3 -m venv "$VENV"
-  runuser -u "$BOT_USER" -- env HOME="$BASE" "$VENV/bin/pip" install --quiet --no-cache-dir \
-    --disable-pip-version-check -r "$APP/requirements.txt"
+  install_packages "$APP" "$VENV" "$BASE/.packages-hash-checked" "$BOT_USER:$BOT_USER" \
+    runuser -u "$BOT_USER" -- env HOME="$BASE" || exit 1
 
   echo "[5/8] Settings..."
   if [ -f "$ENV_FILE" ]; then
@@ -246,7 +343,7 @@ EOF
   if ! grep -q '^DASHBOARD_PASSWORD=' "$ENV_FILE"; then
     ask DASHBOARD_PASSWORD "Dashboard password (12+ letters/digits, Enter to generate one)" '^([A-Za-z0-9_.@%+=:-]{8,64})?$' secret
     if [ -z "$DASHBOARD_PASSWORD" ]; then
-      DASHBOARD_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(12))')"
+      DASHBOARD_PASSWORD="$(python3 -I -c 'import secrets; print(secrets.token_urlsafe(12))')"
       generated="$DASHBOARD_PASSWORD"
     else
       warn_short_password "$DASHBOARD_PASSWORD"
@@ -299,8 +396,9 @@ EOF
   echo "  The bot is running."
   # Say hello through the notify bridge so you know messages reach your chat
   # shellcheck source=/dev/null
+  # As the bot user, never root: the venv belongs to the bot user (runuser keeps the settings exported here)
   if ( set -a; . "$ENV_FILE"; set +a
-       "$VENV/bin/python" "$APP/brain/notify.py" --emoji "✅" --sport "Betting bot" \
+       runuser -u "$BOT_USER" -- "$VENV/bin/python" -I "$APP/brain/notify.py" --emoji "✅" --sport "Betting bot" \
          --msg "is live on your VPS. Send /start to try it." ) >/dev/null; then
     echo "  Sent a test message to your Telegram chat."
   else
