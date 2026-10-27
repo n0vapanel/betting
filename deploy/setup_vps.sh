@@ -161,7 +161,7 @@ install_packages() {
       return 0  # built from this lock on this Python, every package checked
     fi
     log="$(mktemp)"
-    new_venv "$venv" "$owner" "$log" "$@" -- --require-hashes --only-binary :all: -r "$lock"
+    new_venv "$venv" "$owner" "$log" 5 --require-hashes --only-binary :all: -r "$lock" "$@"
     status=$?
     if [ "$status" -eq 0 ]; then
       rm -f -- "$log"
@@ -189,27 +189,29 @@ install_packages() {
   echo "  WARNING: installing from requirements.txt without the hash check (ALLOW_UNPINNED=1)."
   rm -f -- "${marker:?}"
   log="$(mktemp)"
-  new_venv "$venv" "$owner" "$log" "$@" -- -r "$app/requirements.txt"
+  new_venv "$venv" "$owner" "$log" 2 -r "$app/requirements.txt" "$@"
   status=$?
   rm -f -- "$log"
   return "$status"
 }
 
-# new_venv VENV OWNER LOG AS... -- PIP_ARGS...: a venv built beside VENV (at VENV.new) from the system Python, run as
-# AS..., filled by "pip install PIP_ARGS" (whose messages are shown and kept in LOG), then swapped in for VENV.
+# new_venv VENV OWNER LOG N PIP_ARGS... AS...: a venv built beside VENV (at VENV.new) from the system Python, run as
+# AS..., filled by "pip install" with the N PIP_ARGS (counted, since AS... has its own "--", as in runuser -u USER --),
+# whose messages are shown and kept in LOG, then swapped in for VENV.
 # Returns 1 if the build failed and 2 if the swap did; either way VENV is left as it was. Interpreters run with -I
 # (isolated mode: not the current folder, PYTHONPATH or user site-packages), and errexit is off in a function
 # called with "||", so each step is checked here.
 new_venv() {
-  local venv="$1" owner="$2" log="$3" fresh="$1.new" as=() from to files=()
-  shift 3
-  while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do as+=("$1"); shift; done
-  shift
+  local venv="$1" owner="$2" log="$3" n="$4" fresh="$1.new" pip_args=() as=() from to files=()
+  shift 4
+  pip_args=("${@:1:n}")
+  shift "$n"
+  as=("$@")
   rm -rf -- "${fresh:?}" "${venv:?}.old"
   if ! { install -d -o "${owner%%:*}" -g "${owner##*:}" "$fresh" \
          && "${as[@]}" python3 -I -m venv --clear --prompt "${venv##*/}" "$fresh" \
          && "${as[@]}" "$fresh/bin/python" -I -m pip install --quiet --no-cache-dir --disable-pip-version-check \
-              "$@" 2> "$log"; }; then
+              "${pip_args[@]}" 2> "$log"; }; then
     cat -- "$log" >&2
     rm -rf -- "${fresh:?}"
     return 1

@@ -63,6 +63,14 @@ LOCK_COMMAND = "uv pip compile requirements.txt --universal --generate-hashes --
 
 
 STUB = """#!/bin/sh
+# Stands in for "runuser -u USER -- env HOME=... COMMAND...", as strict about runuser's own options as the real one
+[ "$1" = -u ] && [ -n "$2" ] || { echo "runuser: expected -u USER" >&2; exit 1; }
+shift 2
+[ "$1" = -- ] || { echo "runuser: invalid option -- '$1'" >&2; exit 1; }
+shift
+[ "$1" = env ] || { echo "stand-in: expected env after --" >&2; exit 1; }
+shift
+while [ "${1#*=}" != "$1" ]; do shift; done
 echo "$*" >> "$CALLS"
 if [ "$1" = sed ]; then exec "$@"; fi
 case "$*" in *"$FAILS"*) exit 1;; esac
@@ -80,8 +88,9 @@ esac
 
 def run_install(tmp_path: Path, *, lock: bool = True, fails: str = "", allow: str = "", old_venv: bool = False,
                 marker: str = "", hash_mismatch: bool = False) -> subprocess.CompletedProcess:
-    """install_packages with a stand-in for runuser that records each command, makes a pretend venv for
-    "python3 -I -m venv", runs sed for real, and fails any command containing ``fails``."""
+    """install_packages called the way setup_vps.sh calls it (... runuser -u bettingbot -- env HOME=...), with a
+    stand-in for runuser that records each command, makes a pretend venv for "python3 -I -m venv", runs sed for real,
+    and fails any command containing ``fails``."""
     import grp
     import os
     import pwd
@@ -106,8 +115,9 @@ def run_install(tmp_path: Path, *, lock: bool = True, fails: str = "", allow: st
            "FAILS": fails or "NEVER MATCHES", "HASH_MISMATCH": "1" if hash_mismatch else ""}
     script = "\n".join(helper(name) for name in ("install_packages", "new_venv"))
     run = subprocess.run([BASH, "-c", f'set -euo pipefail\n{script}\n'
-                          'install_packages "$1" "$2" "$3" "$4" "$5" || exit 1', "-", str(app), str(venv), str(mark),
-                          owner, str(stub)], capture_output=True, text=True, env=env)
+                          'install_packages "$1" "$2" "$3" "$4" "$5" -u bettingbot -- env HOME="$6" || exit 1', "-",
+                          str(app), str(venv), str(mark), owner, str(stub), str(tmp_path)],
+                         capture_output=True, text=True, env=env)
     calls = tmp_path / "calls"
     run.calls = calls.read_text().splitlines() if calls.exists() else []  # type: ignore[attr-defined]
     run.venv, run.mark = venv, mark  # type: ignore[attr-defined]
