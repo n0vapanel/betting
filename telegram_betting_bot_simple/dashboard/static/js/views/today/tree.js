@@ -3,7 +3,8 @@
 // the shell's left pane (mountTree); on tablet it is a drawer and on phone a tall sheet (openTreeDrawer),
 // the same element each time, so its state and listeners carry over.
 //
-//   const tree = createTree({onSelect(selection, {only}), onPreset(preset), onSavePreset(name), onDeletePreset(i), onPin()})
+//   const tree = createTree({onSelect(selection, {only}), onPreset(preset), onSavePreset(name), onDeletePreset(i), onPin(),
+//                            views, pins, countWords, only})
 //   tree.el                                     the element to mount
 //   tree.update({prepared, counts, selection, pinned, presets, activePreset, liveCount})   redraw
 //   selection: null for every league, else a Set of league keys (an empty Set: none)
@@ -11,6 +12,11 @@
 // A checkbox adds or removes; the name beside it shows only that league (or sport): that is "opening" a
 // league, which is when its odds are asked for. Native checkboxes, so keyboards and screen readers get the
 // mixed state for free. Every outside text is escaped.
+//
+// Other screens reuse it (the Builder's "Sports" control): ``views: false`` leaves out the saved views row,
+// ``pins: false`` the "Pin your sports" button; ``countWords`` says what a league's count counts ("on the day
+// shown" on Today, "in your time window" in the Builder) and ``only`` is the verb of its name buttons
+// ("Show only" on Today, "Only" in the Builder).
 
 import { esc } from "../../ui.js";
 import { icon } from "../../icons.js";
@@ -27,7 +33,8 @@ let seq = 0;
 /** The live count beside a row's name: a pulsing dot and the number (words are in the row's label). */
 const liveHtml = (n) => (n ? `<span class="lt-live" title="${esc(`${n} live now`)}" aria-hidden="true"><span class="live-dot"></span>${esc(n)}</span>` : "");
 
-export function createTree({ onSelect, onPreset, onSavePreset, onDeletePreset, onPin }) {
+export function createTree({ onSelect, onPreset = () => {}, onSavePreset = () => {}, onDeletePreset = () => {}, onPin = () => {},
+  views = true, pins = true, countWords = "on the day shown", only = "Show only" }) {
   const id = `lt${++seq}`;
   const el = document.createElement("div");
   el.className = "lt";
@@ -66,10 +73,10 @@ export function createTree({ onSelect, onPreset, onSavePreset, onDeletePreset, o
     const c = counts.get(entry.key) || { count: 0, live: 0 };
     const on = !selection || selection.has(entry.key);
     const week = last?.prepared.week.get(entry.key) || 0;
-    const words = [`${c.count} game${c.count === 1 ? "" : "s"} on the day shown`, c.live ? `${c.live} live` : "", `${week} in the next 7 days`, ODDS_WORDS[entry.odds] || ODDS_WORDS.none].filter(Boolean).join(", ");
+    const words = [`${c.count} game${c.count === 1 ? "" : "s"} ${countWords}`, c.live ? `${c.live} live` : "", `${week} in the next 7 days`, ODDS_WORDS[entry.odds] || ODDS_WORDS.none].filter(Boolean).join(", ");
     return `<li class="lt-row lt-league${c.count ? "" : " lt-zero"}" data-league="${esc(entry.key)}">
       <label class="lt-hit"><input type="checkbox" class="lt-box" data-lt-box="league" value="${esc(entry.key)}"${on ? " checked" : ""} aria-label="${esc(`Include ${entry.title}`)}"></label>
-      <button type="button" class="lt-name" data-only="${esc(entry.key)}" aria-label="${esc(`Show only ${entry.title}: ${words}`)}" title="${esc(words)}">
+      <button type="button" class="lt-name" data-only="${esc(entry.key)}" aria-label="${esc(`${only} ${entry.title}: ${words}`)}" title="${esc(words)}">
         <span class="lt-text">${esc(entry.title)}${pinned.includes(entry.key) ? ` ${icon("star", { size: 12, className: "lt-pin", label: "pinned" })}` : ""}</span>
         <span class="lt-dots">${dots(entry, counts)}</span><span class="lt-n">${esc(c.count)}</span>
       </button>
@@ -95,7 +102,7 @@ export function createTree({ onSelect, onPreset, onSavePreset, onDeletePreset, o
       return `<li class="lt-group" data-group="${esc(g.key)}">
         <div class="lt-row lt-grow">
           <label class="lt-hit"><input type="checkbox" class="lt-box" data-lt-box="group" data-group="${esc(g.key)}"${state === "on" ? " checked" : ""} data-mixed="${state === "mixed"}" aria-label="${esc(`Include all ${name}`)}"></label>
-          <button type="button" class="lt-name" data-only-group="${esc(g.key)}" aria-label="${esc(`Show only ${name}: ${count} game${count === 1 ? "" : "s"}${live ? `, ${live} live` : ""}`)}">
+          <button type="button" class="lt-name" data-only-group="${esc(g.key)}" aria-label="${esc(`${only} ${name}: ${count} game${count === 1 ? "" : "s"}${live ? `, ${live} live` : ""}`)}">
             <span class="lt-icon" aria-hidden="true">${esc(groupIcon(g.label))}</span><span class="lt-text">${esc(name)}</span>
             <span class="lt-dots">${liveHtml(live)}</span><span class="lt-n">${esc(count)}</span>
           </button>
@@ -110,7 +117,7 @@ export function createTree({ onSelect, onPreset, onSavePreset, onDeletePreset, o
     const form = el.querySelector("[data-preset-form]");
     const formOpen = form && !form.hidden;
     const typed = form?.querySelector("input")?.value || "";
-    el.innerHTML = `${presetHtml(next)}
+    el.innerHTML = `${views ? presetHtml(next) : ""}
       <div class="lt-row lt-all">
         <label class="lt-hit"><input type="checkbox" class="lt-box" data-lt-box="all"${allState === "on" ? " checked" : ""} data-mixed="${allState === "mixed"}" aria-label="Include every sport"></label>
         <button type="button" class="lt-name" data-only-all aria-label="${esc(`Show all sports: ${total} game${total === 1 ? "" : "s"}${totalLive ? `, ${totalLive} live` : ""}`)}">
@@ -119,7 +126,7 @@ export function createTree({ onSelect, onPreset, onSavePreset, onDeletePreset, o
       </div>
       <ul class="lt-groups">${body}</ul>
       <p class="lt-key small muted"><span class="odds-dot fresh" aria-hidden="true"></span> odds fresh · <span class="odds-dot stale" aria-hidden="true"></span> over 2 h · <span class="odds-dot none" aria-hidden="true"></span> load when opened</p>
-      <button type="button" class="btn btn-ghost small lt-pins" data-pin-sports>${icon("star", { size: 16 })}${pinned.length ? "Change your pinned sports" : "Pin your sports to the top"}</button>`;
+      ${pins ? `<button type="button" class="btn btn-ghost small lt-pins" data-pin-sports>${icon("star", { size: 16 })}${pinned.length ? "Change your pinned sports" : "Pin your sports to the top"}</button>` : ""}`;
     for (const box of el.querySelectorAll('input[data-mixed="true"]')) box.indeterminate = true;
     if (formOpen) {
       const f = el.querySelector("[data-preset-form]");

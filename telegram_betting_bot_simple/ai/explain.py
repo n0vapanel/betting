@@ -30,6 +30,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set,
 import anthropic
 from pydantic import BaseModel, ValidationError
 
+from ..engine.soccer import MODEL_BOOK
 from ..engine.tickets import ai_given_no_push
 from .claude import FALLBACK_BETA, FALLBACK_MODELS, PRICES, UNKNOWN_PRICE, usage_cost
 
@@ -686,11 +687,17 @@ def template_explanation(fact_sheet: Dict[str, Any]) -> Dict[str, Any]:
     chance = ticket.get("chance") or {}
     expected = ticket.get("expected") or {}
     stake = ticket.get("total_stake") or ticket.get("unit_stake")
+    legs = _legs(fact_sheet)
+    # A leg priced at the goals model's fair odds (soccer btts, dnb, double chance, team totals): its chance is that
+    # model's, and no bookmaker here offers its price
+    fair = [leg for leg in legs if leg.get("book") == MODEL_BOOK]
+    only_fair = bool(fair) and len(fair) == len(legs)
+    who = "the goals model" if only_fair else "the AI and the goals model" if fair else "the AI"
     parts = []
     if chance.get("ai_one_in") or chance.get("market_one_in"):
         views = []
         if chance.get("ai_one_in"):
-            views.append(f"about {one_in_text(chance['ai_one_in'])} ({pct(chance.get('ai'))}) by the AI")
+            views.append(f"about {one_in_text(chance['ai_one_in'])} ({pct(chance.get('ai'))}) by {who}")
         if chance.get("market_one_in"):
             views.append(f"{one_in_text(chance['market_one_in'])} ({pct(chance.get('market'))}) by the market")
         label = f"{str(chance['label']).capitalize()}: " if chance.get("label") else ""
@@ -706,13 +713,12 @@ def template_explanation(fact_sheet: Dict[str, Any]) -> Dict[str, Any]:
     if expected.get(basis) is not None and stake:
         value = Decimal(str(expected[basis]))
         word = "lose about {} of" if value < 0 else "make about {} on"
-        parts.append(f"On average you {word.format(money(abs(value)))} your {money(stake)} "
-                     f"({'the AI' if basis == 'ai' else 'the market'}'s view).")
+        view = (f"{who}'s view" + (", at fair odds" if fair else "")) if basis == "ai" else "the market's view"
+        parts.append(f"On average you {word.format(money(abs(value)))} your {money(stake)} ({view}).")
     verdict = " ".join(parts) or "This ticket couldn't be priced, so there is nothing to explain yet."
 
     notes = _leg_notes(fact_sheet)
     per_leg = []
-    legs = _legs(fact_sheet)
     for i, leg in enumerate(legs):
         index = leg.get("index", i)
         odds = (leg.get("odds") or {}).get("decimal")
@@ -721,7 +727,8 @@ def template_explanation(fact_sheet: Dict[str, Any]) -> Dict[str, Any]:
         both = ai is not None and market is not None and push > 0
         if ai is not None:
             # The AI's chance is outright and the market's given no push: side by side, both given no push
-            bits.append(f"AI {pct(ai_given_no_push(ai, push) if both else ai)}")
+            name = "goals model" if leg.get("book") == MODEL_BOOK else "AI"
+            bits.append(f"{name} {pct(ai_given_no_push(ai, push) if both else ai)}")
         if market is not None:
             bits.append(f"market {pct(market)}" + (" (both given no push)" if both else ""))
         text = ": ".join([bits[0], ", ".join(bits[1:])]) if len(bits) > 1 else bits[0]
@@ -738,8 +745,12 @@ def template_explanation(fact_sheet: Dict[str, Any]) -> Dict[str, Any]:
         leg = legs[weakest]
         p = leg.get("ai_prob") if leg.get("ai_prob") is not None else leg.get("market_prob")
         against.append(f"The weakest leg is {leg.get('label', 'one leg')}" + (f" at {pct(p)}" if p is not None else "") + ".")
-    if len(legs) > 1:
+    if len(legs) > 1 and not only_fair:
         against.append("Each extra leg adds the bookmaker's cut again.")
+    if fair:
+        names = ", ".join(str(leg.get("label", "a leg")) for leg in fair)
+        against.append(f"{names} {'is' if len(fair) == 1 else 'are'} priced at fair odds: no bookmaker here offers "
+                       "that price, and theirs is usually lower, so check it.")
     most = ticket.get("most_likely") or {}
     if most.get("result") and most.get("probability") is not None:
         against.append(f"The most likely result is {most['result']} ({pct(most['probability'])}).")

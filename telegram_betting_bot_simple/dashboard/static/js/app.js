@@ -14,7 +14,7 @@
 //   onLeave()              optional. Clean up timers and listeners outside ``root``.
 //   title                  optional string (or set it with setTitle()) for the header on sub-pages.
 // Routes (hash based, so a link is just href="#/..."):
-//   #/today  #/game/<league>/<id>  #/player/<league>/<id>  #/build  #/build/rollover  #/ask
+//   #/today  #/game/<league>/<id>  #/player/<league>/<id>  #/build  #/build/rollover  #/build/builder  #/ask
 //   #/bets  #/help  #/help/<topic>  #/settings        (?query parts are passed in params.query)
 // Deep links in use: #/ask?game=<league>:<id>  #/ask?player=<league>:<id>&name=..  #/build?analyse=1
 //   #/game/<league>/<id>?section=analysts  #/bets?tab=calls|leaders|record|slips
@@ -128,7 +128,8 @@ const ROUTES = [
   { name: "today", pattern: /^today$/, tab: "today", load: () => import("./views/today.js") },
   { name: "game", pattern: /^game\/([a-z0-9_]{2,64})\/([A-Za-z0-9_-]{1,64})$/, keys: ["league", "id"], tab: "today", sub: "#/today", title: "Game", load: () => import("./views/game.js") },
   { name: "player", pattern: /^player\/([a-z0-9_]{2,64})\/([0-9]{1,12})$/, keys: ["league", "id"], tab: "today", sub: "#/today", title: "Player", load: () => import("./views/player.js") },
-  { name: "build", pattern: /^build(?:\/(rollover))?$/, keys: ["mode"], tab: "build", title: "Rollover planner", load: () => import("./views/build.js") },
+  { name: "build", pattern: /^build(?:\/(rollover|builder))?$/, keys: ["mode"], tab: "build", title: "Rollover planner",
+    titles: { rollover: "Rollover planner", builder: "Builder" }, load: () => import("./views/build.js") },
   { name: "ask", pattern: /^ask$/, tab: "ask", load: () => import("./views/ask.js") },
   { name: "bets", pattern: /^bets$/, tab: "bets", load: () => import("./views/bets.js") },
   { name: "help", pattern: /^help(?:\/([a-z0-9_-]{1,40}))?$/, keys: ["topic"], tab: "help", title: "Help", load: () => import("./views/help.js") },
@@ -367,9 +368,10 @@ function updateChrome() {
     else tab.removeAttribute("aria-current");
   }
   document.body.dataset.route = route.name;
+  document.body.dataset.sub = (route.name === "build" && params.mode) || ""; // "rollover" | "builder" (layout and styles)
   $("#skip").textContent = route.name === "today" ? "Skip to games" : "Skip to content";
   $("#back").hidden = !sub || tg.inTelegram;
-  drawTitle(sub ? route.title || "" : null); // a screen may set a better one once its data is in
+  drawTitle(sub ? route.titles?.[params.mode] || route.title || "" : null); // a screen may set a better one once its data is in
   if (route.name === "settings") $(".avatar").setAttribute("aria-current", "page");
   else $(".avatar").removeAttribute("aria-current");
   updateBackButton();
@@ -595,7 +597,7 @@ function slipSheetBody(view) {
   if (!slip.count) {
     return `<div class="empty"><div class="empty-icon">${icon("bets", { size: 28 })}</div><h3>Your slip is empty</h3>
       <p>Tap any price on Today to add a pick, or let the AI build one.</p>
-      <div class="empty-actions"><a class="btn btn-primary" href="#/today">Browse games</a><a class="btn btn-secondary" href="#/build">Let AI build one</a></div></div>`;
+      <div class="empty-actions"><a class="btn btn-primary" href="#/today">Browse games</a><a class="btn btn-secondary" href="#/build/builder">Let AI build one</a></div></div>`;
   }
   return `
     <ul class="slip-legs" data-part="legs">${slipLegsHtml(priced().result)}</ul>
@@ -1427,6 +1429,7 @@ export async function boot() {
   drawShell();
   desk.initLayout({
     routeName: () => active?.route?.name || null,
+    routeMode: () => active?.params?.mode || null,
     match: (hash) => {
       const text = String(hash).replace(/^#\/?/, "");
       const q = text.indexOf("?");

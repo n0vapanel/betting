@@ -5,6 +5,14 @@ best prices, the market's margin-free probabilities and, for the NBA, the
 model's predicted score, win/cover/over chances, injuries and player
 projections. Bet slips are always priced here from the cached odds, never
 from prices the browser sends.
+
+For the Builder (v3 Stage 3) it assembles every usable leg from what is
+already in hand, never fetching (builder_candidates): the slate's games, each
+league's saved odds board (every price book's price at the consensus line),
+"Markets say" (the blend as the chance; disagreement and low-confidence
+flags) and the NBA model's cached lines for "why". Soccer games whose board
+has the 1X2 and over/under 2.5 add the goals model's markets (engine/soccer.py)
+at fair odds, and the game route carries that model as ``soccer``.
 """
 
 from __future__ import annotations
@@ -17,7 +25,8 @@ import logging
 import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional, Tuple
+from decimal import Decimal
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
 from ..ai.desk import AnalystDesk
@@ -29,7 +38,7 @@ from ..data.leagues import SPORTS, pick_leagues
 from ..data.odds_service import OddsService, book_roles, is_price_book, moneylines, summarize_markets
 from ..data.store import Store
 from ..engine import bets, calls, consensus, nba_model
-from ..engine.odds_math import decimal_to_american, format_american
+from ..engine.odds_math import decimal_to_american, format_american, remove_vig
 from ..engine.slip import Leg, evaluate_slip
 
 MODEL_VERSION = "v1"
@@ -100,7 +109,10 @@ def _parse_time(value: str) -> datetime.datetime:
 
 
 def outcome_label(game: Dict[str, Any], market: str, side: str, point: Optional[float]) -> str:
-    """How a pick reads on a bet slip, e.g. "Oklahoma City Thunder -13.5" or "Over 224.5"."""
+    """How a pick reads on a bet slip, e.g. "Oklahoma City Thunder -13.5" or "Over 224.5"; a soccer goals-model pick
+    reads "Both teams to score: Yes", "Arsenal (draw no bet)", "Arsenal or draw" or "Arsenal over 1.5 goals"."""
+    if market in DERIVED_MARKETS:
+        return derived_label(game["home"], game["away"], market, side, point)
     team = {"home": game["home"], "away": game["away"], "draw": "Draw"}.get(side, side.title())
     if market == "h2h":
         return team if side == "draw" else f"{team} to win"
@@ -109,6 +121,157 @@ def outcome_label(game: Dict[str, Any], market: str, side: str, point: Optional[
     if market == "totals" and point is not None:
         return f"{side.title()} {point:g}"
     return team
+
+
+# --- soccer's goals model (engine/soccer.py) and the builder's markets ------------------------------------
+#
+# A soccer game whose saved board has the 1X2 and over/under 2.5 (every book quoting both sides at 2.5) is turned into
+# goal rates and a Dixon-Coles grid (soccer.derive: rho -0.13, a +1.5-point nudge to both teams to score), and from
+# that the markets the board doesn't carry: both teams to score, draw no bet, double chance, team totals and the
+# likeliest scores. The 1X2 fed in is the markets brain's blend where the slate has one, else the books' margin-free
+# 1X2, so the game page and the builder read the same model. No bookmaker prices those markets here (the board asks
+# only for moneylines, spreads and totals: more markets cost more credits), so they are shown, and built with, at
+# fair odds ("model_price"): check your bookmaker's price.
+
+BOARD_MARKETS = ("h2h", "spreads", "totals")
+DERIVED_MARKETS = ("btts", "draw_no_bet", "double_chance", "team_totals")  # engine/builder.py's SOCCER_MARKETS
+DERIVED_SIDES: Dict[str, Tuple[str, ...]] = {
+    "btts": ("yes", "no"), "draw_no_bet": ("home", "away"), "double_chance": ("1X", "12", "X2"),
+    "team_totals": ("home_over", "home_under", "away_over", "away_under"),
+}
+MODEL_BOOK = "Fair odds"  # engine/soccer.py's MODEL_BOOK: the "book" of a leg priced at the goals model's fair odds
+FAIR_PRICE_NOTE = "Priced at fair odds; check your bookmaker's price."
+SOCCER_LINE = 2.5  # the over/under line the goal rates are fitted to
+SOCCER_TTL = 2 * 3600.0  # a game's goals model, keyed by its inputs: a new board is a new entry
+STALE_PRICE = 2 * 3600  # a board older than the odds service's 2 hours marks its legs "stale_price"
+
+
+def derived_label(home: str, away: str, market: str, side: str, point: Optional[float]) -> str:
+    """engine/soccer.py's words for a goals-model pick ("Both teams to score: Yes", "Arsenal (draw no bet)", "Arsenal
+    or draw", "Arsenal over 1.5 goals")."""
+    if market == "btts":
+        return "Both teams to score: Yes" if side == "yes" else "Both teams to score: No"
+    if market == "draw_no_bet":
+        return f"{home if side == 'home' else away} (draw no bet)"
+    if market == "double_chance":
+        return {"1X": f"{home} or draw", "X2": f"Draw or {away}", "12": f"{home} or {away}"}.get(side, side)
+    if market == "team_totals":
+        team, _, way = side.partition("_")
+        name = home if team == "home" else away
+        return f"{name} {way} {point:g} goals" if point is not None else f"{name} {way}"
+    return side
+
+
+def _fair_chance(chances: List[float]) -> Optional[float]:
+    return sum(chances) / len(chances) if chances else None
+
+
+def soccer_inputs(game: Mapping[str, Any], one_x_two: Optional[Mapping[str, Any]] = None
+                  ) -> Optional[Dict[str, float]]:
+    """The goals model's inputs from a saved board: the 1X2 (``one_x_two``, the blend, when given with all three
+    outcomes; else summarize_markets' margin-free 1X2, every book pricing all three sides, sharp books included) and
+    the margin-free chance of over 2.5 goals (each book quoting both sides at 2.5, de-vigged, averaged). None when
+    either is missing."""
+    fair: Dict[str, Any] = {}
+    if one_x_two and all(isinstance(one_x_two.get(k), (int, float)) for k in ("home", "draw", "away")):
+        fair = {k: float(one_x_two[k]) for k in ("home", "draw", "away")}
+    else:
+        try:
+            h2h = summarize_markets(dict(game)).get("h2h") or {}
+        except Exception:
+            return None
+        fair = {side: (h2h.get(side) or {}).get("fair") for side in ("home", "draw", "away")}
+    if not all(isinstance(value, float) and 0 < value < 1 for value in fair.values()):
+        return None
+    overs = []
+    for book in game.get("books") or []:
+        outcomes = ((book.get("markets") or {}).get("totals") or {}) if isinstance(book, Mapping) else {}
+        over, under = outcomes.get("over"), outcomes.get("under")
+        if not (isinstance(over, Mapping) and isinstance(under, Mapping)):
+            continue
+        if over.get("point") != SOCCER_LINE or under.get("point") != SOCCER_LINE:
+            continue
+        try:
+            overs.append(remove_vig([float(over["price"]), float(under["price"])])[0])
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            continue
+    over_2_5 = _fair_chance(overs)
+    if over_2_5 is None or not 0 < over_2_5 < 1:
+        return None
+    return {"home": fair["home"], "draw": fair["draw"], "away": fair["away"], "over_2_5": over_2_5}
+
+
+def _offer(p: float, push: float = 0.0) -> Dict[str, Any]:
+    """One goals-model outcome for the game page: its chance (outright), the push (draw no bet's draw), its fair odds
+    (soccer.fair_odds: (1 - push) / chance) and the book price, which the board never has for these markets."""
+    from ..engine import soccer
+    fair = soccer.fair_price(p, push)  # the price the Builder's leg has (rounded down to the cent)
+    entry: Dict[str, Any] = {"p": round(p, 4), "fair": float(fair) if fair is not None else None, "book": None}
+    if push:
+        entry["push"] = round(push, 4)
+    return entry
+
+
+def soccer_view(home: str, away: str, inputs: Mapping[str, float], derived: Mapping[str, Any]) -> Dict[str, Any]:
+    """The game route's "Goals model" block from soccer.derive's result."""
+    from ..engine import soccer
+    m = derived["markets"]
+    one = m["1x2"]
+    team_totals = {team: [{"line": float(line), "over": _offer(sides["over"]), "under": _offer(sides["under"])}
+                          for line, sides in sorted(m["team_totals"][team].items(), key=lambda item: float(item[0]))]
+                   for team in ("home", "away")}
+    return {
+        "rates": {"home": round(derived["rates"]["home"], 3), "away": round(derived["rates"]["away"], 3)},
+        "rho": derived["rho"],
+        "btts_nudge": derived.get("btts_nudge"),
+        "inputs": {key: round(float(value), 4) for key, value in inputs.items()},
+        "fit": derived.get("fit"), "fit_ok": derived.get("fit_ok"),
+        "model_1x2": {key: round(one[key], 4) for key in ("home", "draw", "away")},
+        "expected_goals": {key: round(value, 3) for key, value in (m.get("expected_goals") or {}).items()},
+        "markets": {
+            "btts": {"yes": _offer(m["btts"]["yes"]), "no": _offer(m["btts"]["no"])},
+            # Draw no bet: the draw gives the stake back, so the chance shown is the win outright, with the push
+            "draw_no_bet": {side: _offer(one[side], one["draw"]) for side in ("home", "away")},
+            "double_chance": {side: _offer(m["double_chance"][side]) for side in ("1X", "12", "X2")},
+            "team_totals": team_totals,
+        },
+        "correct_score": [{"score": row["score"], "p": round(row["p"], 4),
+                           "fair": float(soccer.fair_price(row["p"])) if row["p"] > 0 else None}
+                          for row in m.get("correct_score") or []],
+        "teams": {"home": home, "away": away},
+        "note": ("Goal rates fitted to the market's 1X2 and over/under 2.5, then a Dixon-Coles grid (rho "
+                 f"{derived['rho']:g}) with a +1.5-point nudge to both teams to score. No bookmaker prices these "
+                 "markets here: priced at fair odds; check your bookmaker's price."),
+    }
+
+
+def leg_key(league: str, event_id: str, market: str, side: str, point: Optional[float]) -> str:
+    """The pricing engine's stable id for a pick, e.g. "basketball_nba:<event>:spreads:home:-3.5"."""
+    key = f"{league}:{event_id}:{market}:{side}"
+    return key if point is None else f"{key}:{point:g}"
+
+
+def _line_prices(event: Mapping[str, Any], market: str, side: str, point: Optional[float]) -> Dict[str, Decimal]:
+    """Every price book's price for one outcome at one line (titles as keys): the builder picks the best among the
+    books a person allows. Never a sharp book or an exchange."""
+    prices: Dict[str, Decimal] = {}
+    for book in event.get("books") or []:
+        if not isinstance(book, Mapping) or not is_price_book(book):
+            continue
+        offer = ((book.get("markets") or {}).get(market) or {}).get(side)
+        if not isinstance(offer, Mapping) or offer.get("point") != point:
+            continue
+        price = offer.get("price")
+        if isinstance(price, (int, float)) and price > 1:
+            title = str(book.get("title") or book.get("key"))
+            value = Decimal(str(price))
+            if title not in prices or value > prices[title]:
+                prices[title] = value
+    return prices
+
+
+def _pct(p: float) -> str:
+    return f"{p:.0%}"
 
 
 class DashboardService:
@@ -212,6 +375,11 @@ class DashboardService:
                                           _partial, stale=stale, kind="game_card")
         card = _started_now(copy.deepcopy(payload["card"]))
         card["consensus"] = self._consensus(league, event_id, game, payload.get("model"), state)
+        # Soccer's goals model, from the same 1X2 the builder uses (the blend, else the books'): its own computed entry
+        blend = ((card["consensus"] or {}).get("blend") or {}).get("p") if isinstance(card["consensus"], dict) else None
+        soccer = self.soccer_model(league, game, blend if isinstance(blend, dict) and "draw" in blend else None)
+        if soccer is not None:
+            card["soccer"] = soccer
         return card
 
     # --- computed entries: one game's inputs, its parts, and dropping them ----------------------------------
@@ -978,7 +1146,8 @@ class DashboardService:
     # --- AI-built bets: safe, risky, crazy --------------------------------------
 
     def ai_bets(self, league: str, source: str = "all", player: Optional[str] = None) -> Dict[str, Any]:
-        """Bets at three risk levels from the league's upcoming games, or only from someone's calls."""
+        """Bets at three risk levels from the league's upcoming games, or only from someone's calls: the Builder's
+        tickets (engine/builder.py) under the Safe, Risky and Crazy presets, one bookmaker at a time (engine/bets.py)."""
         board = self.games(league)
         allowed = self._legs_from_calls(league, player, board) if source == "mine" and player else None
         candidates = []
@@ -994,7 +1163,7 @@ class DashboardService:
                         candidates.append(bets.Candidate(
                             event_id=card["id"], game=f"{card['away']} @ {card['home']}", market=market, side=side,
                             point=offer["point"], label=offer["label"], probability=offer["ai"], fair=offer["fair"],
-                            prices=prices, push=offer.get("push") or 0.0,
+                            prices=prices, push=offer.get("push") or 0.0, start=card["start"],
                         ))
         if league in AI_LEAGUES:
             note = ("Built from the AI's chances and the best price at one bookmaker per bet. The AI leans on the "
@@ -1054,6 +1223,276 @@ class DashboardService:
                 if line is not None and total != line:
                     legs.add((card["id"], "totals", "over" if total > line else "under"))
         return legs
+
+    # --- soccer's goals model and the builder's candidates (engine/builder.py) ---------------------------
+
+    def _blend_of(self, league: str, event_id: str) -> Optional[Dict[str, float]]:
+        """The markets brain's blended chances for a game, from the slate's detail (this process's slate only)."""
+        if self.slate is None:
+            return None
+        detail = self._slate_detail(league, str(event_id))
+        blend = (detail or {}).get("blend") or {}
+        p = blend.get("p") if isinstance(blend, Mapping) else None
+        return dict(p) if isinstance(p, Mapping) else None
+
+    def soccer_derived(self, league: str, game: Optional[Mapping[str, Any]],
+                       one_x_two: Optional[Mapping[str, Any]] = None) -> Optional[Tuple[Dict[str, float], Dict[str, Any]]]:
+        """(inputs, soccer.derive's result) for a soccer game whose saved board has the 1X2 and over/under 2.5, else
+        None. A computed entry (kind "soccer_model") keyed by the game and its inputs, so the game route, the builder
+        and both processes fit it once per board. ``one_x_two``: the blend (default: the slate's, when it has one)."""
+        if not league.startswith("soccer_") or not game or not game.get("id"):
+            return None
+        if one_x_two is None:
+            one_x_two = self._blend_of(league, str(game["id"]))
+        inputs = soccer_inputs(game, one_x_two)
+        if inputs is None:
+            return None
+        sig = tuple(round(inputs[key], 6) for key in ("home", "draw", "away", "over_2_5"))
+        key = ("soccer_model", league, str(game["id"]), sig)
+
+        def fit() -> Dict[str, Any]:
+            from ..engine import soccer  # the engine's goals model (Stage 3)
+            return soccer.derive(inputs["home"], inputs["draw"], inputs["away"], inputs["over_2_5"])
+
+        try:
+            return inputs, self.cache.get(key, SOCCER_TTL, fit, kind="soccer_model", error_ttl=60)
+        except Exception:
+            logging.exception("Couldn't fit the goals model for %s", game.get("id"))
+            return None
+
+    def soccer_model(self, league: str, game: Optional[Mapping[str, Any]],
+                     one_x_two: Optional[Mapping[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """The game route's "Goals model" block (soccer_view), or None when the game has no 1X2 and over/under 2.5."""
+        found = self.soccer_derived(league, game, one_x_two)
+        if found is None:
+            return None
+        inputs, derived = found
+        return soccer_view(str(game.get("home") or "Home"), str(game.get("away") or "Away"), inputs, derived)
+
+    def _builder_games(self, now: float) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]], str]:
+        """The games the builder may use, the leagues' entries ({key: {title, odds, ...}}) and an ETag: the
+        dashboard's slate (Stage 1: every in-season league, with "Markets say"), else (the bot's process, or no
+        slate yet) the saved odds boards' games. Never fetches."""
+        current = None
+        if self.slate is not None:
+            try:
+                current = self.slate.current()
+            except Exception:
+                logging.exception("Couldn't read the slate")
+        if current is not None:
+            data = current.data or {}
+            entries = {entry["key"]: entry for entry in data.get("leagues") or [] if entry.get("key")}
+            return list(data.get("games") or []), entries, current.etag
+        times = self._odds_times()
+        games: List[Dict[str, Any]] = []
+        entries = {}
+        for league in sorted(times):
+            saved = self.odds.saved_games(league) if hasattr(self.odds, "saved_games") else None
+            if not saved:
+                continue
+            fetched_at, events = saved
+            entries[league] = {"key": league, "title": league,
+                               "odds": "fresh" if now - fetched_at < STALE_PRICE else "stale"}
+            for event in events or []:
+                start = slate_mod._parse_time(event.get("commence_time"))
+                if start is None or not event.get("id"):
+                    continue
+                games.append({"id": f"{league}:{event['id']}", "league": league, "odds_id": str(event["id"]),
+                              "start": event["commence_time"], "status": "pre" if start > now else "live",
+                              "home": {"name": event.get("home")}, "away": {"name": event.get("away")}})
+        return games, entries, f'"boards-{self.odds_mark()}"'
+
+    def _odds_times(self) -> Dict[str, float]:
+        if self.store is None or not hasattr(self.store, "odds_fetched_at"):
+            return {}
+        try:
+            return dict(self.store.odds_fetched_at())
+        except Exception:
+            logging.exception("Couldn't read the saved odds' times")
+            return {}
+
+    def odds_mark(self) -> str:
+        """A short signature of when every league's saved odds were fetched (a new board changes it)."""
+        return hashlib.sha1(json.dumps(sorted(self._odds_times().items())).encode()).hexdigest()[:16]
+
+    def builder_candidates(self, now: Optional[float] = None) -> Dict[str, Any]:
+        """Every leg the builder may use, assembled from what is already in hand (the slate's games, each league's
+        saved odds board, "Markets say" and the NBA model's cached factor lines), never fetched:
+
+        {"candidates": [engine.builder.Candidate], "by_key": {leg key: Candidate}, "leagues": {league: {"title",
+        "odds", "odds_as_of", "games": [start of each game without prices], "priced"}}, "etag", "consensus_as_of"}
+
+        Each leg carries every price book's price at the line most books offer (``prices``: the engine picks the best
+        among the books a person allows) and the best of them as its price; its chance is the markets brain's blend
+        (moneylines), else the price books' margin-free chance (``fair``). A line that can push (a whole number) is
+        left out: its chance of a push isn't known here. Soccer games add the goals model's markets at fair odds
+        (engine/soccer.py's candidates, flag "model_price"). Kept a minute in this process, per slate and set of
+        boards (``now``: the caller's clock, for price ages and games under way)."""
+        now = time.time() if now is None else now
+        games, entries, etag = self._builder_games(now)
+        key = ("builder_candidates", etag, self.odds_mark())
+        return self.cache.get(key, 60.0, lambda: self._assemble_candidates(games, entries, etag, now),
+                              persist=False, kind="builder_candidates")
+
+    def _assemble_candidates(self, games: Sequence[Mapping[str, Any]], entries: Mapping[str, Mapping[str, Any]],
+                             etag: str, now: float) -> Dict[str, Any]:
+        from ..engine import builder as engine_builder  # the engine's module (Stage 3)
+
+        boards: Dict[str, Optional[Tuple[float, Dict[str, Dict[str, Any]]]]] = {}
+        model_lines = self._model_lines()
+        candidates: List[Any] = []
+        leagues: Dict[str, Dict[str, Any]] = {}
+        consensus_as_of: Optional[str] = None
+        for game in games:
+            league = str(game.get("league") or "")
+            if not league or game.get("status") not in ("pre", "live"):
+                continue
+            entry = entries.get(league) or {}
+            info = leagues.setdefault(league, {"title": entry.get("title") or league, "odds": entry.get("odds"),
+                                               "odds_as_of": entry.get("odds_as_of"), "games": [], "priced": 0})
+            odds_id, _ = slate_mod.ids_of(game)
+            if league not in boards:
+                saved = None
+                try:
+                    saved = self.odds.saved_games(league) if hasattr(self.odds, "saved_games") else None
+                except Exception:
+                    logging.exception("Couldn't read the saved %s odds", league)
+                boards[league] = (saved[0], {str(g.get("id")): g for g in saved[1] or [] if isinstance(g, Mapping)}) \
+                    if saved else None
+            board = boards[league]
+            event = board[1].get(str(odds_id)) if board and odds_id else None
+            if event is None:
+                info["games"].append(game.get("start"))
+                continue
+            mkt = game.get("mkt") if isinstance(game.get("mkt"), Mapping) else {}
+            if mkt.get("as_of") and (consensus_as_of is None or mkt["as_of"] > consensus_as_of):
+                consensus_as_of = mkt["as_of"]
+            try:
+                made = self._game_candidates(engine_builder, league, game, event, board[0], mkt, model_lines, now)
+            except Exception:
+                logging.exception("Couldn't make the builder's legs for %s", odds_id)
+                made = []
+            if made:
+                info["priced"] += 1
+            candidates += made
+        by_key = {candidate.key: candidate for candidate in candidates}
+        return {"candidates": candidates, "by_key": by_key, "leagues": leagues, "etag": etag,
+                "consensus_as_of": consensus_as_of}
+
+    def _model_lines(self) -> Dict[str, List[str]]:
+        """The NBA team model's lines per game ("Team model: Boston Celtics by 4.2, total 226", then its top factors),
+        from the league's cached game cards (peeked, never built here). Only where the team model itself ran (its
+        "model" source): a card without it carries the market's own spread and total, which are no model's view."""
+        out: Dict[str, List[str]] = {}
+        peek = getattr(self.cache, "peek", None)
+        for league in AI_LEAGUES:
+            try:
+                found = peek(("games", league)) if callable(peek) else None
+            except Exception:
+                found = None
+            board = found[1] if found else None
+            for card in (board or {}).get("games") or []:
+                prediction = card.get("prediction") or {}
+                model = ((prediction.get("sources") or {}).get("model") or {}) if isinstance(prediction, Mapping) else {}
+                if not isinstance(model, Mapping) or not isinstance(model.get("margin"), (int, float)):
+                    continue
+                margin = float(model["margin"])
+                leader = card.get("home") if margin >= 0 else card.get("away")
+                head = f"Team model: {leader} by {abs(margin):.1f}"
+                if isinstance(model.get("total"), (int, float)):
+                    head += f", total {float(model['total']):.0f}"
+                out[str(card.get("id"))] = [head] + [str(line) for line in prediction.get("factors") or [] if line][:1]
+        return out
+
+    def _game_candidates(self, engine_builder: Any, league: str, game: Mapping[str, Any], event: Mapping[str, Any],
+                         fetched_at: float, mkt: Mapping[str, Any], model_lines: Mapping[str, List[str]],
+                         now: float) -> List[Any]:
+        odds_id = str(event.get("id"))
+        home, away = str(event.get("home") or "Home"), str(event.get("away") or "Away")
+        start = str(event.get("commence_time") or game.get("start"))
+        started = game.get("status") == "live" or (slate_mod._parse_time(start) or now) <= now
+        age = max(0, int(now - fetched_at))
+        summary = summarize_markets(dict(event))
+        detail_p = self._blend_of(league, odds_id)
+        chance = game.get("chance") if isinstance(game.get("chance"), Mapping) else {}
+        blend = detail_p or (chance if chance.get("src") == "blend" else {})
+        game_flags = set()
+        if mkt.get("dis"):
+            game_flags.add("disagree")
+        if mkt.get("conf") == "low":
+            game_flags.add("low_conf")
+        if started:
+            game_flags.add("live")
+        if age > STALE_PRICE:
+            game_flags.add("stale_price")
+        game_key = f"{league}:{odds_id}"
+        model = model_lines.get(odds_id) or []
+        model_line = ["; ".join(model[:2])] if model else []
+        flag_line = []
+        if "disagree" in game_flags:
+            flag_line = [f"Sources disagree by {int(mkt.get('spr') or 5)} points"]
+        elif "low_conf" in game_flags:
+            flag_line = ["Low confidence: no market price in the blend, ratings only"]
+        strip = self._strip_words(mkt)
+        out: List[Any] = []
+        for market in BOARD_MARKETS:
+            for side, offer in (summary.get(market) or {}).items():
+                price, point, fair = offer.get("price"), offer.get("point"), offer.get("fair")
+                if not isinstance(price, (int, float)) or price <= 1:
+                    continue
+                if market != "h2h" and (point is None or float(point).is_integer()):
+                    continue  # a line that can push: its chance of a push isn't known here
+                p, source = None, "books"
+                if market == "h2h" and isinstance(blend.get(side), (int, float)):
+                    p, source = float(blend[side]), "blend"
+                elif isinstance(fair, float):
+                    p = fair
+                if p is None or not 0 < p < 1:
+                    continue
+                flags = set(game_flags)
+                count = int(offer.get("books") or 0)
+                if count <= 1:
+                    flags.add("thin")
+                if source == "blend":
+                    first = strip(side, p)
+                else:
+                    first = f"Books' margin-free chance {_pct(p)} ({count} book{'s' if count != 1 else ''} at this line)"
+                why = [first] + model_line + flag_line
+                if "thin" in flags and len(why) < 3:
+                    why.append("Thin market: one bookmaker at this line")
+                out.append(engine_builder.Candidate(
+                    ref={"league": league, "id": odds_id, "market": market, "side": side, "point": point},
+                    league=league, game_key=game_key, teams=(away, home), start=start, price=Decimal(str(price)),
+                    book=str(offer.get("book") or "?"), chance=p, chance_source=source, price_age_s=age,
+                    flags=flags, why=why[:3], label=outcome_label({"home": home, "away": away}, market, side, point),
+                    fair=fair if isinstance(fair, float) else None,
+                    prices=_line_prices(event, market, side, point) or None))
+        found = self.soccer_derived(league, event, detail_p if detail_p and "draw" in detail_p else None)
+        if found is not None:
+            from ..engine import soccer
+            out += soccer.candidates(league, game_key, (away, home), start, found[1], ref_id=odds_id,
+                                     price_age_s=age, flags=game_flags)
+        return out
+
+    @staticmethod
+    def _strip_words(mkt: Mapping[str, Any]) -> Any:
+        """The "Markets say" summary for one side: "Markets say 63% (Sharp 64% · US 62% · Kalshi 63%)"."""
+        def words(side: str, p: float) -> str:
+            fav = mkt.get("fav")
+            parts = []
+            two_way = "draw" not in (mkt.get("p") or {})
+            for row in mkt.get("src") or []:
+                if not isinstance(row, (list, tuple)) or len(row) < 2 or not isinstance(row[1], (int, float)):
+                    continue
+                if (row[2] if len(row) > 2 else "ok") != "ok":
+                    continue
+                if side == fav:
+                    parts.append(f"{row[0]} {_pct(row[1])}")
+                elif two_way and fav in ("home", "away") and side in ("home", "away"):
+                    parts.append(f"{row[0]} {_pct(1 - row[1])}")
+            text = f"Markets say {_pct(p)}"
+            return f"{text} ({' · '.join(parts[:4])})" if parts else text
+        return words
 
     # --- bet slip ------------------------------------------------------------
 

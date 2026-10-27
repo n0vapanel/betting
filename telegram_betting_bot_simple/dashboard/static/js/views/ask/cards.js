@@ -111,10 +111,15 @@ function legNotes(notes) {
       <ul class="ask-notes">${rest.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></details>` : ""}`;
 }
 
-function legsHtml(ticket, notesByIndex) {
+// A Builder leg's chance is the brain's: "Markets say" (the blend), the books' margin-free chance or the goals model's
+const BUILDER_CHANCE = { blend: "Markets say", books: "Books", model: "Goals model" };
+
+function legsHtml(ticket, notesByIndex, builder = false) {
   const weakest = (ticket.legs || []).length > 1 ? ticket.weakest_leg : null;
   return `<ol class="ask-legs">${(ticket.legs || []).map((leg, i) => {
-    const chances = [leg.ai_prob != null ? `AI ${pct(leg.ai_prob)}` : "", leg.market_prob != null ? `Market ${pct(leg.market_prob)}` : "",
+    const mine = builder && BUILDER_CHANCE[leg.chance_source];
+    const chances = [leg.ai_prob != null ? `${mine || "AI"} ${pct(mine ? leg.chance ?? leg.ai_prob : leg.ai_prob)}` : "",
+      leg.market_prob != null && !(mine && leg.chance_source === "books") ? `Market ${pct(leg.market_prob)}` : "",
       leg.chance_label || ""].filter(Boolean).join(" · ");
     return `<li class="ask-leg${i === weakest ? " weak" : ""}">
       <div class="row-between"><b class="ask-leg-label">${esc(leg.label)}</b><b class="num ask-leg-odds">${esc(priceText(leg.odds))}</b></div>
@@ -199,11 +204,11 @@ export function ticketCardHtml(card, key, { stale = "" } = {}) {
         <span class="muted small">${esc(kindLine(ticket))}</span></div>
       ${tierBadge(ticket.tier)}
     </header>
-    ${legsHtml(ticket, notesByIndex)}
+    ${legsHtml(ticket, notesByIndex, Boolean(card.builder))}
     ${(ticket.reasons || []).map((r) => notice(r, "danger")).join("")}
     ${summaryHtml(ticket)}
     ${card.verdict ? `<p class="verdict">${esc(card.verdict)}</p>` : ""}
-    ${warningsHtml(ticket.warnings)}
+    ${warningsHtml(card.builder ? [...new Set([...(ticket.notes || []), ...(ticket.warnings || [])])] : ticket.warnings)}
     ${alternativesHtml(card, key)}
     ${stale ? `<p class="ask-stale">${icon("clock", { size: 14 })}${esc(stale)}</p>` : ""}
     ${problem ? `<p class="ask-stale warn">${icon("alert", { size: 14 })}${esc(problem)}</p>` : ""}

@@ -100,6 +100,33 @@ td.mk-td-note { display: table-cell; }
 .mk-record .mk-of { display: block; font-size: 10.5px; color: var(--text-2); font-weight: 500; white-space: nowrap; }
 .mk-vs-worse { color: var(--text); }
 .mk-empty { color: var(--text-2); font-size: 14px; margin-top: 8px; }
+
+/* --- the soccer "Goals model" panel (markets/goals.js) ------------------------------------------------------ */
+.gm-xg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.gm-xg > div { display: grid; gap: 2px; padding: 8px 10px; border-radius: 12px; background: var(--card-2); border: 1px solid var(--line); min-width: 0; }
+.gm-xg b { font-size: 22px; font-weight: 800; line-height: 1.1; }
+.gm-xg span { font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+.gm-goals .gm-lead { font-size: 12.5px; color: var(--text-2); margin-top: 6px; }
+.gm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 10px; margin-top: 12px; }
+.gm-block { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--card-2); padding: 8px 10px; }
+.gm-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+.gm-table thead th:first-child { width: 42%; }
+.gm-tt thead th:first-child { width: 22%; }
+.gm-table caption { text-align: left; font-weight: 700; font-size: 13.5px; padding: 0 0 6px; color: var(--text); }
+.gm-table th, .gm-table td {
+  padding: 5px 4px; border-top: 1px solid var(--line); border-bottom: 0; text-align: right; vertical-align: top; white-space: normal;
+  text-transform: none; letter-spacing: 0;
+}
+.gm-table thead th { border-top: 0; font-size: 11.5px; font-weight: 650; color: var(--text-2); }
+.gm-table thead th abbr { text-decoration: none; }
+.gm-table th[scope="row"] { text-align: left; font-weight: 600; font-size: 13px; color: var(--text); overflow-wrap: anywhere; padding-left: 0; }
+.gm-table td { font-variant-numeric: tabular-nums; }
+.gm-table th[scope="row"] small { display: block; font-weight: 500; font-size: 11.5px; color: var(--text-2); }
+.gm-table thead th:first-child { text-align: left; }
+.gm-table td b { font-weight: 750; }
+.gm-table td small { color: var(--text-2); }
+.gm-tt td b { margin-left: 4px; }
+.gm-foot { font-size: 11.5px; color: var(--text-2); margin-top: 4px; }
 `;
 
 export function ensureMarketStyles() {

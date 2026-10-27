@@ -49,8 +49,9 @@
 //   available (add data-no-inspector to a link that must navigate). Inside the inspector the views render
 //   as on their own page (params.inspector = true); their setTitle() goes to the inspector's heading.
 //
-//   Slip rail (desk/wide; it steps aside on Build, which is the slip's own page):
-//   railShown()                        true while the rail is on screen (desk/wide, not on Build)
+//   Slip rail (desk/wide; it steps aside on Build's slip and rollover pages, the slip's own page, and stays
+//   on the Builder, #/build/builder):
+//   railShown()                        true while the rail is on screen (desk/wide, not on #/build or #/build/rollover)
 //   railState()                        "pinned" | "collapsed" (remembered) | "peek" (open over the board
 //                                      from the collapsed tab until closed, pinned or clicked away)
 //   setRailState(state)
@@ -108,6 +109,7 @@ const treeIsCollapsed = () => (state.tree ? state.tree === "collapsed" : !ROOMY.
 // What app.js hands over at start (initLayout): the router's pieces and the slip's drawing
 let hooks = {
   routeName: () => null, // the current route's name ("today", "game", ...)
+  routeMode: () => null, // its sub-page, when it has one ("builder" on #/build/builder)
   match: () => null, // hash -> {route, params} for a route (app.js matchRoute + query)
   navigate: (hash) => { location.hash = hash; },
   setTitleSink: () => {}, // setTitle() goes to fn while the inspector draws (null: back to the header)
@@ -453,9 +455,12 @@ export function setRailState(next) {
   emit("rail", next);
 }
 
-/** The rail shows on desk widths, except on Build: that screen is the slip's own page. */
+/**
+ * The rail shows on desk widths, except on Build's slip and rollover pages: the slip is the page itself there.
+ * The Builder (#/build/builder) keeps it, so "Add to slip" lands in view.
+ */
 export function railShown() {
-  return isDesk() && hooks.routeName() !== "build";
+  return isDesk() && (hooks.routeName() !== "build" || hooks.routeMode() === "builder");
 }
 
 function placeRail() {

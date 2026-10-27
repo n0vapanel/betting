@@ -17,6 +17,7 @@
 //     for "no assistant on this server", "confirm your age", "on a break" and "allowance used up".
 // Deep links: #/ask?game=<league>:<id>&name=..  #/ask?player=<league>:<id>&name=..  #/ask?slip=1
 //   (attaches the slip)  #/ask?thread=<id>  #/ask?q=<text>  #/ask?new=1  #/ask?paste=1 (the paste sheet)
+// From another screen: attachTicket({body, label, draft}) then navigate("#/ask") (the Builder's "Ask AI").
 //
 // Rules kept here: every number shown is the server's (the cards only lay them out); nothing goes on
 // the slip without the person's own tap; chips never suggest staking more; a chat turn keeps running
@@ -80,6 +81,7 @@ const state = {
   loading: false, // a past chat is loading: nothing can be sent until it's on screen
   noAssistant: false,
   focus: false, // put the cursor in the composer after drawing
+  freshTopic: false, // another screen started a new topic (attachTicket): don't resume the last chat
 };
 
 let view = null; // {root, stepTimer, offSlip} while the screen is showing
@@ -1627,7 +1629,10 @@ export async function render(root, params) {
   if (!root.isConnected) return;
   if (!state.request) state.request = loadRequest();
   view = { root, stepTimer: null, offSlip: null };
-  const { open, fresh, paste } = applyQuery(params.query);
+  const applied = applyQuery(params.query);
+  const { open, paste } = applied;
+  const fresh = applied.fresh || state.freshTopic;
+  state.freshTopic = false;
   draw();
   root.addEventListener("click", onClick);
   root.addEventListener("input", onInput);
@@ -1647,6 +1652,20 @@ export async function render(root, params) {
   else if (!open && !fresh && !paste && !state.threadId && !state.messages.length && !busy() && Number.isInteger(resume) && resume > 0) {
     await openThread(resume, { quiet: true });
   }
+}
+
+/**
+ * Another screen's ticket to ask about (the Builder's "Ask AI"): attached to the composer as "About: <label>"
+ * with ``draft`` in the box, in a new chat. Nothing is sent until the person sends it (it uses the allowance).
+ *   attachTicket({body: {type, stake, legs: [ref]}, label, draft})
+ */
+export function attachTicket({ body, label, draft = "" } = {}) {
+  if (!body || !Array.isArray(body.legs) || !body.legs.length) return;
+  if (!state.busy && (state.messages.length || state.loading || state.threadId)) resetThread();
+  state.attach = { kind: "ticket", body, label: String(label || "A ticket").slice(0, 120) };
+  if (draft && !state.draft.trim()) state.draft = String(draft).slice(0, MAX_MESSAGE);
+  state.freshTopic = true;
+  state.focus = true;
 }
 
 export function onLeave() {

@@ -33,7 +33,7 @@ import threading
 import time
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Any, Callable, Collection, Dict, FrozenSet, List, Literal, Mapping, Optional
+from typing import Annotated, Any, Callable, Collection, Dict, FrozenSet, List, Literal, Mapping, Optional, Union
 from urllib.parse import parse_qs
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
@@ -41,7 +41,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.middleware.gzip import GZipMiddleware
 
 from .auth import (
@@ -192,13 +192,19 @@ Money = Annotated[Decimal, Field(ge=Decimal("0.01"), le=Decimal("100000"), decim
 
 
 class Ref(BaseModel):
-    """One pick, by name only: the server looks up its price and chances (a price sent here is ignored)."""
+    """One pick, by name only: the server looks up its price and chances (a price sent here is ignored). Besides the
+    board's moneylines, spreads and totals, a soccer game's goals-model markets (both teams to score, draw no bet,
+    double chance, team totals: priced at fair odds) can be named; the Lab checks the side fits the market."""
 
     league: LeagueKey
     id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
-    market: Literal["h2h", "spreads", "totals"]
-    side: Literal["home", "away", "draw", "over", "under"]
+    market: Literal["h2h", "spreads", "totals", "btts", "draw_no_bet", "double_chance", "team_totals"]
+    side: Literal["home", "away", "draw", "over", "under", "yes", "no", "1X", "12", "X2", "home_over", "home_under",
+                  "away_over", "away_under"]
     point: Optional[float] = Field(None, ge=-1000, le=1000)  # the line the person saw, to flag a move
+
+
+BookKey = Annotated[str, Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9_ .-]+$")]
 
 
 class TicketBody(BaseModel):
@@ -207,6 +213,8 @@ class TicketBody(BaseModel):
     k: Optional[int] = Field(None, ge=2, le=7)
     system: Optional[str] = Field(None, pattern=r"^[A-Za-z0-9_ ]{2,20}$")
     legs: List[Ref] = Field(min_length=1, max_length=12)
+    # A Builder ticket's bookmakers (the run's): each leg is priced at its best price there, as its card shows
+    books: Optional[List[BookKey]] = Field(None, min_length=1, max_length=20)
 
 
 class BuildBody(BaseModel):
@@ -233,6 +241,92 @@ class PlanDayBody(BaseModel):
     legs: List[Ref] = Field(min_length=1, max_length=3)
 
 
+BuilderMarket = Literal["h2h", "spreads", "totals", "team_totals", "btts", "draw_no_bet", "double_chance",
+                        "player_props", "corners", "cards"]
+Clock = Annotated[str, Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")]
+
+
+class BuilderWindow(BaseModel):
+    """The time window: games starting from ``from`` to ``to`` (ISO times; at most 8 days apart; either end may be
+    left open)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    from_: Optional[str] = Field(None, alias="from", min_length=10, max_length=40)
+    to: Optional[str] = Field(None, min_length=10, max_length=40)
+
+
+class BuilderKickoff(BaseModel):
+    """The kick-off window in the person's local time ("18:00" to "23:30"); either end may be left open."""
+
+    model_config = ConfigDict(extra="forbid")
+    earliest: Optional[Clock] = None
+    latest: Optional[Clock] = None
+
+
+class BuilderControls(BaseModel):
+    """The builder's controls (engine/builder.py's Controls, as its to_dict() sends them), every one optional: what is
+    left out comes from the preset named (else the defaults). Types and ranges here; the engine and the Lab check the
+    rest (books a person can bet at, markets on offer, the window). ``ui`` is the app's own small state, kept with the
+    person's saved controls only."""
+
+    model_config = ConfigDict(extra="forbid")
+    leagues: Optional[List[LeagueKey]] = Field(None, max_length=200)
+    window: Optional[BuilderWindow] = None
+    kickoff: Optional[BuilderKickoff] = None
+    exclude_started: Optional[bool] = None
+    legs: Optional[int] = Field(None, ge=1, le=12)
+    target_odds: Optional[float] = Field(None, ge=1.01, le=1_000_000)
+    tolerance_pct: Optional[float] = Field(None, ge=0, le=90)
+    leg_odds_min: Optional[float] = Field(None, ge=1.01, le=1000)
+    leg_odds_max: Optional[float] = Field(None, ge=1.01, le=1000)
+    min_chance: Optional[float] = Field(None, ge=0, le=1)
+    min_edge: Optional[float] = Field(None, ge=-1, le=1)
+    max_per_game: Optional[int] = Field(None, ge=1, le=12)
+    max_per_team: Optional[int] = Field(None, ge=1, le=12)
+    max_per_league: Optional[int] = Field(None, ge=1, le=12)
+    markets: Optional[List[BuilderMarket]] = Field(None, min_length=1, max_length=10)
+    avoid_same_game: Optional[bool] = None
+    prefer_correlation: Optional[bool] = None  # "prefer positive correlation (ideas only)": suggests, never builds
+    max_price_age_s: Optional[int] = Field(None, ge=60, le=7 * 24 * 3600)
+    exclude_disagree: Optional[bool] = None
+    exclude_thin: Optional[bool] = None
+    books: Optional[List[BookKey]] = Field(None, min_length=1, max_length=20)
+    tickets: Optional[int] = Field(None, ge=1, le=5)
+    preset: Optional[Literal["safe", "risky", "crazy", "custom"]] = None
+    caution_pp: Optional[float] = Field(None, ge=0, le=20)
+    # The presets' own band and rules (engine/presets.py), sent back as the presets route gave them
+    legs_max: Optional[int] = Field(None, ge=1, le=12)
+    odds_min: Optional[float] = Field(None, ge=1, le=1_000_000)
+    odds_max: Optional[float] = Field(None, ge=1.01, le=1_000_000)
+    joint_min: Optional[float] = Field(None, ge=0, le=1)
+    joint_max: Optional[float] = Field(None, ge=0, le=1.01)
+    multi_leg_min: Optional[float] = Field(None, ge=0, le=1)
+    whelan: Optional[bool] = None
+    whelan_slack: Optional[int] = Field(None, ge=0, le=12)
+    exclude_low_conf: Optional[bool] = None
+    exclude_model_price: Optional[bool] = None
+    tz: Optional[str] = Field(None, min_length=1, max_length=64)  # IANA zone for the kick-off window
+    ui: Optional[Dict[Annotated[str, Field(max_length=32)], Union[None, bool, float, Annotated[str, Field(max_length=64)]]]] = \
+        Field(None, max_length=12)
+
+
+class BuilderRunBody(BaseModel):
+    controls: Optional[BuilderControls] = None
+    stake: Optional[Money] = None  # the person's stake: only the final pricing uses it ($10 when left out)
+
+
+class BuilderPriceBody(BaseModel):
+    """A builder ticket re-priced with the builder's own numbers (after a swap). With the run's target odds (and
+    tolerance) the answer also says how likely it is to reach them."""
+
+    model_config = ConfigDict(extra="forbid")
+    legs: List[Ref] = Field(min_length=1, max_length=12)
+    stake: Optional[Money] = None
+    books: Optional[List[BookKey]] = Field(None, min_length=1, max_length=20)
+    target_odds: Optional[float] = Field(None, ge=1.01, le=1_000_000)
+    tolerance_pct: Optional[float] = Field(None, ge=0, le=90)
+
+
 class MeUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=64)
     odds_format: Optional[Literal["decimal", "american", "fractional"]] = None
@@ -243,6 +337,8 @@ class MeUpdate(BaseModel):
     confirm_age: Optional[bool] = None
     # The person's IANA time zone (the app sends Intl.DateTimeFormat().resolvedOptions().timeZone); null clears it
     timezone: Optional[str] = Field(None, min_length=1, max_length=64)
+    # The builder's last controls (kept in users.settings "builder"); null clears them
+    builder: Optional[BuilderControls] = None
 
 
 class CooloffBody(BaseModel):
@@ -874,7 +970,7 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     @app.put("/api/me")
     def update_me(body: MeUpdate, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
         """Settings: only the fields sent change. Lowering the weekly budget applies now; raising it waits 24 h."""
-        return lab_call(lambda: lab.update_me(uid, body.model_dump(exclude_unset=True)))
+        return lab_call(lambda: lab.update_me(uid, body.model_dump(mode="json", exclude_unset=True, by_alias=True)))
 
     @app.post("/api/me/cooloff")
     def cooloff(body: CooloffBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
@@ -960,6 +1056,28 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     @app.post("/api/tickets/build")
     def build_ticket(body: BuildBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
         return lab_call(lambda: lab.build(uid, body.model_dump()))
+
+    # --- the builder (Stage 3): presets fill every control; runs are shared for a minute, priced per person -----
+
+    @app.get("/api/builder/presets")
+    def builder_presets(uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """{presets: {safe, risky, crazy}, markets: {market: {available, reason}}, defaults}: behind the gates and
+        the pause on picks, like every builder route."""
+        return lab_call(lambda: lab.builder_presets(uid))
+
+    @app.post("/api/builder/run")
+    def builder_run(body: BuilderRunBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """Build up to 5 tickets that share no leg (engine/builder.py) from what is already in hand: the slate, the
+        saved odds boards and "Markets say". Nothing is fetched; leagues without prices are named, and the slate's
+        throttled background loader is asked for their odds. 400 with the reason during a break or the pause."""
+        return lab_call(lambda: lab.builder_run(uid, body.model_dump(mode="json", exclude_unset=True,
+                                                                     by_alias=True)))
+
+    @app.post("/api/builder/price")
+    def builder_price(body: BuilderPriceBody, uid: str = Depends(person),
+                      lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """A builder ticket (e.g. after a swap) priced with the builder's own chances and prices at the stake."""
+        return lab_call(lambda: lab.builder_price(uid, body.model_dump(mode="json", exclude_unset=True)))
 
     @app.post("/api/slips")
     def save_slip(body: TicketBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:

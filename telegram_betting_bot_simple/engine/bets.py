@@ -7,13 +7,23 @@ The tier is set by the AI's chance that the whole ticket wins:
 - Crazy: 3-25% (1-5 legs; legs of a multi 34%+, or a single long shot of
   8-25%), paying 3.40x-36x.
 
+Since v3 Stage 3 the search is the Builder's (engine/builder.py): each tier
+is its preset (engine/presets.py: the same windows, leg floors, Whelan caps
+and value rules as before), searched by the cautious expected return alone
+(builder.RETURN_ONLY, not the preset's own weights), and these tickets are
+the best the builder found under those controls, ranked here as below. What
+stays here is what makes them the AI's daily bets:
+
 Every candidate leg is one outcome of one game (moneyline, spread or total)
 priced at a bookmaker whose margin on that market is 5% or less, and only
 at books a person can bet at (never Pinnacle or an exchange: those anchor
 the markets brain's consensus only). A ticket
 takes at most one leg per game, so its legs are independent (checked on NBA
 data: game-level correlation is about zero), and it is priced at a single
-bookmaker that offers every leg, as it would have to be placed. Legs the AI
+bookmaker that offers every leg, as it would have to be placed: the builder
+searches at each leg's best price, and each ticket it finds is placed at the
+bookmaker offering all its legs at the best combined price (a ticket no one
+bookmaker offers is left out). Legs the AI
 rates below the market are never used, and Safe skips legs where the AI is
 more than 8 points from the market.
 
@@ -30,12 +40,13 @@ closing line, every ticket is labelled "For fun", with its expected cost.
 
 from __future__ import annotations
 
-import heapq
-import itertools
+import datetime
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from . import builder
 from .odds_math import decimal_to_american, format_american
 
 MAX_HOLD = 0.05  # skip a bookmaker whose margin on the market is higher
@@ -60,6 +71,7 @@ class Candidate:
     prices: Dict[str, float]  # bookmaker -> decimal price at this line
     push: float = 0.0
     sigma: float = 0.02  # model uncertainty, taken off for the cautious chance
+    start: Optional[str] = None  # ISO start time (the builder leaves out games under way); None: still to come
 
     @property
     def cautious(self) -> float:
@@ -177,44 +189,78 @@ def _rank(ticket: Ticket) -> Tuple[float, ...]:
             -(edge if edge is not None else 1.0), min(leg.probability for leg in ticket.legs), -ticket.max_gap)
 
 
-def _search(tier: Tier, legs: Sequence[Candidate], book: str, keep: int = 300) -> List[Ticket]:
-    """Every ticket at one bookmaker that fits the tier (depth-first, pruned on chance and odds)."""
-    by_game: Dict[str, List[Candidate]] = {}
+BOARD_MARKETS = {"h2h", "spreads", "totals"}
+SEARCH_TICKETS = builder.MAX_TICKETS  # tickets asked of the builder per bookmaker, before the tier's own checks
+
+
+def tier_controls(tier: Tier) -> builder.Controls:
+    """The builder's controls for a tier: its preset (engine/presets.py, the tier's windows, leg floors, Whelan cap
+    and value rules; still labelled the tier), searching every board market at any start time for as many tickets
+    as the builder gives. These legs carry no price age (the board is the latest), so the preset's price-age rule
+    never removes one."""
+    from .presets import preset
+    return replace(preset(tier.key), markets=set(BOARD_MARKETS), tickets=SEARCH_TICKETS, window=None)
+
+
+def _as_candidate(leg: Candidate, now: datetime.datetime, only: Optional[str] = None) -> builder.Candidate:
+    """One leg as the builder's Candidate: the AI's chance, the market's fair chance and every price book's price
+    (the builder searches at each leg's best price), or only ``only``'s."""
+    away, _, home = leg.game.partition(" @ ")
+    start = leg.start or (now + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    source = "books" if leg.fair is not None and abs(leg.probability - leg.fair) < 1e-12 else "model"
+    prices = {book: Decimal(str(price)) for book, price in leg.prices.items()
+              if price_book(book) and price > 1 and (only is None or book == only)}
+    book = max(prices, key=lambda name: (prices[name], name))
+    return builder.Candidate(
+        ref={"league": "ai_bets", "id": leg.event_id, "market": leg.market, "side": leg.side, "point": leg.point},
+        league="ai_bets", game_key=leg.event_id, teams=(away or leg.game, home or leg.game), start=start,
+        price=prices[book], book=book, prices=prices, chance=leg.probability, chance_source=source,
+        label=leg.label, fair=leg.fair, push=leg.push)
+
+
+def _search(tier: Tier, legs: Sequence[Candidate], now: Optional[datetime.datetime] = None) -> List[Ticket]:
+    """The builder's tickets under the tier's controls (tier_controls), each placed at the bookmaker that offers all
+    its legs at the best combined price and checked against the tier there (_fits: the chance and odds windows, the
+    leg floors, the expected value floor and the bookmaker's edge). When the builder's best tickets mix legs no one
+    bookmaker offers together, it searches again at each of those legs' bookmakers alone."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    out, orphans = _search_at(tier, legs, now, None)
+    for book in sorted(orphans):
+        out += _search_at(tier, legs, now, book)[0]
+    return out
+
+
+def _search_at(tier: Tier, legs: Sequence[Candidate], now: datetime.datetime, only: Optional[str]
+               ) -> Tuple[List[Ticket], set]:
+    """One builder run (at every price book, or ``only`` one), ranked by the cautious expected return alone: of its
+    best tickets (the builder's ranked list, not only the few sharing no leg), those that fit the tier at one
+    bookmaker, and the bookmakers of tickets no one bookmaker offers."""
+    by_key = {}
+    candidates = []
     for leg in legs:
-        if book in leg.prices and leg.probability >= min(tier.single_min, tier.multi_leg_min):
-            by_game.setdefault(leg.event_id, []).append(leg)
-    pool: List[Candidate] = []
-    for options in by_game.values():
-        options.sort(key=lambda leg: math.log(max(leg.cautious * leg.prices[book], 1e-9)), reverse=True)
-        pool += options[: tier.per_game]
-    pool.sort(key=lambda leg: math.log(max(leg.cautious * leg.prices[book], 1e-9)), reverse=True)
-
-    heap: List[Tuple[Tuple[float, ...], int, Ticket]] = []
-    counter = itertools.count()
-    floor_p, ceiling_d = math.log(tier.p_low), math.log(tier.odds_high)
-
-    def extend(start: int, chosen: List[Candidate], log_p: float, log_d: float, games: frozenset) -> None:
-        if chosen:
-            ticket = Ticket(list(chosen), book)
-            if _fits(tier, ticket):
-                item = (_rank(ticket), next(counter), ticket)
-                if len(heap) < keep:
-                    heapq.heappush(heap, item)
-                elif item[0] > heap[0][0]:
-                    heapq.heapreplace(heap, item)
-        if len(chosen) == tier.max_legs:
-            return
-        for j in range(start, len(pool)):
-            leg = pool[j]
-            if leg.event_id in games:
-                continue  # one leg per game: same-game legs are correlated and priced differently
-            next_p, next_d = log_p + math.log(leg.probability), log_d + math.log(leg.prices[book])
-            if next_p < floor_p or next_d > ceiling_d:
-                continue  # more legs only lower the chance and raise the odds
-            extend(j + 1, chosen + [leg], next_p, next_d, games | {leg.event_id})
-
-    extend(0, [], 0.0, 0.0, frozenset())
-    return [ticket for _, _, ticket in heap]
+        if not any(price_book(book) and (only is None or book == only) for book in leg.prices):
+            continue
+        candidate = _as_candidate(leg, now, only)
+        by_key[candidate.key] = leg
+        candidates.append(candidate)
+    if not candidates:
+        return [], set()
+    result = builder.build(candidates, tier_controls(tier), now, weights=builder.RETURN_ONLY)
+    out, orphans = [], set()
+    for _, keys in result.ranked:
+        chosen = [by_key.get(key) for key in keys]
+        if not chosen or any(leg is None for leg in chosen):
+            continue
+        books = set.intersection(*({b for b in leg.prices if price_book(b) and (only is None or b == only)}
+                                   for leg in chosen))
+        if not books:
+            orphans |= {b for leg in chosen for b in leg.prices if price_book(b)}
+            continue
+        placed = sorted((Ticket(chosen, book) for book in books), key=lambda t: (t.decimal, t.book), reverse=True)
+        fitting = next((ticket for ticket in placed if _fits(tier, ticket)), None)
+        if fitting is not None:
+            out.append(fitting)
+    return out, orphans
 
 
 def price_book(book: str) -> bool:
@@ -225,18 +271,19 @@ def price_book(book: str) -> bool:
     return is_price_book(book)
 
 
-def build_tier(tier: Tier, candidates: Sequence[Candidate], count: int = 3) -> List[Ticket]:
-    """Up to ``count`` tickets for one tier, best first, sharing at most one leg with each other."""
+def build_tier(tier: Tier, candidates: Sequence[Candidate], count: int = 3,
+               now: Optional[datetime.datetime] = None) -> List[Ticket]:
+    """Up to ``count`` tickets for one tier, best first, sharing at most one leg with each other: the builder's
+    tickets under the tier's preset, each at the one bookmaker that offers all its legs at the best price."""
     legs = [leg for leg in candidates
-            if leg.probability >= MIN_LEG and leg.prices and (leg.fair is None or leg.probability >= leg.fair - 0.01)]
-    # Only books a person can bet at: Pinnacle and the exchanges anchor the consensus, never a ticket
-    books = sorted({book for leg in legs for book in leg.prices if price_book(book)})
+            if leg.probability >= MIN_LEG and leg.prices and (leg.fair is None or leg.probability >= leg.fair - 0.01)
+            and (tier.key != "safe" or abs(leg.gap or 0.0) <= SAFE_MAX_GAP)]
+    # Only books a person can bet at (_search): Pinnacle and the exchanges anchor the consensus, never a ticket
     best: Dict[frozenset, Ticket] = {}
-    for book in books:
-        for ticket in _search(tier, legs, book):
-            keys = frozenset(leg.key for leg in ticket.legs)
-            if keys not in best or ticket.decimal > best[keys].decimal:
-                best[keys] = ticket  # the same legs at several books: keep the best price
+    for ticket in _search(tier, legs, now):
+        keys = frozenset(leg.key for leg in ticket.legs)
+        if keys not in best or ticket.decimal > best[keys].decimal:
+            best[keys] = ticket
     chosen: List[Ticket] = []
     uses: Dict[Tuple[str, str, str], int] = {}
     for ticket in sorted(best.values(), key=_rank, reverse=True):
@@ -312,10 +359,12 @@ VIG_NOTE = ("Each extra leg adds the bookmaker's cut again: on NBA moneylines ab
             "two, 11% for three and 17% for five.")
 
 
-def build_all(candidates: Sequence[Candidate], count: int = 3, value_proven: bool = False) -> Dict[str, Dict[str, Any]]:
+def build_all(candidates: Sequence[Candidate], count: int = 3, value_proven: bool = False,
+              now: Optional[datetime.datetime] = None) -> Dict[str, Dict[str, Any]]:
+    """Each tier's tickets (build_tier) as the app and the bot show them, and as the AI record logs them."""
     out = {}
     for tier in TIERS:
-        tickets = build_tier(tier, candidates, count)
+        tickets = build_tier(tier, candidates, count, now)
         out[tier.key] = {
             "title": tier.title,
             "rule": tier.subtitle,

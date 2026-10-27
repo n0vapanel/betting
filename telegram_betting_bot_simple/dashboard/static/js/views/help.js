@@ -1,8 +1,9 @@
 // Help: how the app works, as static pages (nothing here calls the AI or costs anything).
 //   #/help              search, the guides and the whole glossary by group
 //   #/help/glossary     the glossary on its own, with the same search
-//   #/help/<guide>      start (the 60-second tour) · ai (how the AI decides) · rollover (rollover
-//                       explained, with the blueprint's real numbers) · responsible · faq
+//   #/help/<guide>      start (the 60-second tour) · ai (how the AI decides) · builder (the Builder's
+//                       presets, controls and tickets) · rollover (rollover explained, with the
+//                       blueprint's real numbers) · responsible · faq
 //                       (#/help/faq?item=3 opens one answer)
 //   #/help/<term>       one glossary entry: the definition, a worked example step by step, the person's
 //                       own slip where the term applies, "See it live" and related terms. Every ⓘ sheet's
@@ -279,6 +280,54 @@ function aiHtml() {
       <a class="btn btn-secondary" href="#/help/brier">${icon("chart", { size: 18 })}How forecasts are scored</a></div>`;
 }
 
+function builderHtml() {
+  const presets = [
+    ["shield", "Safe", "60%+", "1.15–1.80x", "1–3", "Never a leg the sources disagree on, a thin market, a chance from ratings alone or a leg priced at fair odds."],
+    ["scale", "Risky", "25–60%", "1.50–4.50x", "1–3", "A real chance and a real payout."],
+    ["zap", "Crazy", "3–25%", "3.40–36x", "1–5", "Long shots: expect to lose most of these."],
+  ];
+  return `<div class="page-head"><span class="eyebrow">Guide</span><h1>The Builder</h1>
+      <p>Safe, Risky and Crazy fill every control. Change any of them and the run is yours.</p></div>
+    <section class="card">
+      <p class="hp-lead">Pick a preset, or set the controls yourself, and the Builder returns up to five tickets that share no leg, each saying why.</p>
+      <p class="small muted" style="margin-top:8px">It reads what's already saved (today's games, each league's latest bookmaker prices and the “Markets say” blend) and fetches nothing, so a build costs no credits. Leagues with no prices yet are asked for in the background, within the monthly allowance.</p>
+    </section>
+    ${section("The presets", `<div class="table-wrap"><table>
+        <thead><tr><th>Preset</th><th>Wins</th><th>Pays</th><th>Legs</th></tr></thead>
+        <tbody>${presets.map(([iconName, name, chance, odds, legs]) => `<tr><td>${icon(iconName, { size: 16 })} <b>${esc(name)}</b></td><td>${esc(chance)}</td><td class="num">${esc(odds)}</td><td class="num">${esc(legs)}</td></tr>`).join("")}</tbody>
+      </table></div>
+      <p class="note" style="margin-top:6px">“Wins” is the chance the whole ticket wins, by the brain's numbers.</p>
+      ${points(presets.map(([iconName, name, , , , rule]) => [iconName, `<b>${esc(name)}</b>: ${esc(rule)}`]))}
+      <p class="small muted" style="margin-top:8px">Every preset ranks legs by a cautious chance (the blend minus 2 points) and uses moneylines, spreads and totals. Change a control that shapes the risk and the label turns to “Custom”; sports, time, bookmakers and the number of tickets keep the preset's name.</p>`, { info: "tiers" })}
+    ${section("The controls", points([
+      ["today", "<b>Scope</b>: sports and leagues (the same tree as Today, with “All sports”), the time window (today, the next 24 hours, 3 days or your own), a kick-off window in your time. Games already started are always left out: their prices are from before the start."],
+      ["target", `<b>Shape</b>: 1 to 12 legs or Auto, <a href="#/help/target_odds">target odds</a> with a ± <a href="#/help/tolerance">tolerance</a> (or a stake and “win about”, which set it), each leg's odds range, minimum chance and <a href="#/help/edge">edge</a>, and the most legs per team and league (always one per game).`],
+      ["build", `<b>Markets</b>: moneyline, spread, totals, and for soccer both teams to score, draw no bet, double chance and team totals from the <a href="#/help/dixon_coles">goals model</a>. Props, corners and cards arrive later and are greyed out.`],
+      ["swap", "<b>Correlation</b>: one leg per game, always: a same-game ticket needs a bookmaker's own same-game price, which isn't loaded. “Prefer positive correlation” only suggests same-game ideas."],
+      ["shield", `<b>Data rules</b>: the oldest <a href="#/help/data_age">price</a> allowed (3 hours unless you change it), leave out games whose sources disagree or thin markets, and which bookmakers to use (never Pinnacle or an exchange).`],
+      ["bets", "<b>Output</b>: 1 to 5 tickets that share no leg."],
+    ]))}
+    ${section("How it builds", points([
+      ["check", "Every leg goes through your rules. A leg that fails one is a <a href=\"#/help/near_miss\">near miss</a>, named with the rule it failed."],
+      ["chart", "Tickets of up to 4 legs are tried in every combination of the best 40 legs; longer ones, up to 12, by a beam search that keeps the best partial tickets on the way."],
+      ["scale", "Tickets are ranked by how close they land to your target, the cautious expected return and the chance of winning, weighted by the preset, then priced exactly at your stake."],
+      ["alert", "When nothing fits, it says which rules ruled out how many legs, so you know what to relax."],
+    ], "info"))}
+    ${section("On each ticket", points([
+      ["bets", "The odds, what it pays at your stake, the chance every leg wins as “1 in N” with its fair odds (with a draw-no-bet leg, whose draw gives the stake back, also the chance it wins money), the chance of reaching your target, the expected result in money and what the bookmakers keep."],
+      ["info", "Each leg: the pick, price and bookmaker, its chance and edge, how old its price is, a “Why” line (the brain's top reasons and the main risk) and Swap: alternatives that keep every rule, re-priced without building again."],
+      ["ask", "Add to slip, Explain with AI (uses your AI allowance) and Ask AI about the ticket."],
+    ]))}
+    ${section("Honest limits", points([
+      ["alert", "Hard caps lift only when you ask: set the number of legs yourself and the Whelan cap (no more legs than are worth combining) steps aside, with a warning."],
+      ["alert", "Prediction-market prices are never multiplied into a parlay price, and same-game legs are never combined."],
+      ["alert", "The aim is to match the market and explain it, not to beat it: most tickets lose a little on average, and the card says how much."],
+    ], "warn"))}
+    <div class="hp-actions"><a class="btn btn-primary" href="#/build/builder">${icon("build", { size: 18 })}Open the Builder</a>
+      <a class="btn btn-secondary" href="#/help/target_odds">${icon("target", { size: 18 })}Target odds</a>
+      <a class="btn btn-secondary" href="#/help/near_miss">${icon("info", { size: 18 })}Near misses</a></div>`;
+}
+
 function rolloverHtml() {
   const t = ROLLOVER_TABLE;
   const table = `<div class="hp-scens">${t.rows.map((r) => `<div class="hp-scen">
@@ -364,6 +413,7 @@ function renderTopic(root, t, params) {
   if (t.key === "start") root.innerHTML = startHtml();
   else if (t.key === "ai") root.innerHTML = aiHtml();
   else if (t.key === "rollover") root.innerHTML = rolloverHtml();
+  else if (t.key === "builder") root.innerHTML = builderHtml();
   else if (t.key === "responsible") root.innerHTML = responsibleHtml();
   else {
     const raw = params.query.get("item"); // none (plain #/help/faq) opens no answer: Number(null) would be 0

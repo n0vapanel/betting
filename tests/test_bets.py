@@ -111,3 +111,42 @@ def test_legs_and_tickets_are_graded_from_final_scores() -> None:
     assert (safe["tickets"], safe["won"], safe["actual"]) == (2, 1, 0.5)
     assert safe["predicted"] == pytest.approx(0.675) and safe["roi"] == pytest.approx(-0.3)
     assert risky["tickets"] == 0 and crazy["tickets"] == 0
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_each_tier_s_best_ticket_is_the_best_by_cautious_ev_as_a_full_search_finds(seed) -> None:
+    """The builder searches each tier by the cautious expected return (not the preset's chance-leaning weights): its
+    best ticket is the best of every ticket at one bookmaker that fits the tier, ranked by bets._rank."""
+    import itertools
+    import math
+    import random
+
+    rng = random.Random(seed)
+    books = ["DraftKings", "FanDuel", "BetMGM"]
+    slate = []
+    for g in range(rng.randint(4, 7)):
+        home = rng.uniform(0.2, 0.8)
+        for side, fair in (("home", home), ("away", 1 - home)):
+            ai = min(0.95, max(0.05, fair + rng.gauss(0, 0.03)))
+            prices = {b: round(1 / (fair * rng.uniform(1.02, 1.05)), 2) for b in rng.sample(books, rng.randint(1, 3))}
+            slate.append(Candidate(event_id=f"g{g}", game=f"A{g} @ H{g}", market="h2h", side=side, point=None,
+                                   label=f"{side}{g}", probability=ai, fair=fair, prices=prices))
+    for tier in bets.TIERS[:2]:  # Safe and Risky: up to 3 legs, every combination searched
+        legs = [x for x in slate if x.probability >= bets.MIN_LEG and x.probability >= x.fair - 0.01
+                and (tier.key != "safe" or abs(x.gap) <= bets.SAFE_MAX_GAP)]
+        best = None
+        for n in range(1, tier.max_legs + 1):
+            for combo in itertools.combinations(legs, n):
+                if len({x.event_id for x in combo}) < n:
+                    continue
+                for book in set.intersection(*(set(x.prices) for x in combo)):
+                    ticket = Ticket(list(combo), book)
+                    if bets._fits(tier, ticket) and (best is None or bets._rank(ticket) > bets._rank(best)):
+                        best = ticket
+        got = build_tier(tier, slate)
+        if best is None:
+            assert got == [], tier.key
+            continue
+        assert got, tier.key
+        assert got[0].cautious_ev == pytest.approx(best.cautious_ev, abs=1e-6), tier.key
+        assert math.isclose(got[0].probability, best.probability, abs_tol=1e-6), tier.key

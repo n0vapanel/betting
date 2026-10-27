@@ -834,13 +834,21 @@ def _leg_line(leg: Dict[str, Any]) -> str:
     return f"{html.escape(leg['label'])} {leg['odds']['american']} ({chances})"
 
 
+BUILDER_LINE = ("Built by the Builder with the Safe, Risky and Crazy presets; the app's Build screen lets you "
+                "change every control.")
+
+
 def bets_text(data: Dict[str, Any], tier: Optional[str], league_title: str) -> str:
+    """The AI bets screen: each preset's tickets (engine/bets.py: the Builder under that preset, one bookmaker at a
+    time), or one preset's in full with its band."""
     esc = html.escape
     tiers = data["tiers"]
-    lines = [f"🎲 <b>AI bets · {esc(league_title)}</b>", esc(data.get("note", "")), ""]
+    lines = [f"🎲 <b>AI bets · {esc(league_title)}</b>", esc(data.get("note", "")), f"<i>{esc(BUILDER_LINE)}</i>", ""]
     for key in ([tier] if tier else ("safe", "risky", "crazy")):
         info = tiers[key]
         lines.append(f"{TIER_ICONS[key]} <b>{esc(info['title'])}</b>: {esc(info['rule'])}")
+        if tier and info.get("detail"):
+            lines.append(f"   {esc(info['detail'])}")
         bets_list = info["bets"] if tier else info["bets"][:1]
         if not bets_list:
             lines += [f"   {esc(info.get('empty') or 'Nothing fits right now.')}", ""]

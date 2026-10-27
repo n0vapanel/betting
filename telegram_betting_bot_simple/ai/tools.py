@@ -60,6 +60,13 @@ ASSISTANT_LEAGUES = ("basketball_wnba",)
 LEAGUE_KEYS: Tuple[str, ...] = tuple(sorted(set(POPULAR_LEAGUES) | set(ASSISTANT_LEAGUES)))
 MARKETS = ("h2h", "spreads", "totals")
 SIDES = ("home", "away", "draw", "over", "under")
+# A soccer game's goals-model markets (engine/soccer.py, priced at fair odds) may be a slip's legs too: the input
+# model takes them (Claude copies a slip's refs), though the schema lists only the board's markets to stay small
+REF_MARKETS = MARKETS + ("btts", "draw_no_bet", "double_chance", "team_totals")
+REF_SIDES = SIDES + ("yes", "no", "1X", "12", "X2", "home_over", "home_under", "away_over", "away_under")
+# The builder's markets (engine/builder.py's MARKETS) and its presets
+BUILDER_MARKETS = ("h2h", "spreads", "totals", "team_totals", "btts", "draw_no_bet", "double_chance")
+MAX_BUILD_TICKETS = 3
 TICKET_TYPES = ("single", "multi", "round_robin", "system")
 TIERS = ("safe", "risky", "crazy")
 MAX_LEAGUES = 4  # each league's odds fetch costs 3 of the month's ~500 Odds API credits
@@ -71,6 +78,9 @@ CENT = Decimal("0.005")  # amounts within half a cent of what the person said co
 DEFAULT_MIN_ODDS = Decimal("2.00")
 ODDS_SOURCE = "The Odds API (best price across bookmakers, margin-free market chances)"
 BRAIN_SOURCE = "The brain: our model's chances next to the bookmakers' margin-free ones"
+BUILDER_SOURCE = ("The Builder: legs from the cached boards at books a person can bet at, each leg's chance the markets "
+                  "brain's blend (else the books' margin-free chance, or the goals model's at fair odds), searched "
+                  "and priced in code")
 ESPN_SOURCE = "ESPN"
 MARKETS_SOURCE = ("The markets brain: margin-free sharp and US book prices, Kalshi and Polymarket mid prices, ESPN's "
                   "predictor, power ratings and our model, blended in code")
@@ -115,6 +125,9 @@ _TICKET = {
     "system": {"type": "string", "description": "system only: trixie, patent, yankee, lucky15, canadian, "
                                                 "lucky31, heinz, lucky63, super_heinz or goliath"},
 }
+# A Builder ticket's bookmakers, copied from the slip in the context: each leg is priced where the Builder priced it
+_BOOKS = {"type": "array", "items": {"type": "string"},
+          "description": "Only when the user's slip lists books: copy them as they are"}
 
 # Not "strict": Claude compiles strict schemas into one grammar, and the tools with the league list in
 # every leg made it too large ("The compiled grammar is too large", a 400 on every chat turn). Toolbox.run
@@ -155,19 +168,30 @@ TOOLS: List[Dict[str, Any]] = [
      "description": "Price a ticket: combined odds, payout, chance as '1 in X' (AI and market), what the "
                     "bookmaker keeps, the expected result in money, the most likely outcome and warnings. "
                     "Call this before quoting any ticket's odds, payout or chance.",
-     "input_schema": _obj(dict(_TICKET), optional=("k", "system", "split"))},
+     "input_schema": _obj({**_TICKET, "books": _BOOKS}, optional=("k", "system", "split", "books"))},
     {"name": "ticket_build",
-     "description": "Build up to three tickets that turn the user's stake into about their target, with the "
-                    "honest ceiling on the chance and a verdict. Use the user's own stake and target "
-                    "(target = money back, stake included); ask if either is missing.",
-     "input_schema": _obj({"leagues": _LEAGUES, "stake": {"type": "number"}, "target": {"type": "number"},
-                           "max_legs": {"type": "integer", "description": "1 to 6"},
-                           "tier": {"type": "string", "enum": list(TIERS)}}, optional=("tier",))},
+     "description": "Build tickets. Stake and target alone (the user's own money; target = money back, stake "
+                    "included): up to three tickets near the target with the honest ceiling and a verdict. Any of "
+                    "preset, legs, target_odds, leg odds, min_chance, markets or tickets: the Builder with those "
+                    "controls (a preset fills the rest), e.g. 5 legs across NBA and EPL at about 10x, Risky. All "
+                    "optional; never invent a stake or target.",
+     "input_schema": _obj({
+         "leagues": _LEAGUES, "stake": {"type": "number"}, "target": {"type": "number"},
+         "max_legs": {"type": "integer", "description": "1 to 6"},
+         "tier": {"type": "string", "enum": list(TIERS)}, "preset": {"type": "string", "enum": list(TIERS)},
+         "legs": {"type": "integer", "description": "exactly 1 to 12; leave out for Auto"},
+         "target_odds": {"type": "number", "description": "e.g. 10 for about 10x"},
+         "leg_odds_min": {"type": "number"}, "leg_odds_max": {"type": "number"},
+         "min_chance": {"type": "number", "description": "per leg, 0.55 for 55%"},
+         "markets": {"type": "array", "items": {"type": "string", "enum": list(BUILDER_MARKETS)}},
+         "tickets": {"type": "integer", "description": f"1 to {MAX_BUILD_TICKETS}"},
+     }, optional=("leagues", "stake", "target", "max_legs", "tier", "preset", "legs", "target_odds", "leg_odds_min",
+                  "leg_odds_max", "min_chance", "markets", "tickets"))},
     {"name": "ticket_analyse",
      "description": "Analyse the user's own ticket: priced, with notes per leg (injuries, AI vs market gap, "
                     "analysts' views) and alternatives the code worked out (drop the weakest leg, singles, "
                     "a round robin).",
-     "input_schema": _obj(dict(_TICKET), optional=("k", "system", "split"))},
+     "input_schema": _obj({**_TICKET, "books": _BOOKS}, optional=("k", "system", "split", "books"))},
     {"name": "rollover_simulate",
      "description": "Compare rollover strategies side by side (classic all-in, bank half, pot-and-ladder, "
                     "flat stakes): chance to finish, chance of a profit, typical end, expected cost, the day a "
@@ -214,8 +238,8 @@ LeagueKey = Literal[LEAGUE_KEYS]  # type: ignore[valid-type]
 class Ref(BaseModel):
     league: LeagueKey  # type: ignore[valid-type]
     id: str = Field(min_length=1, max_length=64)
-    market: Literal[MARKETS]  # type: ignore[valid-type]
-    side: Literal[SIDES]  # type: ignore[valid-type]
+    market: Literal[REF_MARKETS]  # type: ignore[valid-type]
+    side: Literal[REF_SIDES]  # type: ignore[valid-type]
 
 
 class TicketInput(BaseModel):
@@ -226,14 +250,29 @@ class TicketInput(BaseModel):
     system: Optional[str] = Field(None, max_length=20)
     split: Optional[bool] = None
     title: Optional[str] = Field(None, max_length=80)
+    books: Optional[List[str]] = Field(None, min_length=1, max_length=20)
 
 
 class BuildInput(BaseModel):
-    leagues: List[LeagueKey] = Field(min_length=1, max_length=MAX_LEAGUES)  # type: ignore[valid-type]
-    stake: Decimal = Field(gt=0, le=100000, decimal_places=2)
-    target: Decimal = Field(gt=0, le=10000000, decimal_places=2)
-    max_legs: int = Field(ge=1, le=6)
+    """ticket_build's input: the target builder's (stake, target, max_legs, tier) or the Builder's controls."""
+    leagues: List[LeagueKey] = Field(default_factory=list, max_length=MAX_LEAGUES)  # type: ignore[valid-type]
+    stake: Optional[Decimal] = Field(None, gt=0, le=100000, decimal_places=2)
+    target: Optional[Decimal] = Field(None, gt=0, le=10000000, decimal_places=2)
+    max_legs: Optional[int] = Field(None, ge=1, le=6)
     tier: Optional[Literal[TIERS]] = None  # type: ignore[valid-type]
+    preset: Optional[Literal[TIERS]] = None  # type: ignore[valid-type]
+    legs: Optional[int] = Field(None, ge=1, le=12)
+    target_odds: Optional[float] = Field(None, ge=1.01, le=1_000_000)
+    leg_odds_min: Optional[float] = Field(None, ge=1.01, le=1000)
+    leg_odds_max: Optional[float] = Field(None, ge=1.01, le=1000)
+    min_chance: Optional[float] = Field(None, ge=0, le=1)
+    markets: Optional[List[Literal[BUILDER_MARKETS]]] = Field(None, min_length=1, max_length=7)  # type: ignore[valid-type]
+    tickets: Optional[int] = Field(None, ge=1, le=MAX_BUILD_TICKETS)
+
+    def builder_fields(self) -> Dict[str, Any]:
+        """The Builder's controls given (beyond the target builder's stake, target, max_legs and tier)."""
+        names = ("preset", "legs", "target_odds", "leg_odds_min", "leg_odds_max", "min_chance", "markets", "tickets")
+        return {name: getattr(self, name) for name in names if getattr(self, name) is not None}
 
 
 class RolloverInput(BaseModel):
@@ -431,6 +470,38 @@ def ticket_facts(ticket: Mapping[str, Any]) -> Dict[str, Any]:
     for name in ("tier", "cautious", "rank", "name"):  # what the target builder adds
         if ticket.get(name) is not None:
             facts[name] = ticket[name]
+    return trim(facts, items=MAX_LEGS)
+
+
+# Where a Builder leg's chance comes from (engine/builder.py's chance_source), in the words the app uses
+CHANCE_SOURCES = {"blend": "markets_say", "books": "books", "model": "goals_model"}
+
+
+def builder_ticket_facts(ticket: Mapping[str, Any]) -> Dict[str, Any]:
+    """A Builder ticket's numbers Claude may quote: ticket_facts, plus its label, joint chance, chance of reaching
+    the target, notes and each leg's reasons, main risk and data age.
+
+    Each leg's ``chance`` is the builder's, named by ``chance_source`` ("markets_say": the markets brain's blend;
+    "books": the price books' margin-free chance; "goals_model": the soccer goals model's), never "ai_chance", with
+    ``chance_given_no_push`` beside ``market_chance`` on a line that can push; ``edge`` is the expected result per
+    unit staked at that chance (as every other tool gives it) and ``edge_vs_price`` the chance minus the price's
+    implied chance, in shares (None for a leg priced at fair odds: no bookmaker's price to compare)."""
+    facts = ticket_facts(ticket)
+    for name in ("label", "joint", "reach_target", "notes", "books"):
+        if ticket.get(name) is not None:
+            facts[name] = trim(ticket[name])
+    views = ticket.get("legs") or []
+    for fact, view in zip(facts.get("legs") or [], views):
+        source = view.get("chance_source")
+        # The builder's chance is not the AI's: it goes by its own name, with where it comes from
+        fact.pop("ai_chance", None)
+        given_no_push = fact.pop("ai_chance_given_no_push", None)
+        if given_no_push is not None:
+            fact["chance_given_no_push"] = given_no_push
+        fact.update({"chance": _p(view.get("chance")), "chance_source": CHANCE_SOURCES.get(source, source),
+                     "edge": view.get("ev", fact.get("edge")), "edge_vs_price": _p(view.get("edge")),
+                     "age": view.get("age"), "why": view.get("why"), "risk": view.get("risk"),
+                     "fair_odds_only": bool(view.get("model_price")) or None})
     return trim(facts, items=MAX_LEGS)
 
 
@@ -642,7 +713,7 @@ STEPS: Dict[str, Callable[[Dict[str, Any]], str]] = {
     "news_get": lambda a: "Checking injury news…",
     "brain_price_legs": lambda a: f"Running the brain on {len(a.get('legs') or [])} legs…",
     "ticket_price": lambda a: f"Pricing {len(a.get('legs') or [])} legs…",
-    "ticket_build": lambda a: "Building tickets…",
+    "ticket_build": lambda a: "Building tickets…" if not a.get("preset") else f"Building {a['preset'].title()} tickets…",
     "ticket_analyse": lambda a: "Analysing your ticket…",
     "rollover_simulate": lambda a: "Running the rollover numbers…",
     "slip_propose": lambda a: "Preparing a slip for you to check…",
@@ -1039,6 +1110,8 @@ class Toolbox:
             body["k"] = data.k
         if data.system:
             body["system"] = data.system
+        if data.books:
+            body["books"] = list(data.books)
         return body
 
     def _priced(self, data: TicketInput, source: str, title: Optional[str] = None,
@@ -1063,10 +1136,17 @@ class Toolbox:
         return content, summary, cards
 
     def _build(self, data: BuildInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
+        """ticket_build: the target builder for a stake and target alone (as before), else the Builder with the
+        controls given (a preset fills the rest)."""
+        if data.builder_fields() or data.stake is None or data.target is None:
+            return self._builder(data)
         self._check_amount("stake", data.stake, "stake")
         self._check_amount("target", data.target, "target")
+        if not data.leagues:
+            raise ToolError("invalid_input", "Name the leagues to build from",
+                            "Use the leagues the user asked about or follows")
         body = {"leagues": list(dict.fromkeys(data.leagues)), "stake": _cents(data.stake), "target": _cents(data.target),
-                "max_legs": data.max_legs, "tier": data.tier}
+                "max_legs": data.max_legs or 3, "tier": data.tier}
         self._use_leagues(body["leagues"])
         built = self.lab.build(self.uid, body) or {}
         tickets = [t for t in built.get("tickets") or [] if isinstance(t, dict)]
@@ -1079,11 +1159,63 @@ class Toolbox:
         if not tickets:
             content["hint"] = "No ticket fits: explain the verdict and notes; don't invent one"
         summary = (f"ticket_build({', '.join(body['leagues'])}, stake {body['stake']} to {body['target']}, max "
-                   f"{data.max_legs} legs{', ' + data.tier if data.tier else ''}): " + " | ".join(
+                   f"{body['max_legs']} legs{', ' + data.tier if data.tier else ''}): " + " | ".join(
                        f"#{i + 1} " + "; ".join(f"{leg.get('label')} [{_ref_text(ref_of(leg))}]"
                                                 for leg in ticket.get("legs") or [])
                        for i, ticket in enumerate(tickets)) or "no ticket")
         cards = [ticket_card(ticket, "ticket_build", extra={"verdict": built.get("verdict")}) for ticket in tickets]
+        return content, summary, cards
+
+    def _builder(self, data: BuildInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
+        """The Builder (POST /api/builder/run's code) with the controls Claude passed: amounts only as the user
+        gave them (a stake prices the tickets; a stake and target set the target odds), tickets at most three."""
+        controls: Dict[str, Any] = data.builder_fields()
+        preset = controls.pop("preset", None) or data.tier
+        if preset:
+            controls["preset"] = preset
+        if data.leagues:
+            controls["leagues"] = list(dict.fromkeys(data.leagues))
+        if data.legs is None and data.max_legs is not None:
+            controls["legs_max"] = data.max_legs
+        controls["tickets"] = min(controls.get("tickets") or MAX_BUILD_TICKETS, MAX_BUILD_TICKETS)
+        stake = None
+        if data.stake is not None:
+            self._check_amount("stake", data.stake, "stake")
+            stake = _cents(data.stake)
+        if data.target is not None:
+            if data.stake is None:
+                raise ToolError("invalid_input", "A target needs the user's stake too",
+                                "Ask the user for their stake, or use target_odds for the odds they want")
+            self._check_amount("target", data.target, "target")
+            if "target_odds" not in controls:
+                controls["target_odds"] = float(data.target / data.stake)
+        body: Dict[str, Any] = {"controls": controls}
+        if stake is not None:
+            body["stake"] = stake
+        built = self.lab.builder_run(self.uid, body) or {}
+        tickets = [t for t in built.get("tickets") or [] if isinstance(t, dict)]
+        content = trim({"label": built.get("label"), "stake": built.get("stake"),
+                        "stake_given": built.get("stake_given"), "target": built.get("target"),
+                        "notes": built.get("notes"), "blocked": (built.get("blocked") or {}).get("message"),
+                        "relax": (built.get("blocked") or {}).get("relax"),
+                        "near_misses": [m.get("text") or m.get("reason") for m in built.get("near_misses") or []],
+                        "unpriced": [u.get("reason") for u in built.get("unpriced") or []]}, items=12)
+        content["tickets"] = [builder_ticket_facts(ticket) for ticket in tickets]
+        content["source"] = BUILDER_SOURCE
+        if not tickets:
+            content["hint"] = "Nothing fits: say which rules blocked it (blocked, relax); don't invent a ticket"
+        elif not built.get("stake_given"):
+            content["hint"] = "No stake given: the money figures are per $10 staked; say so"
+        where = ", ".join(controls.get("leagues") or []) or "all sports"
+        shape = f"{data.legs} legs" if data.legs else "Auto legs"
+        aim = f", about {controls['target_odds']:g}x" if controls.get("target_odds") else ""
+        summary = (f"ticket_build(builder: {where}, {built.get('label') or 'Custom'}, {shape}{aim}): " + " | ".join(
+            f"#{i + 1} " + "; ".join(f"{leg.get('label')} [{_ref_text(ref_of(leg))}]" for leg in ticket.get("legs") or [])
+            for i, ticket in enumerate(tickets)) or "no ticket")
+        # The ticket's own notes (fair odds, a long shot, disagreement) travel in ticket["notes"]: a card's "notes" are
+        # per-leg notes ({index, notes}) to the app
+        cards = [ticket_card(ticket, "ticket_build", title=f"{ticket.get('label') or 'Custom'} ticket #{ticket.get('rank')}",
+                             extra={"builder": True, "label": ticket.get("label") or "Custom"}) for ticket in tickets]
         return content, summary, cards
 
     def _analyse(self, data: TicketInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:

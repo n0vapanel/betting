@@ -1020,13 +1020,17 @@ def test_the_assistant_s_leagues_are_its_own_list_not_every_scoreboard() -> None
 
     assert set(POPULAR_LEAGUES) <= set(LEAGUE_KEYS) and len(LEAGUE_KEYS) == 15
     assert "soccer_efl_champ" in LEAGUES and "soccer_efl_champ" not in LEAGUE_KEYS
-    assert len(json.dumps(TOOLS)) < 16_000  # about 15 KB, as before the slate's leagues; 27 KB with all of them
+    # About 16.6 KB with Stage 3's Builder controls on ticket_build (15.9 KB before); 27 KB with every league
+    assert len(json.dumps(TOOLS)) < 17_000
     assert "soccer_efl_champ" not in assistant_module.ROUTER_PROMPT
 
 
 def test_tools_take_refs_never_prices_or_probabilities() -> None:
     for tool in TOOLS:
-        names = _inputs(tool["input_schema"]) - {"min_odds"}  # a rollover's daily odds, as the user gave them
+        # A rollover's daily odds and the Builder's controls (target odds, leg odds range, minimum chance per leg) are
+        # the user's own settings, never a price or a chance for a leg
+        names = _inputs(tool["input_schema"]) - {"min_odds", "target_odds", "leg_odds_min", "leg_odds_max",
+                                                 "min_chance"}
         assert not [n for n in names if any(w in n for w in ("price", "prob", "odds", "chance", "payout"))], tool["name"]
         schema = json.dumps(tool["input_schema"])
         assert "minimum" not in schema and "maximum" not in schema  # ranges are checked in code

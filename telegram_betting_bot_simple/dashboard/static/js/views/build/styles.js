@@ -80,6 +80,21 @@ const CSS = `
 .view-build .bx-ticket-legs { list-style: none; display: grid; gap: 6px; }
 .view-build .bx-ticket-legs li { border-top: 1px solid var(--line); padding-top: 6px; }
 .view-build .bx-ticket-legs li:first-child { border-top: 0; padding-top: 0; }
+/* the Builder's card on the slip page: three presets, each opening the Builder */
+.view-build .bx-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.view-build .bx-preset {
+  display: flex; align-items: center; gap: 8px; min-height: 52px; min-width: 0; padding: 8px 10px; border-radius: 12px;
+  background: var(--card-2); border: 1px solid var(--line-strong); color: var(--text);
+}
+.view-build .bx-preset:hover { text-decoration: none; border-color: var(--text-3); }
+.view-build .bx-preset > span { display: grid; min-width: 0; }
+.view-build .bx-preset b { font-size: 14.5px; }
+.view-build .bx-preset small { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.view-build .bx-preset.t-safe .icon { color: var(--good-ink); }
+.view-build .bx-preset.t-risky .icon { color: var(--warn-ink); }
+.view-build .bx-preset.t-crazy .icon { color: var(--violet); }
+.view-build .bx-presets.off, .view-build .btn.is-off { opacity: 0.55; cursor: not-allowed; }
+@media (max-width: 380px) { .view-build .bx-preset .icon { display: none; } .view-build .bx-preset { padding: 6px 8px; } }
 .view-build .bx-form .chip-row .chip { padding: 0 11px; gap: 5px; font-size: 13.5px; }
 .view-build .bx-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .view-build .bx-two > .field { margin-top: 0; min-width: 0; }

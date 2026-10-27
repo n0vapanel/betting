@@ -12,6 +12,7 @@ import json
 import math
 import random
 import threading
+import time
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
@@ -579,13 +580,16 @@ def app_client(service: DashboardService, slate: Optional[SlateBuilder] = None) 
 
 
 def test_the_game_route_carries_the_markets_block_and_typed_factors(store) -> None:
-    service = DashboardService(BoardOdds(two_games(), store), NoEspn(), NY, store=store)
+    # The game route reads the wall clock: a board saved a minute before now (a board from the fixed test NOW is
+    # stale once the real clock is 12 hours past it, and then nothing is blended)
+    saved = time.time() - 60
+    service = DashboardService(BoardOdds(two_games(), store, fetched_at=saved), NoEspn(), NY, store=store)
     game = app_client(service).get("/api/game", params={"league": NBA, "id": "g1"}).json()
     block = game["consensus"]
     assert set(block) == {"blend", "sources", "links"}
     assert [s["name"] for s in block["sources"]] == ["Sharp", "US books"]
     assert all(set(s) == {"name", "kind", "p", "as_of", "status", "url", "detail"} for s in block["sources"])
-    expected = consensus.blend(block["sources"], NBA, now=NOW, start="2030-01-01T00:00:00Z")
+    expected = consensus.blend(block["sources"], NBA, now=saved + 60, start="2030-01-01T00:00:00Z")
     assert block["blend"]["p"]["home"] == pytest.approx(expected["p"]["home"])
     assert block["blend"]["confidence"] == "normal" and block["links"] == []
     assert game["markets"]["h2h"]["home"]["book"] == "FanDuel"  # the price grid keeps its old name and shape
@@ -765,7 +769,8 @@ def test_the_markets_consensus_tool_and_the_blend_in_odds_get_prices(store) -> N
     tool = next(t for t in TOOLS if t["name"] == "markets_consensus")
     assert "strict" not in tool and tool["input_schema"]["required"] == ["league", "event_id"]
     assert len(TOOLS) == 14
-    service = DashboardService(BoardOdds(two_games(), store), NoEspn(), NY, store=store)
+    # A board saved a minute ago by the wall clock, which markets_detail reads (see the game route's test)
+    service = DashboardService(BoardOdds(two_games(), store, fetched_at=time.time() - 60), NoEspn(), NY, store=store)
     box = Toolbox(FakeLab(service, store), "tg:42", NY)
     run = box.run("markets_consensus", {"league": NBA, "event_id": "g1"})
     assert run.ok, run.content

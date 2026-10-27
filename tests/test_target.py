@@ -458,3 +458,45 @@ def test_messages_never_use_banned_words() -> None:
     for out in runs:
         for text in [out["verdict"], *out["notes"]]:
             assert not any(word in text.lower() for word in BANNED), text
+
+
+def test_each_slot_keeps_its_best_ticket_by_cautious_ev_not_the_likeliest() -> None:
+    # $10 to $30: two doubles land in the window. Team 1 + Team 2 (cautious EV +9.0%) beats Team 3 + Team 4 (+7.5%),
+    # though the second is likelier: the Builder's search must not trade cautious EV for chance
+    slate = [leg(1, 1.8, market=0.58, ai=0.58), leg(2, 1.8, market=0.58, ai=0.58),
+             leg(3, 1.7, market=0.61, ai=0.61), leg(4, 1.7, market=0.61, ai=0.61)]
+    result = build(slate, 10, 30, max_legs=2)
+    double = next(t for t in result["tickets"] if t["slot"] == "double")
+    assert labels(double) == ["Team 1", "Team 2"] and double["cautious"]["ev"] == pytest.approx(0.0899, abs=1e-4)
+    assert "+$0.90" in result["verdict"]
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_each_slot_matches_brute_force_on_a_small_pool(seed) -> None:
+    """Every slot's ticket has the best cautious expected return of all the tickets of its sizes in the window."""
+    import itertools
+    import random
+
+    from telegram_betting_bot_simple.engine import target as module
+    rng = random.Random(seed)
+    slate = []
+    for i in range(10):
+        market = rng.uniform(0.3, 0.7)
+        ai = min(0.9, max(0.25, market + rng.uniform(-0.04, 0.06)))
+        slate.append(leg(i, round(rng.uniform(0.93, 0.98) / market, 2), market=round(market, 4), ai=round(ai, 4)))
+    stake, wanted = 10, rng.choice((25, 40, 60, 90))
+    result = build(slate, stake, wanted, max_legs=4)
+    low, high = wanted / stake * float(module.WINDOW_LOW), wanted / stake * float(module.WINDOW_HIGH)
+    best = {}
+    for n in range(1, 5):
+        for combo in itertools.combinations(slate, n):
+            odds = math.prod(float(x.price) for x in combo)
+            if not low - 1e-9 <= odds <= high + 1e-9:
+                continue
+            ev = math.prod(cautious_probability(x) * float(x.price) for x in combo) - 1
+            slot = module._slot(n)
+            best[slot] = max(best.get(slot, -math.inf), ev)
+    got = {t["slot"]: t["cautious"]["ev"] for t in result["tickets"]}
+    assert set(got) == set(best)
+    for slot, ev in best.items():
+        assert got[slot] == pytest.approx(ev, abs=1e-4), slot

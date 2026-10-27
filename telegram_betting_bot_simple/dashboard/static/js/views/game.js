@@ -1,8 +1,10 @@
 // Game: one game in full (GET /api/game). "Markets say" (the markets brain's blend with a chip per source,
 // views/markets/say.js), the AI's view next to the market's and ESPN's, the prices (every one toggles a slip
-// pick), why the model's numbers are what they are (typed factors that add up to each number,
-// views/markets/factors.js; the old text lines when the server sends none), injuries, the AI analysts with
-// "Ask now", the players (each opens a player page), every bookmaker's odds, and "Make your call".
+// pick), for soccer the "Goals model" (markets/goals.js: both teams to score, draw no bet, double chance, team
+// totals and the likeliest scores at fair odds), why the model's numbers are what they are (typed factors that
+// add up to each number, views/markets/factors.js; the old text lines when the server sends none), injuries,
+// the AI analysts with "Ask now", the players (each opens a player page), every bookmaker's odds, and "Make
+// your call".
 
 import { api, isQuiet, qs } from "../api.js";
 import { setTitle, refreshMainButton, leagueTitle, sportEmoji } from "../app.js";
@@ -14,6 +16,8 @@ import { icon } from "../icons.js";
 import { analystsHtml, bindAnalysts, openCallSheet, loadMyCalls, callSummary, CAUTION_GAP } from "../legacy.js";
 import { marketsSection, bindMarkets, blendChances, consensusOf } from "./markets/say.js";
 import { factorsSection, bindFactors } from "./markets/factors.js";
+import { goalsSection } from "./markets/goals.js";
+import { ensureMarketStyles } from "./markets/styles.js";
 
 let current = null; // {game, params} for the Telegram main button
 
@@ -192,12 +196,14 @@ export async function render(root, params) {
   const state = { game, params, redraw: null };
   current = state;
 
+  if (game.soccer) ensureMarketStyles(); // the Goals model's table styles (markets/styles.js)
   const draw = () => {
     root.innerHTML = `${hero(game)}
       ${actions(game, myCall)}
       ${marketsSection(game, { short })}
       ${whoWins(game)}
       ${prices(game)}
+      ${goalsSection(game, { short })}
       ${factorsSection(game, { key: fxKey })}
       ${injuries(game)}
       ${game.prediction || (game.analysts && !Array.isArray(game.analysts)) ? section("AI analysts", `<div data-analysts>${analystsHtml(game)}</div>`, { info: "analysts", id: "analysts" }) : ""}

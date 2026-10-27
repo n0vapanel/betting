@@ -24,7 +24,12 @@ The search then works only with numbers the brain already has:
   search that may only use one leg from it anyway;
 - every combination of one to four legs from different games whose combined
   odds land between 10% below and 15% above D* (forty legs give about 100,000
-  combinations, a fraction of a second);
+  combinations, a fraction of a second), searched by the Builder
+  (engine/builder.py, v3 Stage 3): one run per ticket size, with that window as
+  its ticket-odds band, the cautious chance as each leg's chance and the
+  cautious expected return as its only ranking (builder.RETURN_ONLY); each
+  slot then takes the best of the builder's ranked tickets by this module's
+  rank (cautious expected return, then cautious chance);
 - legs priced only at books a person can bet at: a price from Pinnacle or an
   exchange (the markets brain's consensus anchor) is never used;
 - the best single, the best two-leg ticket and the best three- or four-leg
@@ -49,6 +54,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
+from . import builder
 from .bets import TIERS, Tier, price_book
 from .odds_math import decimal_to_american, format_american
 from .tickets import TicketLeg, chance_label, one_in, price_ticket
@@ -328,44 +334,76 @@ def _rank(options: Tuple[_Option, ...], odds: float, target: float) -> Tuple[flo
             -round(abs(math.log(odds / target)), 9), -len(options))
 
 
-def _search(pool: Sequence[_Option], target: float, low: float, high: float, max_legs: int,
-            accept: Callable[[float], bool]) -> Tuple[Dict[str, _Found], int]:
-    """The best ticket for each slot, and how many combinations landed in the odds window.
+SEARCH_BOOK = "Bookmaker"  # the builder needs a book's name; a quote that names none gets this one
 
-    Depth-first over legs sorted by price: once a leg takes the odds past the
-    window every longer leg does too, and a branch that can't reach the window
-    even with the longest prices left is skipped.
+
+def _candidate(option: _Option) -> builder.Candidate:
+    """One pool leg as the builder's Candidate: its chance is the cautious chance (the builder takes no caution off,
+    so its cautious return per unit is p_c x odds + push, this module's), its game the leg's correlation group, and
+    its ref unique per quote (two legs with one ref would be one leg to the builder)."""
+    leg = option.leg
+    away, _, home = leg.game.partition(" @ ")
+    return builder.Candidate(
+        ref={"league": leg.league, "id": leg.key, "market": leg.market, "side": leg.side, "point": leg.point},
+        league=leg.league, game_key=option.game, teams=(away or leg.game, home or leg.game), start=leg.start,
+        price=leg.price, book=leg.book or SEARCH_BOOK, chance=option.cautious, chance_source="books",
+        label=leg.label, push=option.push)
+
+
+def _controls(legs: int, low: float, high: float, tickets: int) -> builder.Controls:
+    """The builder's controls for one ticket size: the odds window [low, high] as its ticket-odds band (no target,
+    so no closeness term), one leg per game, no Whelan cap, no caution (the chances are already cautious), any board
+    market and any price age. _search runs it with builder.RETURN_ONLY, so the builder ranks by the cautious
+    expected return alone."""
+    # Every price is above 1, so a window starting below 1 starts at 1 for the builder
+    return builder.Controls(legs=legs, legs_max=legs, odds_min=max(low, 1.0), odds_max=high, caution_pp=0.0,
+                            whelan=False,
+                            max_per_game=1, max_per_team=builder.MAX_LEGS, markets=set(builder.MARKETS),
+                            max_price_age_s=builder.MAX_AGE_S, tickets=tickets)
+
+
+def _search(pool: Sequence[_Option], target: float, low: float, high: float, max_legs: int,
+            accept: Callable[[float], bool], now: datetime.datetime) -> Tuple[Dict[str, _Found], int]:
+    """The best ticket for each slot, and how many combinations landed in the odds window: the Builder's search
+    (engine/builder.py), one ticket size at a time, over this pool.
+
+    The builder ranks tickets by their cautious expected return alone (builder.RETURN_ONLY; here the cautious
+    chance is this module's p_c) and hands back its best tickets (``Result.ranked``, up to builder.HEAP_KEEP of
+    them: every combination in the window when there are fewer); each slot keeps the best of those the tier
+    accepts by this module's rank (cautious expected return, then cautious chance).
     """
+    by_key = {}
+    candidates = []
+    if low > builder.MAX_TARGET_ODDS:
+        return {}, 0  # past the builder's odds: nothing on a board gets there
+    high = min(high, builder.MAX_TARGET_ODDS)
+    for option in pool:
+        if option.leg.market not in builder.MARKETS:
+            continue  # a market the builder doesn't know (a player prop) can't be searched
+        candidate = _candidate(option)
+        by_key[candidate.key] = option
+        candidates.append(candidate)
     best: Dict[str, _Found] = {}
     in_window = 0
-    top = pool[-1].price if pool else 1.0
+    if not candidates:
+        return best, in_window
 
-    def consider(chosen: Tuple[_Option, ...], odds: float) -> None:
-        nonlocal in_window
-        in_window += 1
-        if not accept(math.prod(option.brain for option in chosen)):
-            return
-        rank = _rank(chosen, odds, target)
-        slot = _slot(len(chosen))
-        if slot not in best or rank > best[slot].rank:
-            best[slot] = _Found(chosen, odds, rank)
-
-    def visit(start: int, chosen: Tuple[_Option, ...], odds_so_far: float, groups: frozenset) -> None:
-        for j in range(start, len(pool)):
-            option = pool[j]
-            odds = odds_so_far * option.price
-            if odds > high:
-                break  # sorted by price: every later leg goes further past the window
-            if option.game in groups:
-                continue  # one leg per game: same-game legs are linked
-            picked = chosen + (option,)
-            if odds >= low:
-                consider(picked, odds)
-            room = max_legs - len(picked)
-            if room and odds * top ** room >= low:
-                visit(j + 1, picked, odds, groups | {option.game})
-
-    visit(0, (), 1.0, frozenset())
+    for size in range(1, max_legs + 1):
+        # One ticket asked for: the builder searches once, so its count of combinations is exact
+        result = builder.build(candidates, _controls(size, low, high, 1), now, weights=builder.RETURN_ONLY)
+        rejected = result.stats.get("rejected") or {}
+        in_window += (int(result.stats.get("combos") or 0) - int(rejected.get("odds_low") or 0)
+                      - int(rejected.get("odds_high") or 0))
+        for _, keys in result.ranked:
+            chosen = tuple(by_key[key] for key in keys)
+            if not accept(math.prod(option.brain for option in chosen)):
+                continue
+            odds = math.prod(option.price for option in chosen)
+            rank = _rank(chosen, odds, target)
+            slot = _slot(len(chosen))
+            if slot not in best or rank > best[slot].rank:
+                ordered = tuple(sorted(chosen, key=lambda option: (option.price, option.leg.key)))
+                best[slot] = _Found(ordered, odds, rank)
     return best, in_window
 
 
@@ -591,7 +629,7 @@ def build_for_target(candidates: Sequence[TicketLeg], stake: Amount, target_retu
     low, high = float(multiple * WINDOW_LOW), float(multiple * WINDOW_HIGH)
     pool, cut = _pool(options, low * (1 - _EPS), high * (1 + _EPS), legs)
     accept = (lambda p: wanted.p_low <= p < wanted.p_high) if wanted else (lambda p: True)
-    best, in_window = _search(pool, m, low * (1 - _EPS), high * (1 + _EPS), legs, accept)
+    best, in_window = _search(pool, m, low, high, legs, accept, now)
     ranked = sorted(best.values(), key=lambda found: found.rank, reverse=True)
     tickets = [_ticket(found, i + 1, stake, target, now) for i, found in enumerate(ranked)]
     verdict, edge, cost = _verdict(ranked[0] if ranked else None, stake, m)
