@@ -1,12 +1,12 @@
 // One game as a desktop board row (a CSS-grid row in an ARIA table), plus the pieces cards share: the
 // price button, the time and status, the team lines and the chance cells. HTML strings only; every outside
 // text goes through esc(). The numbers are the slate's (the server's); edges are the AI's chance minus the
-// market's for the same outcome (model.js), shown in percentage points.
+// bookmakers' margin-free chance for the same outcome (model.js), shown in percentage points.
 
 import { esc, pct, priceText, ago, badge, registerLeg } from "../../ui.js";
 import { slip, sportEmoji, leagueTitle } from "../../app.js";
 import { icon } from "../../icons.js";
-import { offer, legFor, edges, teamShort } from "./model.js";
+import { offer, legFor, edges, teamShort, marketsOf } from "./model.js";
 
 export const MARKETS = [
   { key: "h2h", label: "Winner", sides: ["away", "home", "draw"] },
@@ -127,6 +127,91 @@ export function chanceCell(game, source, sides) {
     : `<span class="td-v num${v === top ? " fav" : ""}">${esc(pct(v))}</span>`)).join("");
 }
 
+// A source's name in words for labels (the slate sends short names: "US", "Poly"); "Model" is the NBA team
+// model on its own, named as the game page's "Who wins" names it (the AI's chance is another number)
+const SOURCE_WORDS = { US: "US books", Poly: "Polymarket", Model: "Team model" };
+// The slate's short names of the market sources (sharp books, US books, prediction markets)
+const MARKET_SOURCES = new Set(["Sharp", "US", "Kalshi", "Poly"]);
+const STATUS_WORDS = { thin: "thin market", stale: "out of date", missing: "no price" };
+
+/** "Celtics" / "the draw" for a side, in words. */
+function sideWords(game, side) {
+  if (side === "draw") return "the draw";
+  return game[side]?.name || teamShort(game[side], game.league) || side;
+}
+
+/** A source's chance in words: "Kalshi 63%" / "Polymarket 61% (thin market)". */
+function sourceWords(s) {
+  return `${SOURCE_WORDS[s.name] || s.name} ${pct(s.p)}${s.status !== "ok" ? ` (${STATUS_WORDS[s.status] || s.status})` : ""}`;
+}
+
+/**
+ * Why a "Markets say" is low confidence, in words: no market price can be counted, either because none prices
+ * the game or because the ones listed are thin or out of date (shown, but not counted).
+ */
+export function lowWords(m) {
+  const listed = (m?.sources || []).filter((s) => MARKET_SOURCES.has(s.name) && s.status !== "ok");
+  if (!listed.length) return "Low confidence: no market prices this game, ratings only";
+  const names = listed.map((s) => SOURCE_WORDS[s.name] || s.name).join(", ");
+  if (listed.length === 1) {
+    const why = { thin: "thin", stale: "out of date" }[listed[0].status] || "not usable";
+    return `Low confidence: ratings only, as the only market price (${names}) is ${why} and not counted`;
+  }
+  return `Low confidence: ratings only, as the market prices (${names}) are thin or out of date and not counted`;
+}
+
+/**
+ * "Markets say" in words, for a label or a tooltip, as sentences: the blend's favourite, how sure, how far
+ * the sources are apart and each source's chance for that side. [] without a "Markets say".
+ */
+export function marketsParts(game) {
+  const m = marketsOf(game);
+  if (!m) return [];
+  const parts = [`Markets say ${sideWords(game, m.fav)} ${pct(m.p[m.fav])}`];
+  if (m.conf === "low") parts.push(lowWords(m));
+  if (m.dis) parts.push(`The sources disagree by ${m.spread != null ? `${Math.round(m.spread)} points` : "5 points or more"}`);
+  if (m.sources.length) parts.push(`${sideWords(game, m.fav)} by source: ${m.sources.map(sourceWords).join(", ")}`);
+  return parts;
+}
+
+/** marketsParts as one label ("" without a "Markets say"). */
+export function marketsWords(game) {
+  return marketsParts(game).join(". ");
+}
+
+/**
+ * The ⚖ badge: "⚖ 7" on the board (points apart; the words are in the cell's label and tooltip), "⚖ 7 pts
+ * apart" on a phone card (``long``).
+ */
+export function disBadge(m, { long = false } = {}) {
+  if (!m?.dis) return "";
+  const n = m.spread != null ? Math.round(m.spread) : null;
+  const text = long ? (n != null ? `${n} pts apart` : "Sources differ") : n != null ? String(n) : "";
+  return `<span class="mk-flag dis"><span class="mk-scale" aria-hidden="true">\u2696\uFE0E</span>${text ? `<span class="mk-flag-t">${esc(text)}</span>` : ""}</span>`;
+}
+
+/** The low-confidence badge (no market price that can be counted: ratings only). */
+export function lowBadge(m, { long = false } = {}) {
+  return m?.conf === "low" ? `<span class="mk-flag low">${long ? "Low confidence" : "Low"}</span>` : "";
+}
+
+/**
+ * The Markets column: the blend per line (away, home, draw; the favourite in bold), with ⚖ when the sources
+ * disagree by 5 points or more and "Low" when no market price can be counted. The tooltip and label list the
+ * sources. Older slates (no "Markets say") show the market's chance as before.
+ */
+export function marketsCell(game, sides) {
+  const m = marketsOf(game);
+  const c = game.chance;
+  if (!c) return `<div class="tb-c tb-mkt" role="cell">${sides.map(() => '<span class="td-v muted">–</span>').join("")}</div>`;
+  const values = sides.map((s) => (typeof c[s] === "number" ? c[s] : null));
+  const top = Math.max(...values.filter((v) => v !== null));
+  const flags = [disBadge(m), lowBadge(m)].filter(Boolean);
+  const parts = marketsParts(game);
+  const lines = values.map((v, i) => `<span class="td-v num${v !== null && v === top ? " fav" : ""}${v === null ? " muted" : ""}">${flags[i] || ""}<span class="mk-v">${v === null ? "–" : esc(pct(v))}</span></span>`).join("");
+  return `<div class="tb-c tb-mkt${m?.dis ? " is-dis" : ""}${m?.conf === "low" ? " is-low" : ""}" role="cell"${parts.length ? ` aria-label="${esc(parts.join(". "))}" title="${parts.map(esc).join("&#10;")}"` : ""}>${lines}</div>`;
+}
+
 /** The edge cell: AI minus market per line, in points; ▲ marks a notable edge, ! a suspiciously big one. */
 export function edgeCell(game, sides) {
   const e = edges(game);
@@ -233,7 +318,7 @@ export function rowHtml(game, { entry, ai, withDay, open, asked, prefetchable, e
     <div class="tb-c tb-lg" role="cell">${leagueHtml(game, entry)}</div>
     <div class="tb-c tb-match" role="cell">${opener}</div>
     ${odds}
-    <div class="tb-c tb-mkt" role="cell">${chanceCell(game, "chance", sides)}</div>
+    ${marketsCell(game, sides)}
     ${aiCells}
     <div class="tb-c tb-badges" role="cell">${notes}<span class="tb-asof-in">${asOf}</span></div>
     <div class="tb-c tb-asof" role="cell">${asOfHtml(game)}</div>
@@ -241,8 +326,10 @@ export function rowHtml(game, { entry, ai, withDay, open, asked, prefetchable, e
 }
 
 /**
- * The fold-out under a game that has no detail page yet: venue, records, start, and why there are no prices.
- * Its one cell spans the row (``cols``: the columns the board shows; Today keeps aria-colspan up to date).
+ * The fold-out under a game that has no detail page yet: venue, records, start, "Markets say" in full (each
+ * source, and why a blend is low confidence: the cell's tooltip isn't reachable by touch or keyboard) and why
+ * there are no prices. Its one cell spans the row (``cols``: the columns the board shows; Today keeps
+ * aria-colspan up to date).
  */
 export function detailHtml(game, entry, asked, { cols = 11 } = {}) {
   const when = new Date(game._start ?? game.start);
@@ -253,8 +340,14 @@ export function detailHtml(game, entry, asked, { cols = 11 } = {}) {
     ["Records", game.away?.record || game.home?.record ? `${game.away?.name || "Away"} ${game.away?.record || "–"} · ${game.home?.name || "Home"} ${game.home?.record || "–"}` : ""],
     ["Status", game.status === "live" ? `Live${game.clock ? ` (${game.clock})` : ""}` : game.status === "final" ? "Final" : game.status === "postponed" ? "Postponed" : "Not started"],
   ].filter(([, v]) => v);
+  const parts = marketsParts(game);
+  const m = parts.length ? marketsOf(game) : null;
+  const markets = parts.length
+    ? `<p class="small td-mk-detail"><b>${esc(parts[0])}.</b> ${esc(parts.slice(1).join(". "))}${parts.length > 1 ? "." : ""}${m?.conf === "low" ? " The ratings are pulled a quarter of the way toward the sport's usual home-win rate (an even split where there is none)." : ""}</p>`
+    : "";
   return `<div class="tb-detail" role="row" data-detail="${esc(game.id)}"><div class="tb-detail-in" role="cell" aria-colspan="${esc(cols)}">
     <dl class="td-facts">${facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>
+    ${markets}
     <p class="small">${noOddsHtml(game, entry, asked)}</p>
   </div></div>`;
 }

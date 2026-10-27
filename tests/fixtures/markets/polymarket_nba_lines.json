@@ -1,0 +1,1366 @@
+[
+ {
+  "active": true,
+  "bestAsk": 0.77,
+  "bestBid": 0.74,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -11.5",
+  "id": "5967324",
+  "lastTradePrice": 0.72,
+  "line": -11.5,
+  "liquidityNum": 12128.2515,
+  "outcomePrices": "[\"0.755\", \"0.245\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-11.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-11pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.03,
+  "volumeNum": 11328.809877
+ },
+ {
+  "active": true,
+  "bestAsk": 0.77,
+  "bestBid": 0.65,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "O/U 232.5",
+  "id": "5967325",
+  "lastTradePrice": 0.59,
+  "line": 232.5,
+  "liquidityNum": 3979.3831,
+  "outcomePrices": "[\"0.71\", \"0.29\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Bulls vs. Celtics: O/U 232.5",
+  "slug": "nba-chi-bos-2026-10-26-total-232pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.12,
+  "volumeNum": 120836.93544200002
+ },
+ {
+  "active": true,
+  "bestAsk": 0.036,
+  "bestBid": 0.01,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -2.5",
+  "id": "5996352",
+  "line": -2.5,
+  "liquidityNum": 13614.82018,
+  "outcomePrices": "[\"0.023\", \"0.977\"]",
+  "outcomes": "[\"Bulls\", \"Celtics\"]",
+  "question": "Spread: Bulls (-2.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-away-2pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.026,
+  "volumeNum": 109.9
+ },
+ {
+  "active": true,
+  "bestAsk": 0.71,
+  "bestBid": 0.67,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -13.5",
+  "id": "5996353",
+  "lastTradePrice": 0.64,
+  "line": -13.5,
+  "liquidityNum": 11609.8396,
+  "outcomePrices": "[\"0.69\", \"0.31\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-13.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-13pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04,
+  "volumeNum": 128881.29276699999
+ },
+ {
+  "active": true,
+  "bestAsk": 0.68,
+  "bestBid": 0.65,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -14.5",
+  "id": "5996354",
+  "lastTradePrice": 0.65,
+  "line": -14.5,
+  "liquidityNum": 10506.5706,
+  "outcomePrices": "[\"0.665\", \"0.335\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-14.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-14pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.03,
+  "volumeNum": 363189.12798000005
+ },
+ {
+  "active": true,
+  "bestAsk": 0.59,
+  "bestBid": 0.56,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -16.5",
+  "id": "5996355",
+  "lastTradePrice": 0.55,
+  "line": -16.5,
+  "liquidityNum": 14232.2783,
+  "outcomePrices": "[\"0.575\", \"0.425\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-16.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-16pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.03,
+  "volumeNum": 33077.215891
+ },
+ {
+  "active": true,
+  "bestAsk": 0.47,
+  "bestBid": 0.43,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -19.5",
+  "id": "5996356",
+  "lastTradePrice": 0.45,
+  "line": -19.5,
+  "liquidityNum": 12731.1039,
+  "outcomePrices": "[\"0.45\", \"0.55\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-19.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-19pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04,
+  "volumeNum": 17017.88022
+ },
+ {
+  "active": true,
+  "bestAsk": 0.4,
+  "bestBid": 0.28,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -22.5",
+  "id": "5996357",
+  "lastTradePrice": 0.34,
+  "line": -22.5,
+  "liquidityNum": 2811.1161,
+  "outcomePrices": "[\"0.34\", \"0.66\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-22.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-22pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.12,
+  "volumeNum": 1552.432435
+ },
+ {
+  "active": true,
+  "bestAsk": 0.24,
+  "bestBid": 0.21,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -25.5",
+  "id": "5996358",
+  "lastTradePrice": 0.17,
+  "line": -25.5,
+  "liquidityNum": 14198.7187,
+  "outcomePrices": "[\"0.225\", \"0.775\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-25.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-25pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.03,
+  "volumeNum": 1236.330968
+ },
+ {
+  "active": true,
+  "bestAsk": 0.97,
+  "bestBid": 0.94,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -3.5",
+  "id": "5996359",
+  "lastTradePrice": 0.84,
+  "line": -3.5,
+  "liquidityNum": 11301.7577,
+  "outcomePrices": "[\"0.955\", \"0.045\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-3.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-3pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.03,
+  "volumeNum": 88.295989
+ },
+ {
+  "active": true,
+  "bestAsk": 0.93,
+  "bestBid": 0.87,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -6.5",
+  "id": "5996360",
+  "lastTradePrice": 0.75,
+  "line": -6.5,
+  "liquidityNum": 3425.0429,
+  "outcomePrices": "[\"0.9\", \"0.1\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-6.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-6pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.06,
+  "volumeNum": 210.066664
+ },
+ {
+  "active": true,
+  "bestAsk": 0.87,
+  "bestBid": 0.83,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -8.5",
+  "id": "5996361",
+  "lastTradePrice": 0.68,
+  "line": -8.5,
+  "liquidityNum": 11420.7592,
+  "outcomePrices": "[\"0.85\", \"0.15\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-8.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-8pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04,
+  "volumeNum": 517.76144
+ },
+ {
+  "active": true,
+  "bestAsk": 0.84,
+  "bestBid": 0.81,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -9.5",
+  "id": "5996362",
+  "lastTradePrice": 0.7,
+  "line": -9.5,
+  "liquidityNum": 14029.6804,
+  "outcomePrices": "[\"0.825\", \"0.175\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-9.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-9pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.03,
+  "volumeNum": 4620.254575999999
+ },
+ {
+  "active": true,
+  "bestAsk": 0.99,
+  "bestBid": 0.931,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "O/U 218.5",
+  "id": "5996363",
+  "lastTradePrice": 0.79,
+  "line": 218.5,
+  "liquidityNum": 4209.27957,
+  "outcomePrices": "[\"0.9605\", \"0.0395\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Bulls vs. Celtics: O/U 218.5",
+  "slug": "nba-chi-bos-2026-10-26-total-218pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.059,
+  "volumeNum": 293
+ },
+ {
+  "active": true,
+  "bestAsk": 0.94,
+  "bestBid": 0.92,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "O/U 221.5",
+  "id": "5996364",
+  "lastTradePrice": 0.84,
+  "line": 221.5,
+  "liquidityNum": 16081.3654,
+  "outcomePrices": "[\"0.93\", \"0.07\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Bulls vs. Celtics: O/U 221.5",
+  "slug": "nba-chi-bos-2026-10-26-total-221pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.02,
+  "volumeNum": 1152.747808
+ },
+ {
+  "active": true,
+  "bestAsk": 0.93,
+  "bestBid": 0.86,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "O/U 224.5",
+  "id": "5996365",
+  "lastTradePrice": 0.93,
+  "line": 224.5,
+  "liquidityNum": 3833.4557,
+  "outcomePrices": "[\"0.895\", \"0.105\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Bulls vs. Celtics: O/U 224.5",
+  "slug": "nba-chi-bos-2026-10-26-total-224pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.07,
+  "volumeNum": 381.74143200000003
+ },
+ {
+  "active": true,
+  "bestAsk": 0.87,
+  "bestBid": 0.83,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "O/U 227.5",
+  "id": "5996366",
+  "lastTradePrice": 0.76,
+  "line": 227.5,
+  "liquidityNum": 11530.5719,
+  "outcomePrices": "[\"0.85\", \"0.15\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Bulls vs. Celtics: O/U 227.5",
+  "slug": "nba-chi-bos-2026-10-26-total-227pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.04,
+  "volumeNum": 7703.452566
+ },
+ {
+  "active": true,
+  "bestAsk": 0.82,
+  "bestBid": 0.79,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "O/U 229.5",
+  "id": "5996368",
+  "lastTradePrice": 0.76,
+  "line": 229.5,
+  "liquidityNum": 15768.6693,
+  "outcomePrices": "[\"0.805\", \"0.195\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Bulls vs. Celtics: O/U 229.5",
+  "slug": "nba-chi-bos-2026-10-26-total-229pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.03,
+  "volumeNum": 21059.643817
+ },
+ {
+  "active": true,
+  "bestAsk": 0.82,
+  "bestBid": 0.71,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "O/U 230.5",
+  "id": "5996369",
+  "lastTradePrice": 0.64,
+  "line": 230.5,
+  "liquidityNum": 3767.7677,
+  "outcomePrices": "[\"0.765\", \"0.235\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Bulls vs. Celtics: O/U 230.5",
+  "slug": "nba-chi-bos-2026-10-26-total-230pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.11,
+  "volumeNum": 20258.611102000003
+ },
+ {
+  "active": true,
+  "bestAsk": 0.69,
+  "bestBid": 0.58,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "O/U 234.5",
+  "id": "5996370",
+  "lastTradePrice": 0.49,
+  "line": 234.5,
+  "liquidityNum": 3115.3692,
+  "outcomePrices": "[\"0.635\", \"0.365\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Bulls vs. Celtics: O/U 234.5",
+  "slug": "nba-chi-bos-2026-10-26-total-234pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.11,
+  "volumeNum": 12332.386865999999
+ },
+ {
+  "active": true,
+  "bestAsk": 0.63,
+  "bestBid": 0.59,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "O/U 235.5",
+  "id": "5996371",
+  "lastTradePrice": 0.57,
+  "line": 235.5,
+  "liquidityNum": 15288.253,
+  "outcomePrices": "[\"0.61\", \"0.39\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Bulls vs. Celtics: O/U 235.5",
+  "slug": "nba-chi-bos-2026-10-26-total-235pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.04,
+  "volumeNum": 15889.221786
+ },
+ {
+  "active": true,
+  "bestAsk": 0.53,
+  "bestBid": 0.51,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "O/U 237.5",
+  "id": "5996372",
+  "lastTradePrice": 0.49,
+  "line": 237.5,
+  "liquidityNum": 17366.7096,
+  "outcomePrices": "[\"0.52\", \"0.48\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Bulls vs. Celtics: O/U 237.5",
+  "slug": "nba-chi-bos-2026-10-26-total-237pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.02,
+  "volumeNum": 14218.907158000002
+ },
+ {
+  "active": true,
+  "bestAsk": 0.48,
+  "bestBid": 0.36,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "O/U 240.5",
+  "id": "5996373",
+  "lastTradePrice": 0.5,
+  "line": 240.5,
+  "liquidityNum": 5640.6375,
+  "outcomePrices": "[\"0.42\", \"0.58\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Bulls vs. Celtics: O/U 240.5",
+  "slug": "nba-chi-bos-2026-10-26-total-240pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.12,
+  "volumeNum": 3063.5762999999997
+ },
+ {
+  "active": true,
+  "bestAsk": 0.32,
+  "bestBid": 0.3,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "O/U 243.5",
+  "id": "5996374",
+  "lastTradePrice": 0.18,
+  "line": 243.5,
+  "liquidityNum": 10848.6207,
+  "outcomePrices": "[\"0.31\", \"0.69\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Bulls vs. Celtics: O/U 243.5",
+  "slug": "nba-chi-bos-2026-10-26-total-243pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.02,
+  "volumeNum": 1227.334832
+ },
+ {
+  "active": true,
+  "bestAsk": 0.24,
+  "bestBid": 0.17,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "O/U 246.5",
+  "id": "5996375",
+  "lastTradePrice": 0.34,
+  "line": 246.5,
+  "liquidityNum": 3645.3194,
+  "outcomePrices": "[\"0.205\", \"0.795\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Bulls vs. Celtics: O/U 246.5",
+  "slug": "nba-chi-bos-2026-10-26-total-246pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.07,
+  "volumeNum": 315.23229100000003
+ },
+ {
+  "active": true,
+  "bestAsk": 0.079,
+  "bestBid": 0.04,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -33.5",
+  "id": "6213208",
+  "line": -33.5,
+  "liquidityNum": 11552.3076,
+  "outcomePrices": "[\"0.0595\", \"0.9405\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-33.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-33pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.039,
+  "volumeNum": 127.989124
+ },
+ {
+  "active": true,
+  "bestAsk": 0.1,
+  "bestBid": 0.06,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -31.5",
+  "id": "6213209",
+  "lastTradePrice": 0.12,
+  "line": -31.5,
+  "liquidityNum": 14951.1307,
+  "outcomePrices": "[\"0.08\", \"0.92\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-31.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-31pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04,
+  "volumeNum": 2676.175824
+ },
+ {
+  "active": true,
+  "bestAsk": 0.13,
+  "bestBid": 0.09,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -29.5",
+  "id": "6213210",
+  "lastTradePrice": 0.14,
+  "line": -29.5,
+  "liquidityNum": 10571.2364,
+  "outcomePrices": "[\"0.11\", \"0.89\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-29.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-29pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04,
+  "volumeNum": 297.5
+ },
+ {
+  "active": true,
+  "bestAsk": 0.18,
+  "bestBid": 0.14,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -27.5",
+  "id": "6213211",
+  "lastTradePrice": 0.18,
+  "line": -27.5,
+  "liquidityNum": 13588.5026,
+  "outcomePrices": "[\"0.16\", \"0.84\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-27.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-27pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04,
+  "volumeNum": 2619.631992
+ },
+ {
+  "active": true,
+  "bestAsk": 0.31,
+  "bestBid": 0.27,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -23.5",
+  "id": "6213212",
+  "lastTradePrice": 0.3,
+  "line": -23.5,
+  "liquidityNum": 14371.2734,
+  "outcomePrices": "[\"0.29\", \"0.71\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-23.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-23pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04,
+  "volumeNum": 2528.223487
+ },
+ {
+  "active": true,
+  "bestAsk": 0.38,
+  "bestBid": 0.34,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -21.5",
+  "id": "6213213",
+  "lastTradePrice": 0.37,
+  "line": -21.5,
+  "liquidityNum": 11168.7507,
+  "outcomePrices": "[\"0.36\", \"0.64\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-21.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-21pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04,
+  "volumeNum": 13587.756379999999
+ },
+ {
+  "active": true,
+  "bestAsk": 0.55,
+  "bestBid": 0.51,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -17.5",
+  "id": "6213214",
+  "lastTradePrice": 0.51,
+  "line": -17.5,
+  "liquidityNum": 12318.4488,
+  "outcomePrices": "[\"0.53\", \"0.47\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-17.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-17pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04,
+  "volumeNum": 28383.578755000002
+ },
+ {
+  "active": true,
+  "bestAsk": 0.64,
+  "bestBid": 0.6,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -15.5",
+  "id": "6213215",
+  "lastTradePrice": 0.62,
+  "line": -15.5,
+  "liquidityNum": 11603.3327,
+  "outcomePrices": "[\"0.62\", \"0.38\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-15.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-15pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04,
+  "volumeNum": 56809.27180799998
+ },
+ {
+  "active": true,
+  "bestAsk": 0.76,
+  "bestBid": 0.72,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -12.5",
+  "id": "6213216",
+  "lastTradePrice": 0.74,
+  "line": -12.5,
+  "liquidityNum": 8984.9094,
+  "outcomePrices": "[\"0.74\", \"0.26\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-12.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-12pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04,
+  "volumeNum": 27252.267323999997
+ },
+ {
+  "active": true,
+  "bestAsk": 0.81,
+  "bestBid": 0.77,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -10.5",
+  "id": "6213217",
+  "lastTradePrice": 0.6,
+  "line": -10.5,
+  "liquidityNum": 8311.261,
+  "outcomePrices": "[\"0.79\", \"0.21\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-10.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-10pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04,
+  "volumeNum": 2583.972658
+ },
+ {
+  "active": true,
+  "bestAsk": 0.99,
+  "bestBid": 0.95,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -1.5",
+  "id": "6213218",
+  "line": -1.5,
+  "liquidityNum": 17164.1096,
+  "outcomePrices": "[\"0.97\", \"0.03\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-1.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-1pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04
+ },
+ {
+  "active": true,
+  "bestAsk": 0.9,
+  "bestBid": 0.86,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -7.5",
+  "id": "6213219",
+  "lastTradePrice": 0.78,
+  "line": -7.5,
+  "liquidityNum": 14966.3723,
+  "outcomePrices": "[\"0.88\", \"0.12\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-7.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-7pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04,
+  "volumeNum": 207.896104
+ },
+ {
+  "active": true,
+  "bestAsk": 0.94,
+  "bestBid": 0.91,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -5.5",
+  "id": "6213220",
+  "lastTradePrice": 0.84,
+  "line": -5.5,
+  "liquidityNum": 16352.5797,
+  "outcomePrices": "[\"0.925\", \"0.075\"]",
+  "outcomes": "[\"Celtics\", \"Bulls\"]",
+  "question": "Spread: Celtics (-5.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-home-5pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.03,
+  "volumeNum": 448.686296
+ },
+ {
+  "active": true,
+  "bestAsk": 0.039,
+  "bestBid": 0.01,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -4.5",
+  "id": "6213221",
+  "lastTradePrice": 0.09,
+  "line": -4.5,
+  "liquidityNum": 18846.77421,
+  "outcomePrices": "[\"0.0245\", \"0.9755\"]",
+  "outcomes": "[\"Bulls\", \"Celtics\"]",
+  "question": "Spread: Bulls (-4.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-away-4pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.029,
+  "volumeNum": 106
+ },
+ {
+  "active": true,
+  "bestAsk": 0.024,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -10.5",
+  "id": "6213222",
+  "lastTradePrice": 0.023,
+  "line": -10.5,
+  "liquidityNum": 13249.13392,
+  "outcomePrices": "[\"0.012\", \"0.988\"]",
+  "outcomes": "[\"Bulls\", \"Celtics\"]",
+  "question": "Spread: Bulls (-10.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-away-10pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.024,
+  "volumeNum": 216.8
+ },
+ {
+  "active": true,
+  "bestAsk": 0.026,
+  "bestBid": 0.001,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -12.5",
+  "id": "6213223",
+  "lastTradePrice": 0.04,
+  "line": -12.5,
+  "liquidityNum": 12681.8688,
+  "outcomePrices": "[\"0.0135\", \"0.9865\"]",
+  "outcomes": "[\"Bulls\", \"Celtics\"]",
+  "question": "Spread: Bulls (-12.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-away-12pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.025,
+  "volumeNum": 2549.426884
+ },
+ {
+  "active": true,
+  "bestAsk": 0.08,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -14.5",
+  "id": "6213224",
+  "line": -14.5,
+  "liquidityNum": 3400.6866,
+  "outcomePrices": "[\"0.04\", \"0.96\"]",
+  "outcomes": "[\"Bulls\", \"Celtics\"]",
+  "question": "Spread: Bulls (-14.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-away-14pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.08,
+  "volumeNum": 36.339423
+ },
+ {
+  "active": true,
+  "bestAsk": 0.489,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -16.5",
+  "id": "6213225",
+  "line": -16.5,
+  "liquidityNum": 1630.80639,
+  "outcomePrices": "[\"0.2445\", \"0.7555\"]",
+  "outcomes": "[\"Bulls\", \"Celtics\"]",
+  "question": "Spread: Bulls (-16.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-away-16pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.489,
+  "volumeNum": 23.083066000000002
+ },
+ {
+  "active": true,
+  "bestAsk": 0.023,
+  "bestBid": 0.01,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -8.5",
+  "id": "6213226",
+  "line": -8.5,
+  "liquidityNum": 11314.21491,
+  "outcomePrices": "[\"0.0165\", \"0.9835\"]",
+  "outcomes": "[\"Bulls\", \"Celtics\"]",
+  "question": "Spread: Bulls (-8.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-away-8pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.013
+ },
+ {
+  "active": true,
+  "bestAsk": 0.025,
+  "bestBid": 0.01,
+  "closed": false,
+  "endDate": "2026-10-26T23:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-chi-bos-2026-10-26",
+    "startTime": "2026-10-26T23:30:00Z",
+    "title": "Bulls vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:30:00+00",
+  "groupItemTitle": "Spread -6.5",
+  "id": "6213227",
+  "lastTradePrice": 0.07,
+  "line": -6.5,
+  "liquidityNum": 8324.04083,
+  "outcomePrices": "[\"0.0175\", \"0.9825\"]",
+  "outcomes": "[\"Bulls\", \"Celtics\"]",
+  "question": "Spread: Bulls (-6.5)",
+  "slug": "nba-chi-bos-2026-10-26-spread-away-6pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.015,
+  "volumeNum": 1125.7306170000002
+ },
+ {
+  "active": true,
+  "bestAsk": 0.71,
+  "bestBid": 0.01,
+  "closed": false,
+  "endDate": "2026-10-31T00:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-30",
+    "slug": "nba-ind-mia-2026-10-30",
+    "startTime": "2026-10-31T00:00:00Z",
+    "title": "Pacers vs. Heat"
+   }
+  ],
+  "gameStartTime": "2026-10-31 00:00:00+00",
+  "id": "6101720",
+  "line": -3.5,
+  "liquidityNum": 8510.0661,
+  "outcomePrices": "[\"0.36\", \"0.64\"]",
+  "outcomes": "[\"Heat\", \"Pacers\"]",
+  "question": "Spread: Heat (-3.5)",
+  "slug": "nba-ind-mia-2026-10-30-spread-home-3pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.7
+ }
+]

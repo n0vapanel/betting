@@ -32,6 +32,34 @@ document that the API serves as it is (GET /api/slate, with an ETag, so an uncha
 The slate also carries the month's Odds API quota as last reported ({"remaining", "used"}, read from the
 shared store, never fetched), for the header's "N odds left".
 
+The markets brain ("Markets say", engine/consensus.py) runs here too. Each game's opinions are gathered as
+consensus Sources: the sharp books' and the US books' margin-free moneylines from the saved odds board
+(OddsService.consensus_inputs' shape: no credits), Kalshi's and Polymarket's mid prices, ESPN's predictor,
+power ratings (BPI, FPI, Torvik, Elo) and the NBA team model's own chance. They are blended into one chance per
+outcome, which becomes the game's ``chance`` (src "blend"), with a compact ``mkt`` block:
+
+    "mkt": {"p": {"home", "away", "draw"?}, "fav": "home"|"away"|"draw", "conf": "normal"|"low", "dis": bool,
+            "spr": the sources' widest gap in whole points, "src": [[short name, chance of "fav" (2 decimals),
+            status], ...], "as_of": to the minute}
+
+The full detail (the Blend, every Source, the venues' links) is kept in memory for the game route
+(``markets_for``). Prediction markets and ratings are fetched only by the slate's own background markets worker
+(one thread, every MARKETS_EVERY seconds, each source on its own TTL: Polymarket and the ratings first, then ESPN's
+predictor for the week's games, then Kalshi, which paces itself and rests when rate-limited); building the slate
+and every request read only cached copies. A game's sources and blend are logged to the store's consensus_log on
+every change until it starts (then frozen; grading scores them after the final), and once a game has started its
+"Markets say" stays the last one before the start. Nothing from the start on enters a game's "Markets say": the
+clock is read again after the scoreboards (which can take seconds) and before logging, a source whose copy is from
+the start or later is left out (market_detail), and such a price seen before the clock says so marks the game as
+started. A start ESPN flags as not valid (a tennis match whose order of play isn't out: midnight Eastern) is only
+a day: the venues are matched on the date, and the game starts when ESPN says it has.
+
+Size: each game leaves out ``espn_id`` or ``odds_id`` when its ``id`` already holds it and sends ESPN logos as their
+path after https://a.espncdn.com/ (the app puts the host back). Each team keeps its full ``name``: Today's search
+finds a game by city or full name ("Brooklyn", "Golden State") and a slip names the team as the game page does,
+which the short name and abbreviation can't give back. About 3.2 KB gzipped per 60 games, names, prices and
+"Markets say" included.
+
 The slate is serialised once per change, kept in memory as raw bytes, gzip bytes and an ETag (a hash of
 the bytes), and saved to the store, so a restarted dashboard serves the last slate before its first
 refresh. Nothing in it changes unless the games do, so an unchanged slate keeps its ETag.
@@ -44,6 +72,7 @@ import gzip
 import hashlib
 import json
 import logging
+import math
 import re
 import threading
 import time
@@ -54,9 +83,10 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
+from ..engine import consensus
 from .espn_client import ESPN_DAY_TZ, LEAGUES as ESPN_LEAGUES, SCOREBOARD_ONLY, espn_path, team_match_score
 from .leagues import POPULAR_LEAGUES, SPORTS
-from .odds_service import MARKETS, summarize_markets
+from .odds_service import MARKETS, book_roles, moneylines, summarize_markets
 
 log = logging.getLogger(__name__)
 
@@ -100,6 +130,27 @@ TITLES = {
     "soccer_uefa_champs_league": "UEFA Champions League", "soccer_uefa_europa_league": "UEFA Europa League",
 }
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f​-‏ -‮⁦-⁩]")
+
+# --- the markets brain ("Markets say") ---
+MARKETS_EVERY = 60.0  # the markets worker's round: each source refreshes on its own TTL within it
+BOOKS_STALE = 12 * 3600  # a saved odds board older than this no longer counts in the blend ("stale")
+MARKET_STALE = 3600  # a prediction market's copy older than this is stale (it refreshes every 1-5 minutes)
+RATING_STALE = 3 * 24 * 3600  # ratings refresh every 12 hours
+PREDICTOR_STALE = 12 * 3600  # ESPN's predictor refreshes every hour
+PREDICTOR_TTL = 3600  # as data/markets/ratings.py: ESPN's predictor is refetched when asked for after an hour
+PREDICTOR_AHEAD = 24 * 3600  # ESPN's predictor is asked for hourly for games starting within this, ...
+PREDICTOR_FAR_EVERY = 6 * 3600  # ... every 6 hours for the rest of the slate's week ...
+PREDICTOR_PER_ROUND = 25  # ... at most this many a round (one ESPN game summary each), the soonest due first
+ESPN_LOGO = "https://a.espncdn.com/"  # logos are sent as their path after this
+# A source's short name in the slate's "mkt" block and the bot's line
+SHORT_NAMES = {"Sharp": "Sharp", "US books": "US", "Kalshi": "Kalshi", "Polymarket": "Poly", "ESPN": "ESPN",
+               "Model": "Model"}  # ratings keep their own short names (BPI, FPI, Torvik, Elo)
+OUTCOMES = ("home", "away", "draw")
+PRICE_KINDS = ("sharp", "us_books", "prediction_market")  # sources whose as_of is when this app read the price
+KALSHI_AHEAD = 48 * 3600  # Kalshi is refreshed only for leagues with a game on or starting within two days: its
+# anonymous limit answers "too many requests" to bursts of large calls (data/markets/kalshi.py)
+# The team model's own chance as the brain's "Model" source (the same words on the game route)
+MODEL_DETAIL = "NBA team model alone: points for and against, home court, rest, injuries"
 
 
 def _iso(ts: Optional[float]) -> Optional[str]:
@@ -166,6 +217,14 @@ def _odds_only_live(league: str) -> float:
     return next(seconds for prefix, seconds in ODDS_ONLY_LIVE if league.startswith(prefix))
 
 
+def _covers(source: Any, league: str) -> bool:
+    covers = getattr(source, "covers", None)
+    try:
+        return bool(covers(league)) if callable(covers) else True
+    except Exception:
+        return False
+
+
 def _answer(queued: bool, code: str, reason: str) -> Dict[str, Any]:
     return {"queued": queued, "reason": reason, "code": code}
 
@@ -178,6 +237,210 @@ def _tour(league: str) -> Optional[str]:
 def _sport(league: str) -> str:
     """ESPN's sport for a league key ("basketball", "soccer", ...), "" when ESPN doesn't show it."""
     return (espn_path(league) or espn_path(_tour(league) or "") or ("",))[0]
+
+
+# --- the markets brain's sources ---------------------------------------------------------------------
+
+def _num(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if number == number and abs(number) != float("inf") else None
+
+
+def _age(as_of: Any, now: float) -> Optional[float]:
+    ts = as_of if isinstance(as_of, (int, float)) and not isinstance(as_of, bool) else _parse_time(as_of)
+    return None if ts is None else now - float(ts)
+
+
+def _https(url: Any) -> Optional[str]:
+    """A venue's link, only when it is a plain https:// address (the app still escapes it)."""
+    if not isinstance(url, str) or len(url) > 300 or not url.startswith("https://"):
+        return None
+    if any(ch in url for ch in "\"'<> \\") or CONTROL.search(url):
+        return None
+    return url
+
+
+def _checked(source: Optional[Mapping[str, Any]], now: float, stale_after: Optional[float] = None
+             ) -> Optional[Dict[str, Any]]:
+    """A Source from the brain (engine/consensus.py) made ready for the slate: None when it has no usable chance,
+    its link kept only as a plain https:// address, its detail tidied, and "stale" when its copy is older than
+    ``stale_after`` (an "ok" one only: a thin market stays "thin")."""
+    if not source or source.get("status") == "missing" or not source.get("p"):
+        return None
+    out = dict(source)
+    out["url"] = _https(out.get("url"))
+    out["detail"] = _text(out.get("detail"), 160)
+    if not isinstance(out.get("as_of"), str):
+        out["as_of"] = None
+    if stale_after is not None and out.get("status") == "ok":
+        age = _age(out.get("as_of"), now)
+        if age is not None and age > stale_after:
+            out["status"] = "stale"
+    return out
+
+
+def make_source(name: str, kind: str, p: Optional[Mapping[str, Any]], as_of: Any = None, status: str = "ok",
+                url: Optional[str] = None, detail: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """engine/consensus.py's make_source (its chances checked and scaled to sum to 1), ready for the slate; None
+    when ``p`` doesn't give at least home and away."""
+    if not isinstance(p, Mapping) or _num(p.get("home")) is None or _num(p.get("away")) is None:
+        return None
+    try:
+        return _checked(consensus.make_source(name, kind, p, as_of, status, url, detail), 0.0)
+    except ValueError:  # an unknown kind or status: a programming error, logged rather than raised into a build
+        log.warning("Slate: unusable %s source (%s, %s)", name, kind, status)
+        return None
+
+
+def book_sources(books: Mapping[str, Mapping[str, Any]], as_of: Any, now: float,
+                 sharp: Optional[Iterable[str]] = None) -> List[Dict[str, Any]]:
+    """The brain's "Sharp" (Pinnacle and the exchanges, no-vig) and "US books" (median no-vig) sources of one game's
+    moneylines at every book ({book key: {outcome: decimal}}, OddsService.consensus_inputs). A board older than
+    BOOKS_STALE is "stale": shown but not blended."""
+    sharp_keys = tuple(sharp if sharp is not None else book_roles().sharp)
+    try:
+        sources = consensus.book_sources(dict(books or {}), as_of, sharp=sharp_keys)
+    except Exception as exc:  # a malformed saved board: no book sources rather than no slate
+        log.warning("Slate: book consensus failed (%s)", type(exc).__name__)
+        return []
+    return [checked for source in sources if (checked := _checked(source, now, BOOKS_STALE))]
+
+
+def market_source(event: Mapping[str, Any], now: float) -> Optional[Dict[str, Any]]:
+    """A Kalshi or Polymarket MarketEvent's game-winner prices (bid/ask mids) as the brain's source
+    (consensus.prediction_market_source): "thin" when any outcome's market is thin, "stale" when its copy is over
+    an hour old. The event must already face the game's way: match_events and orient turn it round, so it is
+    never flipped here."""
+    try:
+        source = consensus.prediction_market_source(event, flip=False)
+    except Exception as exc:
+        log.warning("Slate: unusable prediction market (%s)", type(exc).__name__)
+        return None
+    return _checked(source, now, MARKET_STALE)
+
+
+def rating_source(rating: Optional[Mapping[str, Any]], now: float, name: Optional[str] = None,
+                  stale_after: float = RATING_STALE) -> Optional[Dict[str, Any]]:
+    """Ratings.game_prob's (or espn_predictor's) chances as a "model_rating" source."""
+    if not rating:
+        return None
+    source = make_source(name or str(rating.get("source") or "Ratings"), "model_rating", rating, rating.get("as_of"),
+                         detail=rating.get("detail"))
+    return _checked(source, now, stale_after)
+
+
+def model_source(chance: Optional[float], as_of: Any, now: float) -> Optional[Dict[str, Any]]:
+    """The NBA team model's own home-win chance (not the prediction, which already leans on the market) as the
+    "Model" source."""
+    if chance is None:
+        return None
+    return make_source("Model", "team_model", {"home": chance, "away": 1 - chance}, as_of, detail=MODEL_DETAIL)
+
+
+def tennis_surface(league: str, event_name: Any = None) -> Optional[str]:
+    """A tennis match's surface for its Elo ("clay", "grass", "hard"; data/markets/ratings.py), None elsewhere."""
+    if not str(league).startswith("tennis_"):
+        return None
+    from .markets.ratings import surface_of  # the markets package loads on first use
+    return surface_of(league, event_name)
+
+
+def _flip(p: Mapping[str, Any]) -> Dict[str, Any]:
+    return {{"home": "away", "away": "home"}.get(k, k): v for k, v in p.items()}
+
+
+def after_start(source: Mapping[str, Any], start: Optional[float]) -> bool:
+    """Whether a source's copy (its ``as_of``) is from the game's start or later."""
+    if start is None:
+        return False
+    ts = _parse_time(source.get("as_of"))
+    return ts is not None and ts >= start
+
+
+def market_detail(league: str, sources: Sequence[Optional[Mapping[str, Any]]], start: Optional[float], now: float,
+                  neutral: bool = False) -> Optional[Dict[str, Any]]:
+    """{"blend": Blend | None, "sources": [Source...], "links": [{"name", "url"}]} for one game, or None without
+    any source. The blend (engine/consensus.py) uses only the "ok" sources. Only opinions from before ``start``
+    count: a copy from the start or later (an odds board loaded in play, a venue refreshed after the start) is left
+    out, so a started game's "Markets say" is never made from in-play prices."""
+    usable = [dict(source) for source in sources if source and not after_start(source, start)]
+    if not usable:
+        return None
+    try:
+        blend = consensus.blend(usable, league, now=now, start=start, neutral=neutral)
+    except Exception as exc:
+        log.warning("Slate: blending %s failed (%s)", league, type(exc).__name__)
+        blend = None
+    links = [{"name": source["name"], "url": source["url"]} for source in usable if source.get("url")]
+    return {"blend": dict(blend) if blend else None, "sources": usable, "links": links}
+
+
+def whole_percent(p: Any) -> float:
+    """A chance to the whole percent, as a fraction (0.815 -> 0.82), the way the app's pct() rounds it."""
+    return math.floor(float(p) * 100 + 0.5) / 100
+
+
+def compact(detail: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The slate's "mkt" block of a market detail (None without a blend)."""
+    blend = (detail or {}).get("blend")
+    if not blend or not isinstance(blend.get("p"), Mapping):
+        return None
+    p = {o: round(float(v), 3) for o, v in blend["p"].items() if o in OUTCOMES}
+    fav = max(p, key=lambda o: (p[o], o == "home"))
+    # Each source's chance to the whole percent the app shows (the game route has the full detail), rounded half
+    # up as the app's pct() rounds the full figure (Python's round(0.815, 2) gives 0.81; the game page says 82%)
+    src = [[SHORT_NAMES.get(s["name"], s["name"]), whole_percent(s["p"][fav]), s.get("status") or "ok"]
+           for s in detail.get("sources") or [] if isinstance(s.get("p"), Mapping) and s["p"].get(fav) is not None]
+    as_of = _parse_time(blend.get("as_of"))
+    return _lean({"p": p, "fav": fav, "conf": blend.get("confidence") or "normal", "dis": bool(blend.get("disagree")),
+                  "spr": math.floor(float(blend.get("spread_pp") or 0.0) + 0.5), "src": src,  # half up, as the app
+                  "as_of": _iso(as_of - as_of % 60) if as_of is not None else None})
+
+
+def chance_of(detail: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The slate's "chance" from a market detail: the blend, src "blend"."""
+    blend = (detail or {}).get("blend")
+    if not blend or not isinstance(blend.get("p"), Mapping):
+        return None
+    p = blend["p"]
+    if p.get("home") is None or p.get("away") is None:
+        return None
+    return _lean({"home": round(float(p["home"]), 3), "away": round(float(p["away"]), 3),
+                  "draw": round(float(p["draw"]), 3) if p.get("draw") is not None else None, "src": "blend"})
+
+
+def _short_logo(url: Any) -> Any:
+    return url[len(ESPN_LOGO):] if isinstance(url, str) and url.startswith(ESPN_LOGO) else url
+
+
+def trim_game(game: Mapping[str, Any]) -> Dict[str, Any]:
+    """A game as the slate sends it: no "_" keys, no ``espn_id``/``odds_id`` its ``id`` already holds and ESPN logos
+    as their path after https://a.espncdn.com/. Teams keep their full ``name`` (search and slip labels need it)."""
+    out = {key: value for key, value in game.items() if not key.startswith("_")}
+    league, gid = str(out.get("league") or ""), str(out.get("id") or "")
+    if out.get("espn_id") and gid == f"{league}:espn:{out['espn_id']}":
+        del out["espn_id"]
+    if out.get("odds_id") and gid == f"{league}:{out['odds_id']}":
+        del out["odds_id"]
+    for side in ("home", "away"):
+        team = out.get(side)
+        if isinstance(team, Mapping):
+            team = dict(team)
+            if team.get("logo"):
+                team["logo"] = _short_logo(team["logo"])
+            out[side] = team
+    return out
+
+
+def ids_of(game: Mapping[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+    """(odds id, ESPN id) of a slate game, from its own fields or, trimmed, from its ``id``."""
+    league, gid = str(game.get("league") or ""), str(game.get("id") or "")
+    rest = gid[len(league) + 1:] if gid.startswith(league + ":") else ""
+    odds_id = game.get("odds_id") or (rest if rest and not rest.startswith("espn:") else None)
+    espn_id = game.get("espn_id") or (rest[5:] if rest.startswith("espn:") else None)
+    return odds_id, espn_id
 
 
 # --- ESPN's scoreboards ----------------------------------------------------------------------------
@@ -287,6 +550,9 @@ def parse_competition(league: str, sport: str, competition: Mapping[str, Any], e
         "away": away_view,
         "venue": venue_view or None,
         "_ts": start,
+        # ESPN's placeholder start (midnight Eastern) for a match whose order of play isn't out: only the day counts
+        "_time_ok": competition.get("timeValid") is not False,
+        "_event": _text(event.get("name") or event.get("shortName"), 80) if sport == "tennis" else None,
         "_neutral": bool(competition.get("neutralSite")),
         "_names": (home_names, away_names),
         "_ids": (home_id, away_id),
@@ -390,7 +656,8 @@ class SlateBuilder:
                  tz: Optional[datetime.tzinfo] = None, live_seconds: float = 20, today_seconds: float = 60,
                  idle_seconds: float = 600, future_seconds: float = 3600, odds_per_day: int = ODDS_PER_DAY,
                  ai_leagues: Iterable[str] = AI_LEAGUES, workers: int = WORKERS,
-                 now: Callable[[], float] = time.time) -> None:
+                 now: Callable[[], float] = time.time, polymarket: Any = None, kalshi: Any = None,
+                 ratings: Any = None, markets_every: float = MARKETS_EVERY, log_consensus: bool = True) -> None:
         self.odds = odds
         self.espn = espn
         self.store = store
@@ -429,6 +696,23 @@ class SlateBuilder:
         self._loading: Set[str] = set()
         self._logged: Dict[str, float] = {}
         self._thread: Optional[threading.Thread] = None
+        # The markets brain: the free outside sources (data/markets; None when MARKETS_ENABLED is off), fetched only
+        # by the markets worker; each game's market detail by slate id, and an index by odds and ESPN ids
+        self.polymarket, self.kalshi, self.ratings = polymarket, kalshi, ratings
+        self.markets_every = max(5.0, float(markets_every))
+        self.log_consensus = log_consensus
+        # A daemon thread per round (Kalshi paces itself to a request a second, so a round can take a minute or two:
+        # it must never hold up the process's exit)
+        self._markets_thread: Optional[threading.Thread] = None
+        self._markets_busy = False
+        self._markets_next = 0.0
+        self._markets: Dict[str, Dict[str, Any]] = {}
+        self._markets_index: Dict[Tuple[str, str, str], str] = {}
+        self._matches: Dict[str, Tuple[Any, Dict[str, List[Tuple[str, Any, bool]]]]] = {}  # league -> pairings
+        self._predictors: Dict[Tuple[str, str], Dict[str, Any]] = {}  # (league, ESPN id) -> ESPN's predictor
+        self._predictor_asked: Dict[Tuple[str, str], float] = {}  # (league, ESPN id) -> when the worker last asked
+        self._logged_sig: Dict[Tuple[str, str], str] = {}  # what consensus_log last got for each game
+        self._saved_seen: Dict[str, Optional[Dict[str, Any]]] = {}  # started games' logged detail, read once
 
     # --- serving -----------------------------------------------------------------------------------
 
@@ -514,7 +798,8 @@ class SlateBuilder:
         for game in data.get("games") or []:
             if not isinstance(game, dict) or not all(isinstance(game.get(side), dict) for side in ("home", "away")):
                 raise ValueError("not a game")  # not a slate this version wrote: load() starts without it
-            if not game.get("espn_id"):
+            espn_id = ids_of(game)[1]  # trimmed: the id holds an ESPN-only game's ESPN id
+            if not espn_id:
                 continue
             ts = _parse_time(game.get("start"))
             league = str(game.get("league") or "")
@@ -523,9 +808,10 @@ class SlateBuilder:
                 continue
             day = datetime.datetime.fromtimestamp(ts, ESPN_DAY_TZ).date()
             names = tuple({"displayName": _text(game[side].get("name")),
-                           "shortDisplayName": _text(game[side].get("short"))} for side in ("home", "away"))
+                           "shortDisplayName": _text(game[side].get("short")),
+                           "abbreviation": _text(game[side].get("abbr"), 8)} for side in ("home", "away"))
             self._fallback.setdefault((source, day), []).append({
-                "espn_id": game["espn_id"], "start": game.get("start"), "status": game.get("status") or "pre",
+                "espn_id": espn_id, "start": game.get("start"), "status": game.get("status") or "pre",
                 "clock": game.get("clock"), "home": dict(game["home"]), "away": dict(game["away"]),
                 "venue": game.get("venue"), "_ts": ts, "_neutral": "neutral" in (game.get("badges") or []),
                 "_names": names, "_ids": (None, None),
@@ -591,7 +877,15 @@ class SlateBuilder:
                 del self._boards[key]
             for key in [key for key in self._fallback if key[1] < today - datetime.timedelta(days=1)]:
                 del self._fallback[key]
+            # The clock again: the boards can take seconds, and meanwhile a game may have started (the markets worker
+            # and request_odds keep updating the sources); the slate is built as of now
+            now = self._now()
             leagues, games, as_of = self._assemble(season, today, now)
+            try:
+                self._apply_markets(games, now)
+            except Exception:  # the markets brain must never cost the scores
+                log.exception("Slate: the markets brain failed this round")
+            self._schedule_markets(games, now)
             self._publish(leagues, games, as_of, now, self._quota())
             return self._next_delay(season, today, self._now())
 
@@ -780,15 +1074,20 @@ class SlateBuilder:
             if start is None or not home or not away or not event_id or not re.fullmatch(r"[A-Za-z0-9_-]+", event_id):
                 continue
             prices, chance = odds_view(event)
+            try:
+                books = moneylines(event)
+            except Exception:
+                books = {}
             events.append({"odds_id": event_id, "_ts": start, "home": home, "away": away, "odds": prices,
-                           "chance": chance})
+                           "chance": chance, "_books": books, "_fetched": fetched_at})
         self._odds[league] = (fetched_at, events)
         return events
 
-    def _ai_chances(self) -> Dict[Tuple[str, str], Tuple[float, str]]:
+    def _ai_chances(self) -> Dict[Tuple[str, str], Tuple[float, str, Optional[float], Optional[float]]]:
         """The NBA model's logged pre-game home-win chances: (league, odds id) and ("espn", ESPN id) ->
-        (chance, odds id). Only what it already worked out; nothing is computed here."""
-        chances: Dict[Tuple[str, str], Tuple[float, str]] = {}
+        (chance, odds id, the team model's own chance or None, when it was logged). Only what it already worked
+        out; nothing is computed here."""
+        chances: Dict[Tuple[str, str], Tuple[float, str, Optional[float], Optional[float]]] = {}
         if self.store is None or not hasattr(self.store, "ai_predictions"):
             return chances
         for league in sorted(self.ai_leagues):
@@ -798,12 +1097,17 @@ class SlateBuilder:
                 self._log_failure(f"{league} model predictions", exc)
                 continue
             for row in rows:
-                home_win = (row.get("payload") or {}).get("home_win")
+                payload = row.get("payload") or {}
+                home_win = payload.get("home_win")
                 if not isinstance(home_win, (int, float)) or not 0 <= home_win <= 1:
                     continue
-                chances[(league, str(row.get("event_id")))] = (float(home_win), str(row.get("event_id")))
+                model = payload.get("model_home_win")
+                model = float(model) if isinstance(model, (int, float)) and 0 < model < 1 else None
+                logged = row.get("logged_at") if isinstance(row.get("logged_at"), (int, float)) else None
+                entry = (float(home_win), str(row.get("event_id")), model, logged)
+                chances[(league, str(row.get("event_id")))] = entry
                 if row.get("espn_id"):
-                    chances[("espn", str(row["espn_id"]))] = (float(home_win), str(row.get("event_id")))
+                    chances[("espn", str(row["espn_id"]))] = entry
         return chances
 
     # --- assembling -----------------------------------------------------------------------------------
@@ -848,8 +1152,8 @@ class SlateBuilder:
         return best[2], best[3]
 
     def _game(self, league: str, espn: Optional[Mapping[str, Any]], event: Optional[Mapping[str, Any]], swapped: bool,
-              odds_at: Optional[float], ai: Mapping[Tuple[str, str], Tuple[float, str]], now: float
-              ) -> Optional[Dict[str, Any]]:
+              odds_at: Optional[float], ai: Mapping[Tuple[str, str], Tuple[float, str, Optional[float], Optional[float]]],
+              now: float) -> Optional[Dict[str, Any]]:
         sport = _sport(league)
         if espn is not None:
             home, away = dict(espn["home"]), dict(espn["away"])
@@ -902,6 +1206,11 @@ class SlateBuilder:
             "ai": {"home": round(model[0], 3), "away": round(1 - model[0], 3)} if model else None,
             "badges": badges or None,
             "odds_as_of": _iso(odds_at) if event else None,
+            # For the markets brain only (trim_game drops "_" keys before the slate is sent)
+            "_ts": start_ts, "_swapped": swapped, "_neutral": bool(espn and espn.get("_neutral")),
+            "_time_ok": bool(espn.get("_time_ok", True)) if espn else True,
+            "_surface": tennis_surface(league, espn.get("_event") if espn else None),
+            "_books": (event.get("_books") or None) if event else None, "_model": model,
         })
 
     def _played(self, league: str, day: datetime.date) -> Set[Any]:
@@ -1012,6 +1321,7 @@ class SlateBuilder:
     def _publish(self, leagues: List[Dict[str, Any]], games: List[Dict[str, Any]], as_of: float, now: float,
                  quota: Optional[Dict[str, int]] = None) -> None:
         """Serialise the slate once, if it changed; keep it in memory and in the store."""
+        games = [trim_game(game) for game in games]
         core = self._core_bytes(leagues, games, quota)
         if self._current is not None and core == self._core:
             return
@@ -1028,6 +1338,311 @@ class SlateBuilder:
                 self.store.save_slate(SLATE_NAME, current.raw, current.etag, now)
             except Exception:
                 log.exception("Couldn't save the slate")
+
+    # --- the markets brain ----------------------------------------------------------------------------------
+
+    def markets_for(self, league: str, odds_id: Optional[str] = None, espn_id: Optional[str] = None
+                    ) -> Optional[Dict[str, Any]]:
+        """A game's market detail ({"blend", "sources", "links"}) as last worked out, by the odds feed's or ESPN's
+        id; None when the slate has none. Never fetches anything."""
+        index = self._markets_index
+        for kind, value in (("odds", odds_id), ("espn", espn_id)):
+            if value:
+                gid = index.get((kind, league, str(value)))
+                if gid is not None and gid in self._markets:
+                    return self._markets[gid]
+        return None
+
+    def _sources(self, game: Mapping[str, Any], matched: Sequence[Mapping[str, Any]], now: float
+                 ) -> List[Dict[str, Any]]:
+        """Every opinion on one game, oriented to its home and away (see the module docstring)."""
+        league = game["league"]
+        sources: List[Optional[Dict[str, Any]]] = []
+        books = game.get("_books")
+        if books:
+            sources += book_sources(books, game.get("odds_as_of"), now)
+        for event in matched:
+            sources.append(market_source(event, now))
+        espn_id = game.get("espn_id")
+        predictor = self._predictors.get((league, str(espn_id))) if espn_id else None
+        if predictor:
+            oriented = _flip(predictor) if game.get("_swapped") else predictor
+            sources.append(rating_source({**oriented, "detail": "ESPN matchup predictor"}, now, name="ESPN",
+                                         stale_after=PREDICTOR_STALE))
+        if self.ratings is not None:
+            try:
+                surface = {"surface": game["_surface"]} if game.get("_surface") else {}
+                rating = self.ratings.game_prob(league, game["home"], game["away"], neutral=bool(game.get("_neutral")),
+                                                fetch=False, **surface)
+            except Exception as exc:
+                self._log_failure(f"{league} ratings", exc, detail=False)
+                rating = None
+            sources.append(rating_source(rating, now))
+        model = game.get("_model")
+        if model and model[2] is not None:
+            sources.append(model_source(model[2], model[3], now))
+        return [source for source in sources if source]
+
+    def _venue_events(self, league: str) -> List[Dict[str, Any]]:
+        """The league's cached Kalshi and Polymarket events (never fetched here)."""
+        events: List[Dict[str, Any]] = []
+        for source in (self.kalshi, self.polymarket):
+            if source is None or not _covers(source, league):
+                continue
+            try:
+                events += [event for event in source.cached_events(league) or [] if isinstance(event, dict)]
+            except Exception as exc:
+                self._log_failure(f"{league} prediction markets", exc, detail=False)
+        return events
+
+    def _pm_matches(self, league: str, games: Sequence[Mapping[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        """{slate id: the venues' events for that game, turned to the game's home and away}, each venue matched on
+        its own (data/markets/aliases.py). The pairing is worked out again only when the venues' events or the
+        games change; the prices always come from the events as cached now."""
+        from .markets.aliases import match_events, orient  # the alias tables load once, on first use
+        events = self._venue_events(league)
+        if not events:
+            self._matches.pop(league, None)
+            return {}
+        signature = (tuple((e.get("source"), e.get("id"), e.get("start"), e.get("home"), e.get("away")) for e in events),
+                     tuple((g["id"], g.get("start"), g.get("_time_ok", True)) for g in games))
+        cached = self._matches.get(league)
+        if cached and cached[0] == signature:
+            pairs = cached[1]
+        else:
+            # A start ESPN marks as not valid is a placeholder (midnight Eastern): only its day is compared
+            plain = [{"id": g["id"], "home": g["home"], "away": g["away"], "start": g.get("start")}
+                     if g.get("_time_ok", True) or g.get("_ts") is None else
+                     {"id": g["id"], "home": g["home"], "away": g["away"], "start": None,
+                      "date": datetime.datetime.fromtimestamp(g["_ts"], ESPN_DAY_TZ).date().isoformat()}
+                     for g in games]
+            pairs = {}
+            for venue in sorted({str(e.get("source")) for e in events}):
+                try:
+                    found = match_events(league, plain, [e for e in events if str(e.get("source")) == venue])
+                except Exception as exc:
+                    self._log_failure(f"{league} {venue} matching", exc, detail=False)
+                    continue
+                for gid, event in found.items():
+                    pairs.setdefault(gid, []).append((venue, event.get("id"), bool(event.get("swapped"))))
+            self._matches[league] = (signature, pairs)
+        current = {(str(e.get("source")), e.get("id")): e for e in events}
+        matches: Dict[str, List[Dict[str, Any]]] = {}
+        for gid, keys in pairs.items():
+            for venue, event_id, swapped in keys:
+                event = current.get((venue, event_id))
+                if event is not None:
+                    matches.setdefault(gid, []).append(orient(event, swapped) if swapped else event)
+        return matches
+
+    def _saved_detail(self, game: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+        """A started game's last market detail before its start, from consensus_log (after a restart); looked up
+        once per game."""
+        if self.store is None or not hasattr(self.store, "consensus_row"):
+            return None
+        if game["id"] in self._saved_seen:
+            return self._saved_seen[game["id"]]
+        odds_id, espn_id = game.get("odds_id"), game.get("espn_id")
+        try:
+            row = self.store.consensus_row(game["league"], event_id=odds_id, espn_id=espn_id)
+        except Exception as exc:
+            self._log_failure("saved consensus", exc)
+            return None
+        detail = None
+        if row and row.get("blend"):
+            sources = row.get("sources") or []
+            detail = {"blend": row["blend"], "sources": sources,
+                      "links": [{"name": s["name"], "url": s["url"]} for s in sources if s.get("url")]}
+        self._saved_seen[game["id"]] = detail
+        return detail
+
+    def _apply_markets(self, games: List[Dict[str, Any]], now: float) -> None:
+        """Work out every game's market detail, set its ``chance`` (the blend) and ``mkt``, and log the consensus
+        of games still to start. A started game keeps its last detail from before the start."""
+        details: Dict[str, Dict[str, Any]] = {}
+        index: Dict[Tuple[str, str, str], str] = {}
+        by_league: Dict[str, List[Dict[str, Any]]] = {}
+        for game in games:
+            by_league.setdefault(game["league"], []).append(game)
+        rows = []
+        for league, league_games in by_league.items():
+            try:
+                upcoming = [g for g in league_games if g["status"] == "pre"]
+                matches = self._pm_matches(league, upcoming) if (self.kalshi or self.polymarket) and upcoming else {}
+            except Exception as exc:
+                self._log_failure(f"{league} prediction markets", exc, detail=False)
+                matches = {}
+            for game in league_games:
+                gid = game["id"]
+                detail = None
+                # A start ESPN marks as not valid (a match whose order of play isn't out) is only its day: such a game
+                # has started when ESPN says so
+                start = game.get("_ts") if game.get("_time_ok", True) or game["status"] != "pre" else None
+                started = game["status"] != "pre" or (start is not None and start <= now)
+                if started:  # its "Markets say" stays the last one before the start, as logged
+                    detail = self._markets.get(gid) or self._saved_detail(game)
+                if detail is None and game["status"] != "postponed":
+                    try:
+                        sources = self._sources(game, matches.get(gid, []), now)
+                        if not started and any(s.get("kind") in PRICE_KINDS and after_start(s, start) for s in sources):
+                            # A price from the start or later: the game has started since this round read the clock
+                            started = True
+                            detail = self._markets.get(gid) or self._saved_detail(game)
+                        if detail is None:  # only opinions from before the start (market_detail)
+                            detail = market_detail(league, sources, start, now, neutral=bool(game.get("_neutral")))
+                    except Exception as exc:
+                        self._log_failure(f"{league} markets", exc, detail=False)
+                        detail = None
+                if not detail:
+                    continue
+                details[gid] = detail
+                for kind, value in (("odds", game.get("odds_id")), ("espn", game.get("espn_id"))):
+                    if value:
+                        index[(kind, league, str(value))] = gid
+                chance, mkt = chance_of(detail), compact(detail)
+                if chance:
+                    # Keep the bookmakers' margin-free chance: Today's "Mkt" figure, edge and AI-vs-market sort
+                    book = game.get("chance")  # odds_view's chance, src "market"
+                    if isinstance(book, dict) and book.get("src") == "market":
+                        game["fair"] = {k: book[k] for k in ("home", "away", "draw") if book.get(k) is not None}
+                    game["chance"] = chance
+                if mkt:
+                    game["mkt"] = mkt
+                if not started and detail.get("blend"):
+                    rows.append(self._consensus_row(game, detail))
+        self._markets = details
+        self._markets_index = index
+        current = {game["id"] for game in games}
+        self._saved_seen = {gid: found for gid, found in self._saved_seen.items() if gid in current}
+        if rows and self.log_consensus:
+            # Read the clock once more: the store writes nothing for a game whose start has passed by now
+            self._log_consensus(rows, max(now, self._now()))
+
+    @staticmethod
+    def _consensus_row(game: Mapping[str, Any], detail: Mapping[str, Any]) -> Dict[str, Any]:
+        odds_id, espn_id = game.get("odds_id"), game.get("espn_id")
+        name = lambda team: team.get("name") or team.get("short") or team.get("abbr") or "?"  # noqa: E731
+        return {"league": game["league"], "game_key": f"espn:{espn_id}" if espn_id else f"odds:{odds_id}",
+                "event_id": odds_id, "espn_id": espn_id, "swapped": bool(game.get("_swapped")),
+                "home": name(game["home"]), "away": name(game["away"]), "start": game["start"],
+                "sources": detail["sources"], "blend": detail["blend"]}
+
+    def _log_consensus(self, rows: List[Dict[str, Any]], now: float) -> None:
+        """Write the rows whose sources or blend changed since they were last written (one transaction)."""
+        if self.store is None or not hasattr(self.store, "log_consensus"):
+            return
+        changed, signatures = [], {}
+        for row in rows:
+            key = (row["league"], row["game_key"])
+            signature = hashlib.sha1(json.dumps([row["sources"], row["blend"], row["start"], row["event_id"]],
+                                                sort_keys=True, default=str).encode()).hexdigest()
+            if self._logged_sig.get(key) != signature:
+                changed.append(row)
+                signatures[key] = signature
+        if not changed:
+            return
+        try:
+            self.store.log_consensus(changed, now)
+        except Exception as exc:
+            self._log_failure("consensus log", exc)
+            return
+        self._logged_sig.update(signatures)
+        if len(self._logged_sig) > 20000:  # games long gone
+            self._logged_sig = dict(list(self._logged_sig.items())[-10000:])
+
+    def _schedule_markets(self, games: Sequence[Mapping[str, Any]], now: float) -> None:
+        """Start a markets worker round when one is due: the leagues with games to come or on, and ESPN's
+        predictor for the week's games that are due (hourly within a day of the start, every 6 hours before),
+        soonest first, PREDICTOR_PER_ROUND a round."""
+        if self.polymarket is None and self.kalshi is None and self.ratings is None:
+            return
+        if self._markets_busy or now < self._markets_next:
+            return
+        leagues = sorted({g["league"] for g in games if g["status"] in ("pre", "live")})
+        # Kalshi only where a game is on or starts within two days (its anonymous rate limit is tight)
+        kalshi_leagues = sorted({g["league"] for g in games if g["status"] == "live"
+                                 or (g["status"] == "pre" and (g.get("_ts") or 0) - now < KALSHI_AHEAD)})
+        predictor: List[Tuple[str, str]] = []
+        if self.ratings is not None:
+            from .markets.ratings import PREDICTOR_LEAGUES
+            # Every game of the week, soonest first, but only those due (asked for over an hour ago when the game is
+            # within a day, over 6 hours ago when further off, or never): each round's few fetches go where needed
+            asked = self._predictor_asked
+            due = sorted((g for g in games if g["status"] == "pre" and g.get("espn_id") and g["league"] in PREDICTOR_LEAGUES
+                          and (g.get("_ts") or 0) > now
+                          and now - asked.get((g["league"], str(g["espn_id"])), -math.inf)
+                          >= (PREDICTOR_TTL if (g.get("_ts") or 0) - now < PREDICTOR_AHEAD else PREDICTOR_FAR_EVERY)),
+                         key=lambda g: g.get("_ts") or 0)
+            predictor = [(g["league"], str(g["espn_id"])) for g in due[:PREDICTOR_PER_ROUND]]
+            for key in predictor:
+                asked[key] = now
+            if len(asked) > 4000:  # games long gone
+                self._predictor_asked = dict(sorted(asked.items(), key=lambda item: item[1])[-2000:])
+        self._markets_busy = True
+        thread = threading.Thread(target=self._load_markets, args=(leagues, predictor, kalshi_leagues),
+                                  name="slate-markets", daemon=True)
+        self._markets_thread = thread
+        try:
+            thread.start()
+        except RuntimeError:  # shutting down
+            self._markets_busy = False
+
+    def wait_markets(self, timeout: float = 30.0) -> None:
+        """Wait for the markets worker's round in progress, if any (for tests and tools)."""
+        thread = self._markets_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout)
+
+    def _load_markets(self, leagues: Sequence[str], predictor: Sequence[Tuple[str, str]],
+                      kalshi_leagues: Optional[Sequence[str]] = None) -> None:
+        """One markets worker round, in the background: each source refreshes whatever its TTL says is due (the
+        sources never raise; failures keep their last good copy). Polymarket and the ratings first, then ESPN's
+        predictor, then Kalshi last and only for ``kalshi_leagues`` (games within two days): a rate-limited Kalshi
+        backs off for half a minute inline, so it must not hold up the others, and once it is resting
+        (data/markets/kalshi.py) the round skips it. The slate is rebuilt when the others are done and again at
+        the end."""
+        kalshi_list = [league for league in (leagues if kalshi_leagues is None else kalshi_leagues)
+                       if self.kalshi is not None and _covers(self.kalshi, league)]
+        try:
+            for league in leagues:
+                if self._stop.is_set():
+                    return
+                if self.polymarket is not None and _covers(self.polymarket, league):
+                    try:
+                        self.polymarket.events(league)
+                    except Exception as exc:
+                        self._log_failure(f"Polymarket {league}", exc, detail=False)
+                if self.ratings is not None:
+                    try:
+                        self.ratings.power(league)
+                    except Exception as exc:
+                        self._log_failure(f"ratings {league}", exc, detail=False)
+            for league, espn_id in predictor:
+                if self._stop.is_set():
+                    return
+                try:
+                    value = self.ratings.espn_predictor(league, espn_id)
+                except Exception as exc:
+                    self._log_failure(f"ESPN predictor {league}", exc, detail=False)
+                    continue
+                if value:
+                    self._predictors[(league, espn_id)] = dict(value)
+            if len(self._predictors) > 2000:
+                self._predictors = dict(list(self._predictors.items())[-1000:])
+            if kalshi_list:
+                self.wake()  # show the others' prices now, not after Kalshi's turn
+            for league in kalshi_list:
+                resting = getattr(self.kalshi, "resting", None)
+                if self._stop.is_set() or (callable(resting) and resting()):
+                    break
+                try:
+                    self.kalshi.events(league)
+                except Exception as exc:
+                    self._log_failure(f"Kalshi {league}", exc, detail=False)
+        finally:
+            self._markets_next = self._now() + self.markets_every
+            self._markets_busy = False
+            self.wake()
 
     # --- fresh odds on request ------------------------------------------------------------------------
 
@@ -1081,7 +1696,11 @@ class SlateBuilder:
         return _answer(True, "queued", "Loading the latest odds.")
 
     def _fetch_cost(self) -> int:
-        """Credits one league's board costs: a credit per market per odds region ("us" or "us,uk", say)."""
+        """Credits one league's board costs: a credit per market per region (ten listed bookmakers count as one
+        region: OddsService.board_cost), else per odds region asked for ("us" or "us,uk", say)."""
+        cost = getattr(self.odds, "board_cost", None)
+        if isinstance(cost, int) and not isinstance(cost, bool) and cost > 0:
+            return cost
         regions = getattr(self.odds, "regions", None)
         count = len([r for r in regions.split(",") if r.strip()]) if isinstance(regions, str) else 1
         return FETCH_COST * max(1, count)

@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import html
+import math
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -78,8 +79,15 @@ def short_name(name: str, league: str = "") -> str:
     return name.split()[-1] if " " in name else name
 
 
+def whole(p: float) -> int:
+    """A chance in whole percent, rounded half up as the app rounds it (JavaScript's Math.round and data/slate.py's
+    whole_percent): a 0.585 mid is 59 here too, where Python's round() would say 58."""
+    return math.floor(p * 100 + 0.5)
+
+
 def pct(probability: Optional[float]) -> str:
-    return "–" if probability is None else f"{round(probability * 100)}%"
+    """A chance in whole percent, rounded half up as the app rounds it (see whole)."""
+    return "–" if probability is None else f"{whole(probability)}%"
 
 
 def money(amount: float) -> str:
@@ -116,6 +124,41 @@ def offer_button_text(card: Dict[str, Any], market: str, side: str, offer: Dict[
     else:
         name = f"{side.title()} {offer['point']:g}"
     return f"{name} {offer['american']} · {pct(offer['ai'])}"
+
+
+# How the "Markets say" line names each source (data/slate.py's names)
+MARKET_NAMES = {"Sharp": "sharp", "US books": "US", "Kalshi": "Kalshi", "Polymarket": "Poly", "ESPN": "ESPN",
+                "Model": "model"}
+
+
+def markets_line(card: Dict[str, Any]) -> Optional[str]:
+    """One line of the markets brain's blend (HTML), e.g. "📊 Markets say: Celtics 63% (sharp 64 · US 62 · Kalshi 63
+    · Poly 61)": the side it favours, then each usable source's chance of that side, in whole percent rounded as
+    the app rounds them. ⚖️ marks only a disagreement, as in the app. None without a blend."""
+    detail = card.get("consensus") or {}
+    blend = detail.get("blend") or {}
+    chances = {side: p for side, p in (blend.get("p") or {}).items() if side in ("home", "away", "draw")
+               and isinstance(p, (int, float))}
+    if not chances:
+        return None
+    league = card.get("league", "")
+    fav = max(chances, key=lambda side: (chances[side], side == "home"))
+    team = "Draw" if fav == "draw" else short_name(card.get(fav) or fav, league)
+    parts = []
+    for source in detail.get("sources") or []:
+        p = (source.get("p") or {}).get(fav)
+        if source.get("status") not in ("ok", "thin") or not isinstance(p, (int, float)):
+            continue
+        name = MARKET_NAMES.get(source.get("name"), source.get("name") or "?")
+        parts.append(f"{name} {whole(p)}" + (" thin" if source.get("status") == "thin" else ""))
+    text = f"📊 Markets say: {html.escape(team)} {whole(chances[fav])}%"
+    if parts:
+        text += f" ({html.escape(' · '.join(parts))})"
+    if blend.get("confidence") == "low":
+        text += " · low confidence (ratings only)"
+    if blend.get("disagree"):
+        text += f" · ⚖️ sources differ by {math.floor(float(blend.get('spread_pp') or 0) + 0.5)} pts"
+    return text
 
 
 def game_card_text(card: Dict[str, Any], odds_as_of: Optional[str]) -> str:
@@ -158,6 +201,9 @@ def game_card_text(card: Dict[str, Any], odds_as_of: Optional[str]) -> str:
                 for side, offer in h2h.items()))
         if card.get("espn_home_win") is not None:
             lines.append(f"ESPN predictor: {esc(short_name(home, league))} {pct(card['espn_home_win'])}")
+    say = markets_line(card)
+    if say:
+        lines.append(say)
 
     analysts = [a for a in (card.get("analysts") or {}).get("analysts", []) if a.get("forecast")]
     if analysts:

@@ -72,6 +72,7 @@ from pydantic import ValidationError
 from ..data.espn_client import ESPN_DAY_TZ, LEAGUES as ESPN_LEAGUES, normalize_team
 from ..data.espn_players import PlayerData, hit_rates
 from ..data.leagues import POPULAR_LEAGUES
+from ..data.odds_service import is_price_book
 from ..data.store import MAX_CENTS, Store
 from ..engine import bets, calls, pasted, rollover, target, tickets
 from ..engine.odds_math import decimal_to_american, format_american, remove_vig
@@ -2252,8 +2253,12 @@ class Lab(Gates):
         entry["push"] = (offer.get("push") or 0.0) if modelled else 0.0
         entry["chance_source"] = "model" if ai is not None else "market"
         best = Decimal(str(offer["price"]))
-        entry["best_price"] = {"decimal": str(best.quantize(CENTS, rounding=ROUND_HALF_UP)), "book": offer.get("book")}
-        entry["better_price"] = odds is not None and best >= odds + BETTER_BY
+        # The board's best price is a price book's (data/odds_service.py), but a "better price" is only ever one a
+        # person can bet at: never Pinnacle's or an exchange's
+        if is_price_book(offer.get("book")):
+            entry["best_price"] = {"decimal": str(best.quantize(CENTS, rounding=ROUND_HALF_UP)),
+                                   "book": offer.get("book")}
+            entry["better_price"] = odds is not None and best >= odds + BETTER_BY
         return entry
 
     def _match_prop(self, leg: pasted.ExtractedLeg, odds: Optional[Decimal], boards: "_PasteBoards", now: float,

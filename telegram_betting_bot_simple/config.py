@@ -1,9 +1,19 @@
 # telegram_betting_bot_simple/config.py
-from typing import FrozenSet, Literal, Optional
+import re
+from typing import Any, FrozenSet, Literal, Optional, Tuple
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
+
+# The Odds API bookmakers the league board asks for (checked against its bookmaker list on 27 October 2026):
+# Pinnacle and two exchanges anchor the consensus; the rest are US books people can bet at. Caesars
+# (williamhill_us) is listed for paid plans only, and espnbet is now called "theScore Bet"
+DEFAULT_BOOKMAKERS = ("pinnacle,betfair_ex_eu,matchbook,draftkings,fanduel,betmgm,williamhill_us,espnbet,betrivers,"
+                      "bovada")
+DEFAULT_SHARP_BOOKS = "pinnacle,betfair_ex_eu,matchbook"
+MAX_BOOKMAKERS = 10  # every 10 bookmakers count as one region (3 credits a board for three markets)
+BOOK_KEY = re.compile(r"[a-z0-9][a-z0-9_]{1,39}")
 
 class Config(BaseSettings):
     telegram_token: str = Field(..., validation_alias="TELEGRAM_BOT_TOKEN")
@@ -28,7 +38,20 @@ class Config(BaseSettings):
     telegram_allowed_ids: str = Field("", validation_alias="TELEGRAM_ALLOWED_IDS")
     # Minutes to keep a league's odds before fetching again (each fetch costs 3 quota units)
     odds_cache_minutes: float = Field(120, validation_alias="ODDS_CACHE_MINUTES")
+    # Only used when ODDS_BOOKMAKERS is "none": the odds board then asks for whole regions (3 credits each)
     odds_regions: str = Field("us", validation_alias="ODDS_REGIONS")
+    # The bookmakers each league's odds board asks for (comma-separated Odds API keys, at most 10: every 10
+    # count as one region, so a board still costs 3 credits). Blank means the default list; "none" goes back to
+    # ODDS_REGIONS. SHARP_BOOKS (Pinnacle and the exchanges) only anchor the markets brain's consensus: nobody is
+    # offered their prices. ODDS_PRICE_BOOKS are the books a person can actually bet at, the only ones "best
+    # price", the slip, the AI's tickets, the target builder and a pasted slip's "better price" use (blank: every
+    # book in ODDS_BOOKMAKERS that isn't sharp or an exchange)
+    odds_bookmakers: str = Field(DEFAULT_BOOKMAKERS, validation_alias="ODDS_BOOKMAKERS")
+    sharp_books: str = Field(DEFAULT_SHARP_BOOKS, validation_alias="SHARP_BOOKS")
+    odds_price_books: str = Field("", validation_alias="ODDS_PRICE_BOOKS")
+    # The markets brain's free outside opinions (Polymarket, Kalshi, ESPN's predictor and power ratings, Torvik,
+    # Tennis Abstract, eloratings.net), refreshed in the background by the dashboard's slate worker
+    markets_enabled: bool = Field(True, validation_alias="MARKETS_ENABLED")
     # Below this many Odds API requests left this month, serve saved odds instead of fetching
     odds_reserve: int = Field(50, validation_alias="ODDS_RESERVE")
     # Today's all-sports slate (data/slate.py): seconds between ESPN scoreboard checks for a league with a game
@@ -77,11 +100,34 @@ class Config(BaseSettings):
         value = (value or "").strip().rstrip("/")
         return value or None
 
+    @field_validator("markets_enabled", mode="before")
+    @classmethod
+    def _blank_is_on(cls, value: object) -> object:
+        # "MARKETS_ENABLED=" in .env means the default (on), not a startup error
+        return True if isinstance(value, str) and not value.strip() else value
+
     @field_validator("ai_chat_web_daily_cents", "ai_chat_daily_total_cents", mode="before")
     @classmethod
     def _blank_is_unset(cls, value: object) -> object:
         # "AI_CHAT_WEB_DAILY_CENTS=" in .env means unset (the default), not a startup error
         return None if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("odds_bookmakers", "sharp_books", "odds_price_books", mode="before")
+    @classmethod
+    def _check_books(cls, value: object, info: Any) -> str:
+        # A typo fails loudly at startup instead of quietly dropping a bookmaker (or every price) from the board
+        text = "" if value is None else str(value)
+        if info.field_name == "odds_bookmakers" and not text.strip():
+            return DEFAULT_BOOKMAKERS  # "ODDS_BOOKMAKERS=" in .env means the default list
+        if info.field_name == "sharp_books" and not text.strip():
+            return DEFAULT_SHARP_BOOKS
+        if info.field_name == "odds_bookmakers" and text.strip().lower() == "none":
+            return "none"
+        keys = parse_book_keys(text, info.field_name.upper())
+        if info.field_name == "odds_bookmakers" and len(keys) > MAX_BOOKMAKERS:
+            raise ValueError(f"ODDS_BOOKMAKERS can hold at most {MAX_BOOKMAKERS} bookmakers: every 10 cost one more "
+                             "region (3 more credits a board)")
+        return ",".join(keys)
 
     @field_validator("telegram_allowed_ids")
     @classmethod
@@ -95,11 +141,40 @@ class Config(BaseSettings):
         return parse_telegram_ids(self.telegram_allowed_ids)
 
     @property
+    def bookmakers(self) -> Tuple[str, ...]:
+        """ODDS_BOOKMAKERS as keys; empty when it is "none" (the board then asks for ODDS_REGIONS)."""
+        return () if self.odds_bookmakers == "none" else parse_book_keys(self.odds_bookmakers, "ODDS_BOOKMAKERS")
+
+    @property
+    def sharp_book_keys(self) -> Tuple[str, ...]:
+        return parse_book_keys(self.sharp_books, "SHARP_BOOKS")
+
+    @property
+    def price_book_keys(self) -> Tuple[str, ...]:
+        """ODDS_PRICE_BOOKS as keys; empty means every book in ODDS_BOOKMAKERS that isn't sharp or an exchange."""
+        return parse_book_keys(self.odds_price_books, "ODDS_PRICE_BOOKS")
+
+    @property
     def mini_app_url(self) -> Optional[str]:
         """PUBLIC_URL if Telegram can open it as a Mini App (HTTPS only), else None."""
         if self.public_url and self.public_url.lower().startswith("https://"):
             return self.public_url
         return None
+
+def parse_book_keys(text: str, setting: str = "ODDS_BOOKMAKERS") -> Tuple[str, ...]:
+    """Bookmaker keys from "pinnacle, draftkings" (lowercase, spaces and empty entries ignored, no repeats)."""
+    keys = []
+    for part in (text or "").split(","):
+        part = part.strip().lower()
+        if not part:
+            continue
+        if not BOOK_KEY.fullmatch(part):
+            # The bad entry isn't repeated: something pasted into the wrong line would end up in the logs
+            raise ValueError(f"{setting} should be The Odds API's bookmaker keys separated by commas, "
+                             "e.g. pinnacle,draftkings,fanduel")
+        if part not in keys:
+            keys.append(part)
+    return tuple(keys)
 
 def parse_telegram_ids(text: str) -> FrozenSet[int]:
     """Telegram user ids from "12345, 67890" (spaces and empty entries are ignored)."""

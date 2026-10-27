@@ -5,9 +5,11 @@ twice for the same fetch and nothing is lost on restart), the last
 all-sports slate Today is drawn from (served at once after a restart), a log of The
 Odds API's quota headers, short leases so only one process refreshes a
 league at a time, the predictions people make (and how they scored), and
-the AI's own pre-game predictions for its track record, and the AI
-analysts' forecasts (Claude, DeepSeek) with what each call cost. WAL mode
-lets readers and a writer work concurrently.
+the AI's own pre-game predictions for its track record, the AI
+analysts' forecasts (Claude, DeepSeek) with what each call cost, and the
+markets brain's consensus for every game (each source's opinion and the
+blend, frozen at the start and scored after the final). WAL mode lets
+readers and a writer work concurrently.
 
 Version 2 adds per-person accounts, so a slip started in Telegram opens
 unchanged in the browser: users (with the limits the AI cannot edit: age
@@ -132,8 +134,31 @@ CREATE TABLE IF NOT EXISTS analyst_calls (
     cost REAL NOT NULL,            -- estimated US dollars
     ok INTEGER NOT NULL            -- 0 when no forecast came back (it still counts toward the daily limit)
 );
+CREATE TABLE IF NOT EXISTS consensus_log (
+    league TEXT NOT NULL,
+    game_key TEXT NOT NULL,        -- "espn:<id>" when ESPN shows the game, else "odds:<id>": one row per game
+    event_id TEXT,                 -- the odds feed's game id
+    espn_id TEXT,                  -- ESPN's event id, to fetch the result
+    swapped INTEGER NOT NULL DEFAULT 0,  -- 1 when ESPN lists home and away the other way round from the row
+    home TEXT NOT NULL,
+    away TEXT NOT NULL,
+    start TEXT NOT NULL,           -- ISO start time
+    logged_at REAL NOT NULL,       -- the last refresh before the start: the row is frozen after it
+    sources TEXT NOT NULL,         -- JSON: every source's opinion (engine/consensus.py's Source)
+    blend TEXT NOT NULL,           -- JSON: the markets brain's blend (engine/consensus.py's Blend)
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending, graded or void
+    outcome TEXT,                  -- home, away or draw, once graded
+    result TEXT,                   -- JSON: the final score, and each source's and the blend's Brier score and log loss
+    graded_at REAL,
+    PRIMARY KEY (league, game_key)
+);
+CREATE INDEX IF NOT EXISTS consensus_log_by_status ON consensus_log (status, start);
+CREATE INDEX IF NOT EXISTS consensus_log_by_event ON consensus_log (league, event_id);
 """
 
+CONSENSUS_FIELDS = ("league", "game_key", "event_id", "espn_id", "swapped", "home", "away", "start", "logged_at",
+                    "sources", "blend", "status", "outcome", "result", "graded_at")
+CONSENSUS_JSON = {"sources", "blend", "result"}
 PREDICTION_FIELDS = ("id", "player", "name", "league", "event_id", "espn_id", "home", "away", "start",
                      "created_at", "call", "ai", "status", "result", "user_points", "ai_points", "graded_at")
 AI_FIELDS = ("league", "event_id", "espn_id", "home", "away", "start", "logged_at", "payload", "status",
@@ -338,6 +363,15 @@ SQL_CHUNK = 500  # ids per "IN (...)" query, well under SQLite's variable limit
 RESERVED_PREFIX = "*"
 AI_HOLD_SECONDS = 10 * 60  # a running AI call's hold lapses this long after it was taken or last renewed
 # (renew_ai, before each request to the model), in case its process died mid-call
+
+
+def _consensus(values: Sequence[Any]) -> Dict[str, Any]:
+    row = dict(zip(CONSENSUS_FIELDS, values))
+    for key in CONSENSUS_JSON:
+        if row[key] is not None:
+            row[key] = json.loads(row[key])
+    row["swapped"] = bool(row["swapped"])
+    return row
 
 
 def _record(fields: Tuple[str, ...], values: Sequence[Any]) -> Dict[str, Any]:
@@ -814,6 +848,96 @@ class Store:
                 "UPDATE ai_predictions SET status = ?, result = ?, graded_at = ? WHERE league = ? AND event_id = ?",
                 (status, json.dumps(result), time.time(), league, event_id),
             )
+
+    # --- the markets brain's consensus, logged before each start and graded after the final ----------------
+
+    def log_consensus(self, rows: Sequence[Mapping[str, Any]], now: Optional[float] = None) -> int:
+        """Save each game's latest sources and blend (one transaction): a row is updated on every refresh until
+        its game starts, then frozen; rows for games already started are ignored. Returns the rows written."""
+        now = _now(now)
+        now_iso = _iso(now)
+        written = 0
+        with closing(self._connect()) as db, _transaction(db):
+            for row in rows:
+                start = str(row["start"])
+                if start <= now_iso:
+                    continue
+                cursor = db.execute(
+                    "INSERT INTO consensus_log (league, game_key, event_id, espn_id, swapped, home, away, start, "
+                    "logged_at, sources, blend) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(league, game_key) DO UPDATE SET event_id = COALESCE(excluded.event_id, "
+                    "consensus_log.event_id), espn_id = COALESCE(excluded.espn_id, consensus_log.espn_id), "
+                    "swapped = excluded.swapped, home = excluded.home, away = excluded.away, start = excluded.start, "
+                    "logged_at = excluded.logged_at, sources = excluded.sources, blend = excluded.blend "
+                    "WHERE consensus_log.status = 'pending' AND consensus_log.start > ?",
+                    (row["league"], row["game_key"], row.get("event_id"), row.get("espn_id"),
+                     1 if row.get("swapped") else 0, row["home"], row["away"], start, now,
+                     json.dumps(row["sources"], default=_json_default), json.dumps(row["blend"], default=_json_default),
+                     now_iso),
+                )
+                written += cursor.rowcount
+        return written
+
+    def consensus_rows(self, league: Optional[str] = None, status: Optional[str] = None,
+                       started_before: Optional[str] = None, limit: int = 5000) -> List[Dict[str, Any]]:
+        """Logged consensus rows, latest start first."""
+        where, args = [], []
+        for clause, value in (("league = ?", league), ("status = ?", status), ("start < ?", started_before)):
+            if value is not None:
+                where.append(clause)
+                args.append(value)
+        sql = f"SELECT {', '.join(CONSENSUS_FIELDS)} FROM consensus_log"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        with closing(self._connect()) as db:
+            rows = db.execute(sql + " ORDER BY start DESC LIMIT ?", (*args, _limit(limit))).fetchall()
+        return [_consensus(values) for values in rows]
+
+    def consensus_graded(self) -> Tuple[Tuple[int, Optional[float]], List[Dict[str, Any]]]:
+        """Every graded row's league, blend and result (not its sources: the record needs only the scores), with a
+        mark that changes whenever a row is graded ((rows, latest graded_at)), so a reader can keep what it worked
+        out until the mark moves. No limit: the record counts every graded game."""
+        with closing(self._connect()) as db:
+            mark = db.execute("SELECT COUNT(*), MAX(graded_at) FROM consensus_log WHERE status = 'graded'").fetchone()
+            rows = db.execute("SELECT league, blend, result FROM consensus_log WHERE status = 'graded' "
+                              "ORDER BY start DESC").fetchall()
+        return ((int(mark[0]), mark[1]),
+                [{"league": league, "blend": json.loads(blend) if blend else None,
+                  "result": json.loads(result) if result else None} for league, blend, result in rows])
+
+    def consensus_graded_mark(self) -> Tuple[int, Optional[float]]:
+        """(graded rows, latest graded_at): changes whenever a row is graded."""
+        with closing(self._connect()) as db:
+            count, latest = db.execute("SELECT COUNT(*), MAX(graded_at) FROM consensus_log WHERE status = 'graded'"
+                                       ).fetchone()
+        return int(count), latest
+
+    def consensus_row(self, league: str, event_id: Optional[str] = None, espn_id: Optional[str] = None,
+                      game_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """One game's logged row, by its key, the odds feed's id or ESPN's id (the most recently logged match)."""
+        for column, value in (("game_key", game_key), ("event_id", event_id), ("espn_id", espn_id)):
+            if not value:
+                continue
+            with closing(self._connect()) as db:
+                values = db.execute(
+                    f"SELECT {', '.join(CONSENSUS_FIELDS)} FROM consensus_log WHERE league = ? AND {column} = ? "
+                    "ORDER BY logged_at DESC LIMIT 1", (league, str(value))).fetchone()
+            if values:
+                return _consensus(values)
+        return None
+
+    def grade_consensus(self, league: str, game_key: str, status: str, outcome: Optional[str],
+                        result: Mapping[str, Any], now: Optional[float] = None) -> bool:
+        """Record a game's outcome and every source's scores (status graded or void); a row is graded once."""
+        if status not in ("graded", "void"):
+            raise ValueError(f"Unknown consensus status {status!r}")
+        with closing(self._connect()) as db:
+            cursor = db.execute(
+                "UPDATE consensus_log SET status = ?, outcome = ?, result = ?, graded_at = ? "
+                "WHERE league = ? AND game_key = ? AND status = 'pending'",
+                (status, outcome, json.dumps(result, default=_json_default), _now(now), league, game_key),
+            )
+        return cursor.rowcount > 0
 
     # --- the AI analysts' forecasts and what they cost ---------------------------------
 

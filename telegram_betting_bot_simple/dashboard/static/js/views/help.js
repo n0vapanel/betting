@@ -250,7 +250,7 @@ function aiHtml() {
       <p>The brain counts, Claude explains, and the analysts have to earn their say.</p></div>
     ${section("1 · The brain computes every number", `<p class="small muted">The “brain” is the app's own code. Every chance, price, payout, cut and expected result you see comes from it.</p>
       ${points([
-        ["scale", "<b>The market</b>: the best prices from several bookmakers, with their margin taken out, as the baseline in every sport."],
+        ["scale", "<b>Markets say</b>: one chance per outcome, blended in log-odds from sharp bookmakers and exchanges (50% to start), the US bookmakers (20%), Kalshi and Polymarket (20%), ratings (5%) and the app's team model (5%), each with its margin removed. It's the baseline in every sport; ⚖ marks games whose sources disagree by 5 points or more, and when no market price can be counted (none, or only thin or out-of-date ones) it says “Low confidence”. <a href=\"#/help/markets_say\">How the blend works</a>"],
         ["chart", "<b>The NBA model</b> blends the bookmakers' consensus, ESPN's matchup predictor and a team model (form, rest, travel, injuries), plus player projections for props."],
         ["build", "<b>Ticket maths</b>: one pricing function for singles, multis, round robins and system bets, in exact money rounded once. It knows each leg's push chance and blocks same-game legs in a multi."],
         ["info", "<b>Other sports</b> have no model yet, so they show the market's chance and label it “Mkt”, never dressed up as the AI's."],

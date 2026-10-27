@@ -235,7 +235,7 @@ def test_a_build_runs_the_tool_loop_and_cards_come_from_the_tool_results(store, 
     # Toolbox.run validates every input instead
     assert all("strict" not in tool and tool["input_schema"]["additionalProperties"] is False
                for tool in first["tools"])
-    assert len(first["tools"]) == 13  # the twelve tools and pasted_slip_analyse
+    assert len(first["tools"]) == 14  # the twelve tools, pasted_slip_analyse and markets_consensus
     result = second["messages"][-1]["content"][0]
     assert result["type"] == "tool_result" and result["tool_use_id"] == "toolu_1" and not result["is_error"]
     assert "ceiling_one_in" in result["content"]
@@ -606,7 +606,9 @@ def test_password_users_share_one_allowance_and_the_app_has_a_daily_cap(store, l
     assert kinds.count("answer") < 8 and kinds[-1] == "gate"
     shared = store.ai_used_today(assistant_module.WEB_POOL, now=NOW)
     assert shared <= 10
-    last = assistant.reply("web:rotate-00000007", message="hello?")
+    # The same question as the turn just refused: its worst-case cost can't fit in what's left either (a shorter
+    # message could squeeze in by a fraction of a cent, depending on the prompt's size)
+    last = assistant.reply("web:rotate-00000007", message="what do odds mean?")
     assert "everyone signed in with the password" in last["reply"]["text"]
     assert last["credits"]["left_cents"] == pytest.approx(10 - shared, abs=0.01)
     assert store.ai_used_today(assistant_module.WEB_POOL, now=NOW) == shared  # a gated turn costs nothing

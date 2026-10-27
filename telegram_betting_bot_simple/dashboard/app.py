@@ -847,6 +847,13 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
                      svc: DashboardService = Depends(get_service)) -> Dict[str, Any]:
         return calls_errors(lambda: svc.track_record(league))
 
+    @app.get("/api/record/markets", dependencies=signed_in)
+    def markets_record(svc: DashboardService = Depends(get_service)) -> Dict[str, Any]:
+        """The markets brain's record: per league and per source (Sharp, US books, Kalshi, Polymarket, ESPN,
+        ratings, the model), the games graded, the mean Brier score and log loss, and the blend's on the same
+        games. Read from the store; nothing is fetched."""
+        return calls_errors(svc.markets_record)
+
     # --- version 2: per person (settings, tickets, saved bets, plans, players, chat) -----------------
 
     @app.get("/api/me")

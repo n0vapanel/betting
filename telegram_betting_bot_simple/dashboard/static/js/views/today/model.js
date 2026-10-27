@@ -1,20 +1,40 @@
 // Today's data, without the page: the slate (GET /api/slate) indexed once, then filtered and sorted in
 // the browser by league, day, status and search. No DOM here, so every rule can be checked in node.
 //
-// The numbers are the server's: prices, the market's margin-free chances and the NBA model's chances come
-// in the slate. This module only compares them on the same footing (the AI's chance minus the market's,
-// for the same outcome of the same game) and writes them in the person's odds format.
+// The numbers are the server's: prices, the bookmakers' margin-free chances, the markets brain's blend and the
+// NBA model's chances come in the slate. This module only compares them on the same footing (the AI's chance
+// minus the bookmakers', for the same outcome of the same game) and writes them in the person's odds format.
 //
 //   prepare(slate)                     -> {leagues: Map, order: [keys], groups, games, week: Map(league -> games
 //                                         in the seven days)} (memoised per slate)
 //   dayStrip(now)                      -> [{key: "YYYY-MM-DD", label, long, offset}] today and the next 6 days
 //   view(prepared, {leagues, day, status, search, sort, pinned}) -> {games, counts, days, live, total, searchAll}
-//   edges(game) / gap(game)            -> AI minus market per side (or null) / the biggest gap
+//   bookChance(game)                   -> the bookmakers' margin-free chance per outcome (never the blend), or null
+//   edges(game) / gap(game)            -> AI minus the bookmakers' chance per side (or null) / the biggest gap
 //   legFor(game, market, side)         -> the slip leg an odds button adds (ref names the odds event id)
 //   american(decimal)                  -> "+150" / "-200"
+//   normalizeGame(raw)                 -> a slate game in the full shape (the trimmed slate, or an older copy
+//                                         saved on this device as it was: both are read)
+//   marketsOf(game)                    -> the game's "Markets say" (its mkt block) checked, or null
+//
+// The slate is trimmed to stay small (about 3 KB gzipped per 60 games): a game's ``espn_id``/``odds_id`` are
+// left out when its ``id`` holds them ("<league>:<odds id>" or "<league>:espn:<ESPN id>"), ESPN logos come as
+// their path after https://a.espncdn.com/, and a team's full ``name`` only when ``short`` or ``abbr`` is
+// missing. normalizeGame puts the ids, the logo addresses and a name back; a copy of the older, untrimmed
+// slate (still in a device's cache after an update) passes through unchanged.
+//
+// "Markets say": each game's ``chance`` is the markets brain's blend (src "blend"; "market" in older slates)
+// and ``mkt`` is its compact summary: {p: {home, away, draw?}, fav, conf: "normal"|"low", dis: bool, spr:
+// the sources' widest gap in points, src: [[short name, chance of fav, status], ...], as_of}.
+//
+// One name, one number: "Mkt" (a price button's chance), a slip leg's market chance and Edge are the
+// bookmakers' margin-free chance (``fair``: {home, away, draw?}, sent next to the blend; in an older slate,
+// ``chance`` itself), the same figure the game page's buttons and the priced slip show. "Markets" is the blend.
+// A slate with the blend but no ``fair`` shows no "Mkt" chance and no Edge rather than pass the blend off as
+// the bookmakers'.
 
 export const STATUSES = ["all", "upcoming", "live", "finished"];
-export const SORTS = ["time", "league", "gap", "market", "ai"];
+export const SORTS = ["time", "league", "gap", "dis", "market", "ai"];
 export const DAYS = 7;
 
 const STATUS_OF = { pre: "upcoming", live: "live", final: "finished", postponed: "finished" };
@@ -47,6 +67,84 @@ export function dayStrip(now = new Date()) {
 
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
+const ESPN_IMAGES = "https://a.espncdn.com/";
+const LOGO_PATH = /^[A-Za-z0-9][A-Za-z0-9._~\/%-]{0,250}(\?[A-Za-z0-9=&._%-]{0,80})?$/;
+
+/**
+ * A logo address from the slate: ESPN's path ("i/teamlogos/nba/500/bos.png") gets its host back; a full
+ * https address (an older slate) is kept as it is; anything else is dropped (row.js still checks the host).
+ */
+export function logoUrl(value) {
+  if (typeof value !== "string" || !value) return null;
+  if (/^https:\/\//i.test(value)) return value;
+  if (value.includes("..") || value.includes("//") || !LOGO_PATH.test(value)) return null;
+  return ESPN_IMAGES + value;
+}
+
+function fullTeam(team) {
+  if (!team || typeof team !== "object") return team;
+  const logo = logoUrl(team.logo);
+  const name = typeof team.name === "string" && team.name ? team.name : team.short || team.abbr || "";
+  if (logo === team.logo && name === team.name) return team;
+  const out = { ...team, name };
+  if (logo) out.logo = logo;
+  else delete out.logo;
+  return out;
+}
+
+/**
+ * A slate game in the full shape: ``odds_id`` and ``espn_id`` from its ``id`` when they were left out, logo
+ * addresses rebuilt and a ``name`` for each side (the full name when sent, else the short name or the
+ * abbreviation). A game already in the full shape (an older cached slate) comes back as it is.
+ */
+export function normalizeGame(raw) {
+  if (!raw || typeof raw !== "object" || typeof raw.id !== "string" || typeof raw.league !== "string") return raw;
+  const out = { ...raw };
+  const prefix = `${raw.league}:`;
+  const rest = raw.id.startsWith(prefix) ? raw.id.slice(prefix.length) : "";
+  if (rest.startsWith("espn:")) {
+    if (out.espn_id == null && rest.length > 5) out.espn_id = rest.slice(5);
+  } else if (rest && out.odds_id == null) {
+    out.odds_id = rest;
+  }
+  out.home = fullTeam(raw.home);
+  out.away = fullTeam(raw.away);
+  return out;
+}
+
+const SIDES = ["home", "away", "draw"];
+const SOURCE_STATUSES = ["ok", "thin", "stale", "missing"];
+
+/**
+ * The game's "Markets say" summary, checked: {p: {home, away, draw?}, fav, conf, dis, spread (points),
+ * sources: [{name, p (chance of fav), status}], asOf}, or null when the slate has none (an older slate, or no
+ * source has an opinion yet).
+ */
+export function marketsOf(game) {
+  const m = game?.mkt;
+  if (!m || typeof m !== "object" || !m.p || typeof m.p !== "object") return null;
+  const p = {};
+  for (const side of SIDES) if (num(m.p[side]) !== null) p[side] = m.p[side];
+  if (p.home === undefined || p.away === undefined) return null;
+  let fav = SIDES.includes(m.fav) && p[m.fav] !== undefined ? m.fav : null;
+  if (!fav) for (const side of SIDES) if (p[side] !== undefined && (!fav || p[side] > p[fav])) fav = side;
+  const sources = [];
+  for (const entry of Array.isArray(m.src) ? m.src : []) {
+    if (!Array.isArray(entry) || typeof entry[0] !== "string" || num(entry[1]) === null) continue;
+    sources.push({ name: entry[0].slice(0, 24), p: entry[1], status: SOURCE_STATUSES.includes(entry[2]) ? entry[2] : "ok" });
+  }
+  return {
+    p, fav, conf: m.conf === "low" ? "low" : "normal", dis: m.dis === true, spread: num(m.spr), sources,
+    asOf: typeof m.as_of === "string" ? m.as_of : null,
+  };
+}
+
+/** How far the sources are apart on a game, in points (null without a "Markets say"). */
+export function disagreement(game) {
+  const m = marketsOf(game);
+  return m ? (m.spread ?? (m.dis ? 5 : 0)) : null;
+}
+
 /** A best price [price, book, point?] from the slate, checked: {price, book, point} or null. */
 export function offer(game, market, side) {
   const entry = game?.odds?.[market]?.[side];
@@ -67,13 +165,26 @@ export function american(decimal) {
 }
 
 /**
+ * The bookmakers' margin-free chance of each outcome, {home, away, draw?}, or null: the slate's ``fair``, else
+ * ``chance`` when it is the market's own (an older slate). Never the blend (``chance`` with src "blend").
+ */
+export function bookChance(game) {
+  const f = game?.fair;
+  if (f && typeof f === "object" && num(f.home) !== null && num(f.away) !== null) return f;
+  const c = game?.chance;
+  if (c && typeof c === "object" && c.src !== "blend" && num(c.home) !== null && num(c.away) !== null) return c;
+  return null;
+}
+
+/**
  * The AI's chance minus the market's for each side of the moneyline, in probability units, or null.
- * Like with like: both are the chance that side wins this game, the market's with the bookmakers' margin
- * taken out. A three-way market (a draw) is compared only when the AI gives a draw chance too.
+ * Like with like: both are the chance that side wins this game, the market's the bookmakers' with their
+ * margin taken out (bookChance; never the blend). A three-way market (a draw) is compared only when the AI
+ * gives a draw chance too.
  */
 export function edges(game) {
   const ai = game?.ai;
-  const market = game?.chance;
+  const market = bookChance(game);
   if (!ai || !market) return null;
   const sides = num(market.draw) !== null ? ["home", "away", "draw"] : ["home", "away"];
   const out = {};
@@ -155,7 +266,7 @@ export function legFor(game, market, side) {
     price: o.price,
     american: american(o.price),
     ai: modelled ? game.ai[side] : null,
-    fair: market === "h2h" ? num(game.chance?.[side]) : null,
+    fair: market === "h2h" ? num(bookChance(game)?.[side]) : null, // the bookmakers', as the priced slip has it
   };
 }
 
@@ -178,8 +289,9 @@ export function prepare(slate, now = new Date()) {
     order.push(entry.key);
   }
   const games = [];
-  for (const raw of Array.isArray(slate?.games) ? slate.games : []) {
-    if (!raw || typeof raw.id !== "string" || typeof raw.league !== "string") continue;
+  for (const sent of Array.isArray(slate?.games) ? slate.games : []) {
+    if (!sent || typeof sent.id !== "string" || typeof sent.league !== "string") continue;
+    const raw = normalizeGame(sent);
     const start = Date.parse(raw.start);
     if (!Number.isFinite(start)) continue;
     if (!leagues.has(raw.league)) { // a game in a league the list doesn't name: list it anyway
@@ -192,7 +304,7 @@ export function prepare(slate, now = new Date()) {
     const day = status === "live" && dayKey(new Date(start)) < today ? today : dayKey(new Date(start));
     const words = [raw.home?.name, raw.home?.short, raw.home?.abbr, raw.away?.name, raw.away?.short, raw.away?.abbr,
       leagues.get(raw.league)?.title, raw.venue?.name, raw.venue?.city].filter(Boolean).join(" ");
-    games.push({ ...raw, status, _start: start, _day: day, _bucket: STATUS_OF[status], _text: fold(words), _gap: gap(raw) });
+    games.push({ ...raw, status, _start: start, _day: day, _bucket: STATUS_OF[status], _text: fold(words), _gap: gap(raw), _dis: disagreement(raw) });
   }
   const groups = [];
   const byGroup = new Map();
@@ -235,7 +347,7 @@ export function groupName(label) {
 /**
  * The board for a view:
  *   options = {leagues: Set | null (all), day: "YYYY-MM-DD", status: "all"|"upcoming"|"live"|"finished",
- *              search: "", sort: {key: "time"|"league"|"gap"|"market"|"ai", dir: 1|-1}, pinned: [league keys]}
+ *              search: "", sort: {key: "time"|"league"|"gap"|"dis"|"market"|"ai", dir: 1|-1}, pinned: [league keys]}
  * A search looks across all seven days (people search for a team, not a date). Returns
  *   {games, counts: Map(league -> {count, live}) for the day, days: Map(day -> count) for the leagues,
  *    live (games live in the leagues), total (games on the day before the status filter), searchAll}
@@ -271,8 +383,9 @@ export function view(prepared, { leagues = null, day = "", status = "all", searc
 
 /**
  * Sort a board. "time": live first, then upcoming by start, then finished (pinned leagues first when the
- * person has some); "league": by the league list's order (pinned first), then time; "gap", "market", "ai":
- * biggest first (games without that number last), ties by time. ``dir`` -1 reverses the main key.
+ * person has some); "league": by the league list's order (pinned first), then time; "gap", "dis" (how far the
+ * markets' sources are apart), "market", "ai": biggest first (games without that number last), ties by time.
+ * ``dir`` -1 reverses the main key.
  */
 export function sortGames(games, sort = { key: "time", dir: 1 }, pinned = [], prepared = null) {
   const key = SORTS.includes(sort?.key) ? sort.key : "time";
@@ -283,6 +396,7 @@ export function sortGames(games, sort = { key: "time", dir: 1 }, pinned = [], pr
   const byTime = (a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || (a._start - b._start) || a.id.localeCompare(b.id);
   const value = (g) => {
     if (key === "gap") return g._gap;
+    if (key === "dis") return g._dis ?? disagreement(g);
     if (key === "market") return favourite(g, "chance")?.chance ?? null;
     if (key === "ai") return favourite(g, "ai")?.chance ?? null;
     return null;

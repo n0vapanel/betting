@@ -8,7 +8,9 @@ The tier is set by the AI's chance that the whole ticket wins:
   8-25%), paying 3.40x-36x.
 
 Every candidate leg is one outcome of one game (moneyline, spread or total)
-priced at a bookmaker whose margin on that market is 5% or less. A ticket
+priced at a bookmaker whose margin on that market is 5% or less, and only
+at books a person can bet at (never Pinnacle or an exchange: those anchor
+the markets brain's consensus only). A ticket
 takes at most one leg per game, so its legs are independent (checked on NBA
 data: game-level correlation is about zero), and it is priced at a single
 bookmaker that offers every leg, as it would have to be placed. Legs the AI
@@ -215,11 +217,20 @@ def _search(tier: Tier, legs: Sequence[Candidate], book: str, keep: int = 300) -
     return [ticket for _, _, ticket in heap]
 
 
+def price_book(book: str) -> bool:
+    """Whether a ticket may be priced at this bookmaker (by title or key): never a SHARP_BOOKS book or an
+    exchange, only the books a person can actually bet at (data/odds_service.py's BookRoles, set from
+    ODDS_PRICE_BOOKS)."""
+    from ..data.odds_service import is_price_book  # imported here: the data layer imports the engine
+    return is_price_book(book)
+
+
 def build_tier(tier: Tier, candidates: Sequence[Candidate], count: int = 3) -> List[Ticket]:
     """Up to ``count`` tickets for one tier, best first, sharing at most one leg with each other."""
     legs = [leg for leg in candidates
             if leg.probability >= MIN_LEG and leg.prices and (leg.fair is None or leg.probability >= leg.fair - 0.01)]
-    books = sorted({book for leg in legs for book in leg.prices})
+    # Only books a person can bet at: Pinnacle and the exchanges anchor the consensus, never a ticket
+    books = sorted({book for leg in legs for book in leg.prices if price_book(book)})
     best: Dict[frozenset, Ticket] = {}
     for book in books:
         for ticket in _search(tier, legs, book):

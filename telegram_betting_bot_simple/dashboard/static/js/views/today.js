@@ -184,9 +184,11 @@ export async function render(root, params) {
   const strip = dayStrip(now);
   const saved = savedView();
   const kept = memory && strip.some((d) => d.key === memory.day) ? memory : null;
+  // A link may choose the sort (#/today?sort=dis, from Help's "Sort Today by disagreement"); it is remembered
+  const linkSort = params.query?.get?.("sort");
   const state = {
     leagues: saved.leagues,
-    sort: saved.sort,
+    sort: SORTS.includes(linkSort) ? { key: linkSort, dir: 1 } : saved.sort,
     day: kept?.day || dayKey(now),
     status: kept?.status || "all",
     search: kept?.search || "",
@@ -196,6 +198,7 @@ export async function render(root, params) {
     memory = { day: state.day, status: state.status, search: state.search, expanded: state.expanded };
     prefs.set(VIEW_KEY, { leagues: state.leagues ? [...state.leagues] : null, sort: state.sort });
   };
+  if (SORTS.includes(linkSort)) remember();
   let presets = loadPresets();
 
   if (!me().age_confirmed && me().uid) {
@@ -351,9 +354,10 @@ export async function render(root, params) {
   }
 
   function legendHtml(ai) {
-    return `<p class="note">“Market” is the bookmakers' chance with their margin removed ${explain("market_chance")}.
-      ${ai ? `“AI” is the model's chance (NBA for now) ${explain("ai_chance")}; “Edge” is AI minus market in points: ▲ 3 or more, ! 8 or more, which usually means news the model hasn't caught.` : "The AI's own chances are NBA-only for now."}
-      Prices are the best across bookmakers; tap one to add it to your slip.</p>`;
+    return `<p class="note">“Markets” is one chance blended from the sources that price the game: sharp bookmakers and exchanges, US bookmakers, prediction markets and ratings, each with its margin removed ${explain("markets_say")}.
+      ⚖ marks a game whose sources disagree by 5 points or more (the number is how far apart they are) ${explain("disagreement")}; “Low” means no market price can be counted (none, or only thin or out-of-date ones), so it rests on ratings alone, pulled a quarter of the way toward the sport's usual home-win rate.
+      ${ai ? `“AI” is the model's chance (NBA for now) ${explain("ai_chance")}; “Edge” is AI minus the bookmakers' chance (“Mkt”, margin removed) in points: ▲ 3 or more, ! 8 or more, which usually means news the model hasn't caught.` : "The AI's own chances are NBA-only for now."}
+      Prices are the best at bookmakers you can bet with; tap one to add it to your slip.</p>`;
   }
 
   function emptyHtml(v) {

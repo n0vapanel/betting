@@ -17,7 +17,9 @@
 //   bindBoard(root, {onSort, onOpenLeague, onToggle, onOpenDetail}) -> unbind
 //   syncHeader(root)          keep the sticky header's sideways scroll with the rows' (call after drawing)
 //
-// Table semantics: role="table" with rowgroups, rows, column headers (aria-sort on the sorted one) and a
+// Table semantics: role="table" with rowgroups, rows, column headers (aria-sort on the sorted one, when the rows
+// are in the order of that column's own values: the Markets column sorts by how far the sources disagree, so its
+// button says so in its name instead) and a
 // row header (the time) per row; a separator's or a fold-out's one cell spans the ``cols`` columns shown
 // (aria-colspan; Today keeps it right as the board's width hides or shows columns). The first column stays
 // put when the table scrolls sideways; rows use content-visibility so a long all-sports day draws only what
@@ -32,9 +34,10 @@ const HEAD = [
   { cls: "tb-lg", label: "League", sort: "league" },
   { cls: "tb-match", label: "Away @ Home" },
   ...MARKETS.map((m) => ({ cls: `tb-${m.key}`, label: m.label })),
-  { cls: "tb-mkt", label: "Market", short: "Mkt", sort: "market", title: "Market chance: the bookmakers' chance, margin removed (sorts by the favourite's)" },
+  { cls: "tb-mkt", label: "Markets", short: "Mkts", sort: "dis", byOther: true, sortWords: "sort by how far the sources disagree",
+    title: "Markets say: one chance blended from the bookmakers, the exchanges, prediction markets and ratings. ⚖ marks sources 5 points or more apart: sort by how far apart they are" },
   { cls: "tb-ai", label: "AI", sort: "ai", ai: true, title: "The AI's chance (NBA for now): sort by the AI's favourite" },
-  { cls: "tb-edge", label: "Edge", sort: "gap", ai: true, title: "AI minus market, in points: sort by the biggest gap" },
+  { cls: "tb-edge", label: "Edge", sort: "gap", ai: true, title: "AI minus the bookmakers' chance (margin removed), in points: sort by the biggest gap" },
   { cls: "tb-badges", label: "Notes" },
   { cls: "tb-asof", label: "Odds as of" },
 ];
@@ -44,10 +47,15 @@ function headHtml(sort, ai) {
     const sorted = h.sort && sort.key === h.sort;
     const dir = sorted ? (sort.dir === -1 ? (h.sort === "time" || h.sort === "league" ? "descending" : "ascending") : (h.sort === "time" || h.sort === "league" ? "ascending" : "descending")) : "none";
     const text = h.short ? `<span class="h-full">${esc(h.label)}</span><span class="h-short" aria-hidden="true">${esc(h.short)}</span>` : esc(h.label);
+    // A column sorted by something other than its own values (Markets: by disagreement) says what its button
+    // does, and whether the board is sorted that way, in the button's name; its aria-sort stays "none"
+    const name = h.sortWords
+      ? `${h.label}: ${sorted ? `${h.sortWords.replace(/^sort/, "sorted")}, ${dir === "ascending" ? "closest" : "widest"} first` : h.sortWords}`
+      : h.short ? h.label : "";
     const inner = h.sort
-      ? `<button type="button" class="tb-sort" data-sort="${h.sort}"${h.title ? ` title="${esc(h.title)}"` : ""}${h.short ? ` aria-label="${esc(h.label)}"` : ""}>${text}<span class="tb-arrow" aria-hidden="true">${sorted ? (dir === "ascending" ? "▲" : "▼") : ""}</span></button>`
+      ? `<button type="button" class="tb-sort" data-sort="${h.sort}"${h.title ? ` title="${esc(h.title)}"` : ""}${name ? ` aria-label="${esc(name)}"` : ""}>${text}<span class="tb-arrow" aria-hidden="true">${sorted ? (dir === "ascending" ? "▲" : "▼") : ""}</span></button>`
       : `<span${h.title ? ` title="${esc(h.title)}"` : ""}>${esc(h.label)}</span>`;
-    return `<div class="tb-c ${h.cls}" role="columnheader"${h.sort ? ` aria-sort="${dir}"` : ""}>${inner}</div>`;
+    return `<div class="tb-c ${h.cls}" role="columnheader"${h.sort ? ` aria-sort="${h.byOther ? "none" : dir}"` : ""}>${inner}</div>`;
   }).join("")}</div></div>`;
 }
 

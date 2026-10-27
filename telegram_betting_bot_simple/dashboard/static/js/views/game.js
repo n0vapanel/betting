@@ -1,5 +1,7 @@
-// Game: one game in full (GET /api/game). The AI's view next to the market's and ESPN's, the prices
-// (every one toggles a slip pick), why the model leans the way it does, injuries, the AI analysts with
+// Game: one game in full (GET /api/game). "Markets say" (the markets brain's blend with a chip per source,
+// views/markets/say.js), the AI's view next to the market's and ESPN's, the prices (every one toggles a slip
+// pick), why the model's numbers are what they are (typed factors that add up to each number,
+// views/markets/factors.js; the old text lines when the server sends none), injuries, the AI analysts with
 // "Ask now", the players (each opens a player page), every bookmaker's odds, and "Make your call".
 
 import { api, isQuiet, qs } from "../api.js";
@@ -10,6 +12,8 @@ import {
 } from "../ui.js";
 import { icon } from "../icons.js";
 import { analystsHtml, bindAnalysts, openCallSheet, loadMyCalls, callSummary, CAUTION_GAP } from "../legacy.js";
+import { marketsSection, bindMarkets, blendChances, consensusOf } from "./markets/say.js";
+import { factorsSection, bindFactors } from "./markets/factors.js";
 
 let current = null; // {game, params} for the Telegram main button
 
@@ -31,7 +35,9 @@ function marginText(margin, game) {
 
 function hero(game) {
   const p = game.prediction;
-  const chances = winChances(game);
+  // The blend is the app's best estimate: it fills the bar when the markets brain has one
+  const blend = blendChances(game);
+  const chances = blend ? { ...blend, source: "Markets say" } : winChances(game);
   const away = shortName(game.away, game.league);
   const home = shortName(game.home, game.league);
   const marketHome = p?.sources?.market?.home_win_prob;
@@ -49,7 +55,7 @@ function hero(game) {
       <div class="hero-team"><b>${esc(game.home)}</b><span>Home</span></div>
     </div>
     ${p ? `<p class="muted small" style="text-align:center">AI's predicted score · ${esc(marginText(p.margin, game))} · total ${p.total.toFixed(0)}</p>` : ""}
-    ${chances ? `<div style="margin-top:12px">${splitBar(away, chances.away, home, chances.home, { source: chances.source === "AI" ? "AI chance" : "Market chance", draw: chances.draw })}</div>` : ""}
+    ${chances ? `<div style="margin-top:12px">${splitBar(away, chances.away, home, chances.home, { source: chances.source === "AI" ? "AI chance" : chances.source === "Markets say" ? "Markets say" : "Market chance", draw: chances.draw })}</div>` : ""}
   </section>`;
 }
 
@@ -67,11 +73,13 @@ function compareRow(label, sub, homeWin, { final = false } = {}) {
 
 function whoWins(game) {
   const p = game.prediction;
+  // Without the AI's own model, "Markets say" already shows the market's and ESPN's views (and more)
+  if (!p && consensusOf(game)) return "";
   const s = p?.sources || {};
   const marketHome = s.market?.home_win_prob ?? (game.markets?.h2h?.draw ? null : game.markets?.h2h?.home?.fair);
   const espnHome = s.espn?.home_win_prob ?? game.espn_home_win;
   const rows = [
-    p ? compareRow("AI", "the blend", p.home_win, { final: true }) : "",
+    p ? compareRow("AI", "NBA model", p.home_win, { final: true }) : "",
     compareRow("Market", "no margin", marketHome),
     compareRow("ESPN", "predictor", espnHome),
     p ? compareRow("Team model", "form, rest", s.model?.home_win_prob) : "",
@@ -97,12 +105,6 @@ function prices(game) {
       Tap a price to add it to your slip ${explain("multi", { label: "How do slips work?" })}</p>
     ${game.prediction ? `<p class="note">▲ next to a chance: the AI rates that pick above its price (an opinion, not a guarantee). “!”: the AI is far from the bookmakers, so check the injury news ${explain("value_mark", { label: "What do ▲ and ! mean?" })}</p>` : ""}`,
   { info: "spread", aside: "" });
-}
-
-function factors(game) {
-  const list = game.prediction?.factors || [];
-  if (!list.length) return "";
-  return section("What moved the AI", `<ul class="bullets">${list.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>`);
 }
 
 function injuries(game) {
@@ -146,13 +148,15 @@ function booksTable(game) {
   const draw = books.some((b) => b.markets?.h2h?.draw);
   const cell = (offer, market, side) => offer
     ? `${market !== "h2h" ? `<span class="muted">${esc(pointText(market, side, offer.point))}</span> ` : ""}${esc(priceText(offer))}` : "–";
+  const sharp = books.some((b) => b.role === "sharp");
   return section("Every bookmaker", `<div class="table-wrap"><table>
     <thead><tr><th>Bookmaker</th><th>${esc(away)}</th>${draw ? "<th>Draw</th>" : ""}<th>${esc(home)}</th><th>${esc(away)} spr.</th><th>${esc(home)} spr.</th><th>Over</th><th>Under</th></tr></thead>
-    <tbody>${books.map((b) => `<tr><td>${esc(b.title)}</td>
+    <tbody>${books.map((b) => `<tr><td>${esc(b.title)}${b.role === "sharp" ? ' <span class="badge muted" title="A sharp book or exchange: it feeds Markets say only; its prices are never offered as yours to take">consensus only</span>' : ""}</td>
       <td>${cell(b.markets.h2h?.away, "h2h", "away")}</td>${draw ? `<td>${cell(b.markets.h2h?.draw, "h2h", "draw")}</td>` : ""}<td>${cell(b.markets.h2h?.home, "h2h", "home")}</td>
       <td>${cell(b.markets.spreads?.away, "spreads", "away")}</td><td>${cell(b.markets.spreads?.home, "spreads", "home")}</td>
       <td>${cell(b.markets.totals?.over, "totals", "over")}</td><td>${cell(b.markets.totals?.under, "totals", "under")}</td></tr>`).join("")}
-    </tbody></table></div>`);
+    </tbody></table></div>
+    ${sharp ? `<p class="note">“Consensus only”: sharp books and exchanges feed Markets say ${explain("sharp_book")}; best prices and tickets come only from bookmakers you can bet at.</p>` : ""}`);
 }
 
 function actions(game, myCall) {
@@ -183,15 +187,18 @@ export async function render(root, params) {
   setTitle(`${shortName(game.away, league)} @ ${shortName(game.home, league)}`);
   let side = "away";
   let myCall = null;
+  let fxKey = null; // the number the factor list shows (kept across a redraw)
+  const short = (name) => shortName(name, league);
   const state = { game, params, redraw: null };
   current = state;
 
   const draw = () => {
     root.innerHTML = `${hero(game)}
       ${actions(game, myCall)}
+      ${marketsSection(game, { short })}
       ${whoWins(game)}
       ${prices(game)}
-      ${factors(game)}
+      ${factorsSection(game, { key: fxKey })}
       ${injuries(game)}
       ${game.prediction || (game.analysts && !Array.isArray(game.analysts)) ? section("AI analysts", `<div data-analysts>${analystsHtml(game)}</div>`, { info: "analysts", id: "analysts" }) : ""}
       ${section("Players", `<div data-players>${playersHtml(game, side)}</div>`, { id: "players" })}
@@ -212,6 +219,10 @@ export async function render(root, params) {
 
   const query = params.query.get("section");
   if (query) root.querySelector(`#${CSS.escape(query)}`)?.scrollIntoView({ block: "start" });
+
+  // "Markets say": the explainer sheet; the factor list: which number it explains
+  bindMarkets(root, game);
+  bindFactors(root, game, { onPick: (key) => { fxKey = key; } });
 
   // Analysts: "Ask now" redraws only their section
   bindAnalysts(root, game, () => {

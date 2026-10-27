@@ -49,6 +49,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from ..dashboard.service import CallRejected, NotFound
 from ..data.leagues import POPULAR_LEAGUES
+from ..engine import consensus
 from ..engine.pasted import system_key
 from ..engine.tickets import ai_given_no_push, chance_label, combinations, one_in
 
@@ -71,6 +72,10 @@ DEFAULT_MIN_ODDS = Decimal("2.00")
 ODDS_SOURCE = "The Odds API (best price across bookmakers, margin-free market chances)"
 BRAIN_SOURCE = "The brain: our model's chances next to the bookmakers' margin-free ones"
 ESPN_SOURCE = "ESPN"
+MARKETS_SOURCE = ("The markets brain: margin-free sharp and US book prices, Kalshi and Polymarket mid prices, ESPN's "
+                  "predictor, power ratings and our model, blended in code")
+MARKETS_NOTE = ("The blend is the app's best estimate; the market usually wins. Only sources with status ok are "
+                "blended: thin, stale or missing ones are shown, not counted.")
 PASTED_SOURCE = ("The user's pasted slip at their own odds, priced by the brain: chances from the market, the model "
                  "or estimated from their price minus a typical margin when the leg isn't on our boards")
 MAX_PASTED_LEGS = 20
@@ -124,6 +129,10 @@ TOOLS: List[Dict[str, Any]] = [
     {"name": "odds_get_prices",
      "description": "Every market for one game: best price, the AI's chance, the market's margin-free chance, "
                     "fair odds and a ref for each outcome. Call this before quoting any odds or chance for a game.",
+     "input_schema": _obj({"league": _LEAGUE, "event_id": _STR})},
+    {"name": "markets_consensus",
+     "description": "What the markets say about one game: the blended chance per outcome (the app's best "
+                    "estimate), each source's chance, as-of and status, and whether they disagree.",
      "input_schema": _obj({"league": _LEAGUE, "event_id": _STR})},
     {"name": "player_get_profile",
      "description": "A player's season and recent averages, last 10 games, home/away splits, injury status, "
@@ -275,7 +284,8 @@ class PastedInput(BaseModel):
 
 
 INPUTS: Dict[str, type] = {
-    "sports_find_events": EventsInput, "odds_get_prices": OddsInput, "player_get_profile": PlayerInput,
+    "sports_find_events": EventsInput, "odds_get_prices": OddsInput, "markets_consensus": OddsInput,
+    "player_get_profile": PlayerInput,
     "player_get_props": PlayerInput, "news_get": NewsInput, "brain_price_legs": LegsInput,
     "ticket_price": TicketInput, "ticket_build": BuildInput, "ticket_analyse": TicketInput,
     "rollover_simulate": RolloverInput, "slip_propose": TicketInput, "user_get_context": NoInput,
@@ -626,6 +636,7 @@ def pasted_card(view: Mapping[str, Any], analysis: Optional[Mapping[str, Any]], 
 STEPS: Dict[str, Callable[[Dict[str, Any]], str]] = {
     "sports_find_events": lambda a: f"Finding {'/'.join(l.split('_')[-1].upper() for l in a.get('leagues') or [])} games…",
     "odds_get_prices": lambda a: "Checking the odds…",
+    "markets_consensus": lambda a: "Checking what the markets say…",
     "player_get_profile": lambda a: f"Looking up {a.get('name') or 'the player'}…",
     "player_get_props": lambda a: f"Checking {a.get('name') or 'the player'}'s prop lines…",
     "news_get": lambda a: "Checking injury news…",
@@ -681,7 +692,8 @@ class Toolbox:
         self.extra: Set[str] = set()  # leagues loaded this turn beyond self.leagues
         self.pasted: Dict[int, Optional[Mapping[str, Any]]] = dict(pasted or {})
         self.runners: Dict[str, Callable[[Any], Tuple[Dict[str, Any], str, List[Dict[str, Any]]]]] = {
-            "sports_find_events": self._events, "odds_get_prices": self._odds, "player_get_profile": self._profile,
+            "sports_find_events": self._events, "odds_get_prices": self._odds, "markets_consensus": self._markets,
+            "player_get_profile": self._profile,
             "player_get_props": self._props, "news_get": self._news, "brain_price_legs": self._brain,
             "ticket_price": self._price, "ticket_build": self._build, "ticket_analyse": self._analyse,
             "rollover_simulate": self._rollover, "slip_propose": self._propose, "user_get_context": self._context,
@@ -855,14 +867,86 @@ class Toolbox:
                     "ai_chance_given_no_push": _no_push(ai, offer.get("push")),
                     "fair_odds": round(1 / ai, 2) if ai else None, "edge": _p(offer.get("ev")),
                 })
+        # The markets brain's blend for the game-winner outcomes (computed in code from cached sources)
+        blend = (self._market_detail(data.league, str(card["id"])) or {}).get("blend") or {}
+        for outcome in outcomes:
+            chance = (blend.get("p") or {}).get(outcome["ref"]["side"]) if outcome["ref"]["market"] == "h2h" else None
+            if chance is not None:
+                outcome["blend_chance"] = round(float(chance), 4)
         as_of = (today.get("odds_as_of") or {})
         content = {"game": _game_name(card), "when": card.get("when"), "live": bool(card.get("live")),
                    "outcomes": outcomes, "odds_as_of": as_of.get(data.league) if isinstance(as_of, dict) else as_of,
                    "source": ODDS_SOURCE}
+        if blend:
+            content["markets_say"] = {"confidence": blend.get("confidence"), "disagree": bool(blend.get("disagree")),
+                                      "spread_points": blend.get("spread_pp"), "as_of": blend.get("as_of"),
+                                      "note": "blend_chance is the app's best estimate; the market usually wins"}
         if card.get("live"):
             content["hint"] = "This game has started: its legs can't go on a ticket"
         summary = f"odds_get_prices({_game_name(card)}): " + "; ".join(
             f"{o['label']} [{_ref_text(o['ref'])}]" for o in outcomes)
+        return content, summary, []
+
+    def _market_detail(self, league: str, event_id: str) -> Optional[Dict[str, Any]]:
+        """The game's "Markets say" from the service (cached sources only: never a fetch or a credit)."""
+        service = getattr(self.lab, "service", None)
+        detail = getattr(service, "markets_detail", None)
+        if not callable(detail):
+            return None
+        try:
+            return detail(league, event_id)
+        except NotFound:
+            return None
+        except Exception:
+            logging.exception("Couldn't read the markets for %s", event_id)
+            return None
+
+    def _game_names(self, league: str, event_id: str) -> Tuple[Optional[str], Optional[str]]:
+        """(home, away) from the saved odds board or the logged consensus, never fetched."""
+        service = getattr(self.lab, "service", None)
+        saved = getattr(getattr(service, "odds", None), "saved_games", None)
+        try:
+            board = saved(league) if callable(saved) else None
+            game = next((g for g in (board or (None, []))[1] if g.get("id") == event_id), None)
+            if game:
+                return game.get("home"), game.get("away")
+            store = getattr(service, "store", None)
+            row = store.consensus_row(league, event_id=event_id) if store is not None else None
+            if row:
+                return row.get("home"), row.get("away")
+        except Exception:
+            logging.exception("Couldn't name the teams of %s", event_id)
+        return None, None
+
+    def _markets(self, data: OddsInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
+        detail = self._market_detail(data.league, data.event_id)
+        if not detail or not detail.get("sources"):
+            raise ToolError("not_found", f"No market opinions for {data.event_id} in {data.league} yet",
+                            "Check the event id with sports_find_events; if it's right, say the markets haven't "
+                            "priced this game yet")
+        home, away = self._game_names(data.league, data.event_id)
+        blend = detail.get("blend") or {}
+        rounded = lambda p: {o: round(float(v), 4) for o, v in (p or {}).items()}  # noqa: E731
+        sources = [{"name": source.get("name"), "kind": source.get("kind"), "chance": rounded(source.get("p")),
+                    "status": source.get("status"), "as_of": source.get("as_of"), "detail": source.get("detail")}
+                   for source in detail.get("sources") or []]
+        content: Dict[str, Any] = {
+            "game": f"{away} @ {home}" if home and away else None, "home": home, "away": away,
+            "blend": rounded(blend.get("p")) or None, "confidence": blend.get("confidence"),
+            "disagree": bool(blend.get("disagree")), "spread_points": blend.get("spread_pp"),
+            "weights": {name: round(float(w), 3) for name, w in (blend.get("weights") or {}).items()},
+            "sources": sources, "blend_as_of": blend.get("as_of"), "source": MARKETS_SOURCE, "note": MARKETS_NOTE}
+        if not blend:
+            content["hint"] = "No source is usable right now (all thin, stale or missing): say there's no blend"
+        elif blend.get("confidence") == "low":
+            # A market price can be listed but not counted (thin or out of date): name it rather than deny it
+            uncounted = [source.get("name") for source in detail.get("sources") or []
+                         if source.get("kind") in consensus.MARKET_KINDS and source.get("status") in ("thin", "stale")]
+            content["hint"] = (f"Low confidence: the only market prices ({', '.join(uncounted)}) are thin or out of "
+                               "date and not counted; the chance rests on ratings; say so" if uncounted else
+                               "Low confidence: no market prices this game, only ratings; say so")
+        summary = f"markets_consensus({content['game'] or data.event_id} [{data.league}:{data.event_id}]): " + (
+            ", ".join(f"{o} {p:.0%}" for o, p in (content["blend"] or {}).items()) or "no blend")
         return content, summary, []
 
     def _find_player(self, name: str, league: str) -> Dict[str, Any]:

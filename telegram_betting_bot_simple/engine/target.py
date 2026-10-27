@@ -25,6 +25,8 @@ The search then works only with numbers the brain already has:
 - every combination of one to four legs from different games whose combined
   odds land between 10% below and 15% above D* (forty legs give about 100,000
   combinations, a fraction of a second);
+- legs priced only at books a person can bet at: a price from Pinnacle or an
+  exchange (the markets brain's consensus anchor) is never used;
 - the best single, the best two-leg ticket and the best three- or four-leg
   ticket by cautious expected return. At a fixed payout that is also the most
   likely ticket, because P = (1 + EV) / D.
@@ -47,7 +49,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-from .bets import TIERS, Tier
+from .bets import TIERS, Tier, price_book
 from .odds_math import decimal_to_american, format_american
 from .tickets import TicketLeg, chance_label, one_in, price_ticket
 
@@ -236,6 +238,8 @@ def _usable(candidates: Sequence[TicketLeg], now: datetime.datetime) -> Tuple[Li
     dropped = {"started": 0, "no_chance": 0, "outside_range": 0}
     best: Dict[str, _Option] = {}
     for leg in candidates:
+        if leg.book and not price_book(leg.book):
+            continue  # Pinnacle or an exchange: the consensus's anchor, never a price to build a ticket at
         if leg.ai_prob is None and leg.market_prob is None:
             dropped["no_chance"] += 1
         elif _started(leg, now):

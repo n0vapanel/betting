@@ -7,6 +7,7 @@ from statistics import NormalDist
 
 import pytest
 
+from telegram_betting_bot_simple.engine.factors import check_sum
 from telegram_betting_bot_simple.engine.nba_model import (
     GamePrediction,
     Params,
@@ -75,6 +76,14 @@ def test_blended_prediction_uses_model_market_and_espn() -> None:
     assert prediction.home_win_prob == pytest.approx(NormalDist().cdf(NormalDist().inv_cdf(0.70) + (expected - 6.5) / win_sd))
     assert any("back-to-back" in factor for factor in prediction.factors)
     assert any("Star" in factor for factor in prediction.factors)
+    # The text lines are rendered from typed factors (factor_text), word for word as before
+    assert prediction.factors == ["Home court: Home +2.0", "Away on a back-to-back: -1.2", "Away missing Star: -3.0"]
+    projections = prediction.projections()
+    for key in ("margin", "total", "home_win", "model_margin", "model_total"):
+        assert check_sum(projections[key]), key
+    assert projections["margin"].value == prediction.margin
+    assert projections["home_win"].value == pytest.approx(100 * prediction.home_win_prob)
+    assert {f.key for f in projections["model_margin"].factors} >= {"home_court", "away_back_to_back", "away_injuries"}
 
 def test_absence_impact_is_not_counted_twice() -> None:
     star = {"gp": 10, "min": 36.0, "pts": 28.0}

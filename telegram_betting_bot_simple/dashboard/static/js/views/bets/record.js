@@ -3,12 +3,15 @@
 //   AI record: GET /api/track-record: every NBA game the AI predicted before tip-off, graded after it
 //              (winners, Brier scores next to the bookmakers', calibration, the spread and total), the
 //              daily Safe / Risky / Crazy AI bets' record, and the AI analysts (Claude, DeepSeek) with
-//              the trust they've earned. Misses included.
+//              the trust they've earned. Misses included. Then "Markets" (GET /api/record/markets, its own
+//              request: views/markets/record.js): per sport, each source of the markets brain graded next
+//              to the blend, so the record shows which source has earned its weight.
 // Every figure is the server's; this file only lays them out.
 
 import { api, isQuiet } from "../../api.js";
 import { esc, pct, shortName, badge, emptyState, errorState, skeleton, section, explain, shortDate } from "../../ui.js";
 import { icon } from "../../icons.js";
+import { renderMarketsRecord } from "../markets/record.js";
 
 const LEAGUE = "basketball_nba"; // the one league with an AI model so far
 const signed = (n, digits = 1) => (n == null ? "–" : `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(Number(n)).toFixed(digits)}`);
@@ -128,15 +131,25 @@ export async function renderRecord(box, { signal }) {
   try {
     r = await api(`/api/track-record?league=${LEAGUE}`, { signal });
   } catch (error) {
-    if (!isQuiet(error) && box.isConnected) box.innerHTML = errorState(error);
+    if (!isQuiet(error) && box.isConnected) {
+      // The markets record has its own request: it can still show when the AI's record can't
+      box.innerHTML = `${errorState(error)}<div data-mk-record></div>`;
+      renderMarketsRecord(box.querySelector("[data-mk-record]"), { signal });
+    }
     return;
   }
   if (!box.isConnected) return;
   const head = `<p class="muted">Every NBA game the AI predicted before tip-off, graded after the final buzzer. Honest numbers, misses included.
     <a href="#/help/ai">How the AI decides</a></p>`;
+  const markets = '<div data-mk-record></div>';
+  const drawMarkets = () => {
+    const slot = box.querySelector("[data-mk-record]");
+    if (slot) renderMarketsRecord(slot, { signal });
+  };
   if (!r.games) {
     box.innerHTML = `${head}${emptyState({ iconName: "chart", title: "No graded games yet", body: "The record starts with the games the AI predicts from now on: check back after tonight's games." })}
-      ${tiersHtml(r.tiers)}${analystsHtml(r.analysts)}`;
+      ${tiersHtml(r.tiers)}${analystsHtml(r.analysts)}${markets}`;
+    drawMarkets();
     return;
   }
   box.innerHTML = `${head}
@@ -157,7 +170,9 @@ export async function renderRecord(box, { signal }) {
     ${tiersHtml(r.tiers)}
     ${analystsHtml(r.analysts)}
     ${recentHtml(r.recent)}
+    ${markets}
     <p class="note">What good looks like: nobody gets near 100%. The closing betting market picks about 68% of NBA winners
       (65.7–69.8% by season) with a Brier score near 0.20; a sound model lands at 66–69% and 0.20–0.21. Against the
       closing spread, 50–53% is realistic and 52.4% is needed to break even at standard prices.</p>`;
+  drawMarkets();
 }

@@ -1,0 +1,58 @@
+[
+ {
+  "active": true,
+  "bestAsk": 0.98,
+  "bestBid": 0.979,
+  "closed": false,
+  "endDate": "2026-10-26T23:00:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nhl-lak-nyr-2026-10-26",
+    "startTime": "2026-10-26T23:00:00Z",
+    "title": "Kings vs. Rangers"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:00:00+00",
+  "id": "5126653",
+  "lastTradePrice": 0.98,
+  "liquidityNum": 12668.92414,
+  "outcomePrices": "[\"0.9795\", \"0.0205\"]",
+  "outcomes": "[\"Kings\", \"Rangers\"]",
+  "question": "Kings vs. Rangers",
+  "slug": "nhl-lak-nyr-2026-10-26",
+  "sportsMarketType": "moneyline",
+  "spread": 0.001,
+  "volumeNum": 155532.85175000003
+ },
+ {
+  "active": true,
+  "bestAsk": 0.27,
+  "bestBid": 0.26,
+  "closed": false,
+  "endDate": "2026-10-27T00:30:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nhl-tor-cal-2026-10-26",
+    "startTime": "2026-10-27T00:30:00Z",
+    "title": "Maple Leafs vs. Flames"
+   }
+  ],
+  "gameStartTime": "2026-10-27 00:30:00+00",
+  "id": "5126658",
+  "lastTradePrice": 0.27,
+  "liquidityNum": 22891.6649,
+  "outcomePrices": "[\"0.265\", \"0.735\"]",
+  "outcomes": "[\"Maple Leafs\", \"Flames\"]",
+  "question": "Maple Leafs vs. Flames",
+  "slug": "nhl-tor-cal-2026-10-26",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 115668.652978
+ }
+]

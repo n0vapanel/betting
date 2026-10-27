@@ -54,6 +54,12 @@
 #   AI_CHAT_DAILY_CENTS=100       each person's allowance
 #   AI_CHAT_WEB_DAILY_CENTS=300   everyone signed in with the dashboard password, together (default: 3 people's)
 #   AI_CHAT_DAILY_TOTAL_CENTS=1000  the whole app (default: 10 people's)
+# The markets brain ("Markets say"; optional, the defaults are fine):
+#   ODDS_BOOKMAKERS=pinnacle,betfair_ex_eu,...  the odds board's bookmakers, at most 10 (10 cost one region:
+#                                 3 credits a board); "none" asks for ODDS_REGIONS instead
+#   SHARP_BOOKS=pinnacle,betfair_ex_eu,matchbook  books that only anchor the consensus (never a price offered)
+#   ODDS_PRICE_BOOKS=draftkings,fanduel  the books "best price" and every ticket use (default: the rest)
+#   MARKETS_ENABLED=0             turn off Kalshi, Polymarket, ESPN's predictor and the ratings (free; on by default)
 #
 # The dashboard password should be 12 or more characters: a shorter one still works, but the setup
 # warns about it.
@@ -93,6 +99,10 @@ declare -A PATTERNS=(
   [ANTHROPIC_MODEL]='^claude-[a-z0-9.-]{3,60}$'
   [DEEPSEEK_MODEL]='^deepseek-[a-z0-9.-]{2,60}$'
   [TELEGRAM_ALLOWED_IDS]='^[0-9]{1,20}(,[0-9]{1,20})*$'
+  [ODDS_BOOKMAKERS]='^([a-z0-9][a-z0-9_]{1,39}(,[a-z0-9][a-z0-9_]{1,39}){0,9}|none)$'
+  [SHARP_BOOKS]='^[a-z0-9][a-z0-9_]{1,39}(,[a-z0-9][a-z0-9_]{1,39}){0,9}$'
+  [ODDS_PRICE_BOOKS]='^[a-z0-9][a-z0-9_]{1,39}(,[a-z0-9][a-z0-9_]{1,39}){0,9}$'
+  [MARKETS_ENABLED]='^(0|1|true|false)$'
 )
 # DOMAIN is checked and saved on its own, since it can also be "off"
 DOMAIN_PATTERN='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$'

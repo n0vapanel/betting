@@ -132,32 +132,32 @@ const CSS = `
    follows these breakpoints (6 columns, 7 from 820, 9 from 1180; AI and Edge add 2). The League and "Odds as
    of" columns wait for 1180 px, so the names keep about 330 px beside them. */
 .view-today .tb {
-  --c-when: 84px; --c-lg: 0px; --c-match: minmax(130px, 1fr); --c-h2h: 60px; --c-sp: 80px; --c-tot: 92px; --c-mkt: 50px;
-  --c-ai: 46px; --c-edge: 56px; --c-notes: 76px; --tb-min: 496px;
+  --c-when: 84px; --c-lg: 0px; --c-match: minmax(130px, 1fr); --c-h2h: 60px; --c-sp: 80px; --c-tot: 92px; --c-mkt: 72px;
+  --c-ai: 46px; --c-edge: 56px; --c-notes: 76px; --tb-min: 518px;
   --cols: var(--c-when) var(--c-match) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt);
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); overflow: clip; margin-top: 4px;
 }
-.view-today .tb.has-ai { --cols: var(--c-when) var(--c-match) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-ai) var(--c-edge); --tb-min: 598px; }
+.view-today .tb.has-ai { --cols: var(--c-when) var(--c-match) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-ai) var(--c-edge); --tb-min: 620px; }
 .view-today .tb-c.tb-badges { display: none; }
 .view-today .tb-notes-in { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; min-width: 0; font-size: 11.5px; color: var(--text-2); }
 .view-today .tb-notes-in .badge { font-size: 10.5px; line-height: 1.3; padding: 1px 5px; max-width: 100%; white-space: normal; } /* "Far from market" wraps rather than being cut */
 @container today (min-width: 820px) {
   .view-today .tb {
-    --c-when: 100px; --c-match: minmax(180px, 1fr); --c-h2h: 70px; --c-sp: 88px; --c-tot: 100px; --c-mkt: 58px; --c-ai: 52px; --c-edge: 62px; --c-notes: 104px; --tb-min: 700px;
+    --c-when: 100px; --c-match: minmax(180px, 1fr); --c-h2h: 70px; --c-sp: 88px; --c-tot: 100px; --c-mkt: 76px; --c-ai: 52px; --c-edge: 62px; --c-notes: 104px; --tb-min: 718px;
     --cols: var(--c-when) var(--c-match) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-notes);
   }
-  .view-today .tb.has-ai { --tb-min: 814px; --cols: var(--c-when) var(--c-match) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-ai) var(--c-edge) var(--c-notes); }
+  .view-today .tb.has-ai { --tb-min: 832px; --cols: var(--c-when) var(--c-match) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-ai) var(--c-edge) var(--c-notes); }
   .view-today .tb-c.tb-badges { display: flex; }
   .view-today .tb-notes-in { display: none; }
 }
 @container today (min-width: 1180px) {
   .view-today .tb {
-    --c-when: 84px; --c-lg: 108px; --c-match: minmax(200px, 1fr); --c-h2h: 72px; --c-sp: 90px; --c-tot: 100px; --c-mkt: 76px; --c-ai: 54px;
-    --c-edge: 64px; --c-notes: 120px; --c-asof: 84px; --tb-min: 934px;
+    --c-when: 84px; --c-lg: 108px; --c-match: minmax(200px, 1fr); --c-h2h: 72px; --c-sp: 90px; --c-tot: 100px; --c-mkt: 88px; --c-ai: 54px;
+    --c-edge: 64px; --c-notes: 120px; --c-asof: 84px; --tb-min: 946px;
     --cols: var(--c-when) var(--c-lg) var(--c-match) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-notes) var(--c-asof);
   }
   .view-today .tb.has-ai {
-    --tb-min: 1052px;
+    --tb-min: 1064px;
     --cols: var(--c-when) var(--c-lg) var(--c-match) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-ai) var(--c-edge) var(--c-notes) var(--c-asof);
   }
 }
@@ -246,6 +246,19 @@ const CSS = `
 .view-today .td-mark { margin-left: 3px; font-size: 10px; color: var(--good-ink); }
 .view-today .td-mark.warn { color: var(--warn-ink); font-weight: 800; font-size: 12px; }
 .view-today .tb-mkt, .view-today .tb-ai, .view-today .tb-edge { padding-right: 10px; }
+/* "Markets say": ⚖ (sources 5 points or more apart, with how far) and "Low" (ratings only) sit at the start of a
+   line, the blend's value at its end; the cell's label and tooltip list every source */
+.view-today .tb-row .tb-mkt { padding-left: 4px; padding-right: 8px; }
+.view-today .tb-mkt .td-v { gap: 3px; }
+.view-today .tb-mkt .mk-flag { margin-right: auto; }
+.view-today .mk-flag {
+  display: inline-flex; align-items: center; gap: 2px; flex: none; padding: 0 4px; min-height: 18px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 750; line-height: 1; white-space: nowrap; border: 1px solid; font-variant-numeric: tabular-nums;
+}
+.view-today .mk-flag.dis { color: var(--warn-ink); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: var(--warn-soft); }
+.view-today .mk-flag.low { color: var(--text-2); border-color: var(--line-strong); background: var(--card-2); font-weight: 650; }
+.view-today .mk-scale { font-size: 12px; }
+.view-today .tb-mkt.is-low .mk-v { color: var(--text-2); font-style: italic; }
 .view-today .tb-hrow .tb-mkt, .view-today .tb-hrow .tb-ai, .view-today .tb-hrow .tb-edge { justify-content: end; }
 .view-today .tb-badges { display: flex; flex-wrap: wrap; align-content: center; align-items: center; gap: 4px; }
 .view-today .tb-badges .badge { font-size: 11px; padding: 1px 6px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
@@ -280,6 +293,19 @@ const CSS = `
 .view-today .td-num.up dd { color: var(--good-ink); }
 @media (max-width: 400px) { .view-today .td-num { padding: 5px 6px; } .view-today .td-num dd { font-size: 13px; } .view-today .td-nums .td-mark { margin-left: 1px; } }
 .view-today .td-num.far dd { color: var(--warn-ink); }
+.view-today .mk-strip {
+  display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0 14px 8px; padding: 5px 8px; border-radius: 10px;
+  background: var(--card-2); border: 1px solid var(--line); font-size: 12.5px; color: var(--text-2); white-space: nowrap;
+}
+.view-today .mk-k { flex: none; font-size: 10.5px; font-weight: 750; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); }
+@media (max-width: 399px) { .view-today .mk-k { display: none; } } /* the tile above says "Markets": the sources get the room */
+.view-today .mk-flags { flex: none; display: inline-flex; gap: 4px; }
+.view-today .mk-flags:empty { display: none; }
+.view-today .mk-src { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+/* Sources that disagree (⚖): the whole list shows, on a line of its own under the flags when it doesn't fit beside them */
+.view-today .mk-strip.wrap { flex-wrap: wrap; row-gap: 3px; }
+.view-today .mk-strip.wrap .mk-src { flex: 1 1 240px; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.view-today .mk-src b { color: var(--text); font-weight: 700; }
 .view-today .td-card-prices .odds-grid { padding: 2px 14px 0; }
 .view-today .td-card-none { padding: 2px 14px 6px; color: var(--text-2); }
 .view-today .td-card .td-noodds.link { min-height: 44px; width: 100%; justify-content: center; }

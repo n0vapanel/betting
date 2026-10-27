@@ -18,7 +18,8 @@ export const SORT_LABELS = [
   { value: "time", label: "Time" },
   { value: "league", label: "League" },
   { value: "gap", label: "Biggest AI vs market gap" },
-  { value: "market", label: "Market favourite" },
+  { value: "dis", label: "Sources disagree most" },
+  { value: "market", label: "Markets' favourite" },
   { value: "ai", label: "AI favourite" },
 ];
 

@@ -26,7 +26,7 @@ from telegram_betting_bot_simple.data.espn_client import ESPN_DAY_TZ, LEAGUES, S
 from telegram_betting_bot_simple.data import odds_service
 from telegram_betting_bot_simple.data.cache import TTLCache
 from telegram_betting_bot_simple.data.odds_service import OddsService, normalize_event
-from telegram_betting_bot_simple.data.slate import SEASON_EVERY, SEASON_RETRY, SLATE_NAME, SlateBuilder
+from telegram_betting_bot_simple.data.slate import SEASON_EVERY, SEASON_RETRY, SLATE_NAME, SlateBuilder, ids_of
 from telegram_betting_bot_simple.data.store import Store
 
 NBA, NHL, EPL, ODI = "basketball_nba", "icehockey_nhl", "soccer_epl", "cricket_odi"
@@ -149,10 +149,13 @@ def test_an_espn_only_league_lists_its_games_without_odds(store) -> None:
     builder = builder_for(store, espn)
     builder.refresh()
     [game] = games_of(builder)
-    assert game["id"] == "icehockey_nhl:espn:401" and game["espn_id"] == "401" and game["league"] == NHL
-    assert "odds_id" not in game and "odds" not in game and "chance" not in game  # nulls are left out
+    # The id holds the ESPN id (no "espn_id" too); nulls are left out
+    assert game["id"] == "icehockey_nhl:espn:401" and "espn_id" not in game and game["league"] == NHL
+    assert ids_of(game) == (None, "401")
+    assert "odds_id" not in game and "odds" not in game and "chance" not in game and "mkt" not in game
+    # The logo as its path after https://a.espncdn.com/; the full name stays (search by city, slip labels)
     assert game["home"] == {"name": "Boston Bruins", "short": "Bruins", "abbr": "BB", "record": "3-1",
-                            "logo": "https://a.espncdn.com/i/teamlogos/nhl/500/scoreboard/1.png"}
+                            "logo": "i/teamlogos/nhl/500/scoreboard/1.png"}
     assert game["venue"] == {"name": "Bruins Arena", "city": "Boston", "indoor": True}
     assert game["status"] == "pre" and game["start"] == at(1).replace("Z", ":00Z")
     entry = league_entry(builder, NHL)
@@ -174,12 +177,16 @@ def test_an_odds_only_league_takes_its_games_from_the_saved_snapshot(store) -> N
     builder = builder_for(store, FakeEspn(), odds)
     builder.refresh()
     [game] = [g for g in games_of(builder) if g["league"] == ODI]
-    assert game["id"] == "cricket_odi:odi1" and game["odds_id"] == "odi1" and "espn_id" not in game
-    assert game["home"] == {"name": "India"} and game["status"] == "pre"
+    assert game["id"] == "cricket_odi:odi1" and "odds_id" not in game and "espn_id" not in game
+    assert ids_of(game) == ("odi1", None)
+    assert game["home"] == {"name": "India"} and game["status"] == "pre"  # no short name: the full one stays
     assert game["odds"]["h2h"] == {"home": [1.6, "DraftKings"], "away": [2.4, "DraftKings"]}
     assert game["odds"]["totals"]["over"] == [1.91, "DraftKings", 220.5] and "spreads" not in game["odds"]
-    # The market's margin-free chances, computed in code: 1/1.6 and 1/2.4 scaled to add up to 1
-    assert game["chance"] == {"home": 0.6, "away": 0.4, "src": "market"}
+    # The markets brain's blend, computed in code: one US book's margin-free chances, 1/1.6 and 1/2.4 scaled to
+    # add up to 1, are the only opinion
+    assert game["chance"] == {"home": 0.6, "away": 0.4, "src": "blend"}
+    assert game["mkt"] == {"p": {"home": 0.6, "away": 0.4}, "fav": "home", "conf": "normal", "dis": False,
+                           "spr": 0.0, "src": [["US", 0.6, "ok"]], "as_of": "2026-10-26T21:50:00Z"}
     assert game["odds_as_of"] == "2026-10-26T21:50:00Z"
     entry = league_entry(builder, ODI)
     assert entry["label"] == "🏏 Cricket" and entry["odds"] == "fresh" and entry["espn"] is False
@@ -209,7 +216,7 @@ def test_odds_join_espn_games_on_team_names_within_three_hours(store) -> None:
     # ESPN lists Phoenix at home, the odds feed Sacramento: the game keeps the odds feed's sides, so a price
     # added to a slip names the side the server prices
     swapped = games["basketball_nba:o4"]
-    assert swapped["espn_id"] == "e4" and swapped["home"]["name"] == "Sacramento Kings"
+    assert swapped["espn_id"] == "e4" and swapped["home"]["short"] == "Kings" and swapped["home"]["abbr"] == "SK"
     assert swapped["odds"]["h2h"]["home"] == [2.5, "DraftKings"] and swapped["chance"]["home"] < 0.5
     assert len(games) == 5
 
@@ -231,7 +238,7 @@ def test_live_final_and_postponed_games(store) -> None:
     })
     builder = builder_for(store, espn)
     builder.refresh()
-    games = {g["espn_id"]: g for g in games_of(builder)}
+    games = {ids_of(g)[1]: g for g in games_of(builder)}
     live = games["l1"]
     assert live["status"] == "live" and live["clock"] == "Q3 4:12"
     assert (live["home"]["score"], live["away"]["score"]) == (88, 80)
@@ -268,7 +275,7 @@ def test_the_nba_model_s_logged_chance_is_shown_never_computed(store) -> None:
     builder = builder_for(store, espn)
     builder.refresh()
     [game] = games_of(builder)
-    assert game["ai"] == {"home": 0.64, "away": 0.36} and game["chance"]["src"] == "market"
+    assert game["ai"] == {"home": 0.64, "away": 0.36} and game["chance"]["src"] == "blend"
     assert league_entry(builder, NBA)["ai"] is True
 
 
@@ -283,14 +290,14 @@ def test_a_failed_league_keeps_its_last_good_games_even_after_a_restart(store) -
     boards[(NBA, TODAY)] = RuntimeError("ESPN returned HTTP 503")
     clock["now"] += 3600  # every board is due again
     builder.refresh()
-    assert {g["espn_id"] for g in games_of(builder)} == {"e1", "h1"}
+    assert {ids_of(g)[1] for g in games_of(builder)} == {"e1", "h1"}
     assert builder.current().etag == first.etag  # nothing changed, so the same bytes and ETag (a 304 for the app)
     # A restart: the saved slate is served at once, and stands in for boards ESPN won't give
     restarted = builder_for(store, FakeEspn({(NBA, TODAY): RuntimeError("down"),
                                              (NHL, TODAY): boards[(NHL, TODAY)]}), now=lambda: clock["now"])
     assert restarted.load() and restarted.current().etag == first.etag
     restarted.refresh()
-    assert {g["espn_id"] for g in games_of(restarted)} == {"e1", "h1"}
+    assert {ids_of(g)[1] for g in games_of(restarted)} == {"e1", "h1"}
 
 
 def test_the_refresh_pace_follows_the_games(store) -> None:
@@ -672,7 +679,7 @@ def test_a_saved_slate_of_another_shape_is_set_aside_not_a_crash(store, caplog, 
         assert builder.load() is False
     assert builder.current() is None and "starting without it" in caplog.text
     builder.refresh()  # the first refresh builds and saves a new slate
-    assert [g["espn_id"] for g in games_of(builder)] == ["e1"] and store.slate(SLATE_NAME)[1] == builder.current().etag
+    assert [ids_of(g)[1] for g in games_of(builder)] == ["e1"] and store.slate(SLATE_NAME)[1] == builder.current().etag
 
 
 # --- POST /api/slate/odds: fresh odds on request, within the quota's limits ----------------------------------

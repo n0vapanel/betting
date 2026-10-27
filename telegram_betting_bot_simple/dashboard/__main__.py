@@ -56,6 +56,11 @@ def main() -> None:
         slate = build_slate(config, service)
         if slate.load():
             logging.info("Serving the saved slate until the first refresh finishes")
+        # The markets brain: the slate's own background worker refreshes Kalshi, Polymarket, ESPN's predictor and
+        # the ratings (free; MARKETS_ENABLED=0 turns them off), and every game's consensus is logged before its
+        # start and graded with the rest (grade_forever)
+        logging.info("Markets brain: %s", "books, prediction markets and ratings" if slate.kalshi or slate.polymarket
+                     or slate.ratings else "books and the model only (MARKETS_ENABLED is off)")
         slate.start()
     # The bot token checks Telegram Mini App sign-ins, and only the listed Telegram users get in.
     # Behind Caddy, DASHBOARD_HOST=127.0.0.1 keeps the plain-HTTP port off the internet; uvicorn

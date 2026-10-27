@@ -1,0 +1,114 @@
+{
+ "cursor": "",
+ "events": [
+  {
+   "event_ticker": "KXEPLTOTAL-26OCT31CFCMUN",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-31T16:30:00Z",
+     "floor_strike": 0.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-31T16:30:00Z",
+     "status": "active",
+     "ticker": "KXEPLTOTAL-26OCT31CFCMUN-1",
+     "title": "Will over 0.5 goals be scored?",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.9700",
+     "yes_bid_dollars": "0.9300",
+     "yes_sub_title": "Over 0.5 goals scored"
+    },
+    {
+     "expected_expiration_time": "2026-10-31T16:30:00Z",
+     "floor_strike": 1.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-31T16:30:00Z",
+     "status": "active",
+     "ticker": "KXEPLTOTAL-26OCT31CFCMUN-2",
+     "title": "Will over 1.5 goals be scored?",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.8400",
+     "yes_bid_dollars": "0.8200",
+     "yes_sub_title": "Over 1.5 goals scored"
+    },
+    {
+     "expected_expiration_time": "2026-10-31T16:30:00Z",
+     "floor_strike": 2.5,
+     "last_price_dollars": "0.6300",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-31T16:30:00Z",
+     "status": "active",
+     "ticker": "KXEPLTOTAL-26OCT31CFCMUN-3",
+     "title": "Will over 2.5 goals be scored?",
+     "volume_fp": "153.83",
+     "yes_ask_dollars": "0.6300",
+     "yes_bid_dollars": "0.6100",
+     "yes_sub_title": "Over 2.5 goals scored"
+    },
+    {
+     "expected_expiration_time": "2026-10-31T16:30:00Z",
+     "floor_strike": 3.5,
+     "last_price_dollars": "0.4100",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-31T16:30:00Z",
+     "status": "active",
+     "ticker": "KXEPLTOTAL-26OCT31CFCMUN-4",
+     "title": "Will over 3.5 goals be scored?",
+     "volume_fp": "3.00",
+     "yes_ask_dollars": "0.4100",
+     "yes_bid_dollars": "0.3900",
+     "yes_sub_title": "Over 3.5 goals scored"
+    },
+    {
+     "expected_expiration_time": "2026-10-31T16:30:00Z",
+     "floor_strike": 4.5,
+     "last_price_dollars": "0.2000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-31T16:30:00Z",
+     "status": "active",
+     "ticker": "KXEPLTOTAL-26OCT31CFCMUN-5",
+     "title": "Will over 4.5 goals be scored?",
+     "volume_fp": "1.23",
+     "yes_ask_dollars": "0.2300",
+     "yes_bid_dollars": "0.2000",
+     "yes_sub_title": "Over 4.5 goals scored"
+    },
+    {
+     "expected_expiration_time": "2026-10-31T16:30:00Z",
+     "floor_strike": 5.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-31T16:30:00Z",
+     "status": "active",
+     "ticker": "KXEPLTOTAL-26OCT31CFCMUN-6",
+     "title": "Will over 5.5 goals be scored?",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.1200",
+     "yes_bid_dollars": "0.0800",
+     "yes_sub_title": "Over 5.5 goals scored"
+    }
+   ],
+   "mutually_exclusive": false,
+   "series_ticker": "KXEPLTOTAL",
+   "sub_title": "CFC vs MUN (Oct 31)",
+   "title": "Chelsea vs Manchester United: Total Goals"
+  }
+ ],
+ "milestones": [
+  {
+   "details": {
+    "league": "EPL",
+    "main_game_event_ticker": "KXEPLGAME-26OCT31CFCMUN",
+    "status": "not_started"
+   },
+   "id": "7214c5d2-7076-5bc4-bd0c-8b9fa28967fc",
+   "primary_event_tickers": [
+    "KXEPLTOTAL-26OCT31CFCMUN"
+   ],
+   "start_date": "2026-10-31T12:30:00Z",
+   "title": "Chelsea vs Manchester United",
+   "type": "soccer_tournament_multi_leg"
+  }
+ ]
+}

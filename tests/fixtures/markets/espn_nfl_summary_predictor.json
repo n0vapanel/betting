@@ -1,0 +1,35 @@
+{
+ "header": {
+  "competitions": [
+   {
+    "competitors": [
+     {
+      "homeAway": "home",
+      "team": {
+       "abbreviation": "BUF",
+       "id": "2"
+      }
+     },
+     {
+      "homeAway": "away",
+      "team": {
+       "abbreviation": "BAL",
+       "id": "33"
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "predictor": {
+  "awayTeam": {
+   "gameProjection": "37.8",
+   "id": "33"
+  },
+  "header": "Matchup Predictor",
+  "homeTeam": {
+   "gameProjection": "61.9",
+   "id": "2"
+  }
+ }
+}

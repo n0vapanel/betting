@@ -1,0 +1,294 @@
+[
+ {
+  "active": true,
+  "bestAsk": 0.26,
+  "bestBid": 0.24,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31-more-markets",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC - More Markets"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "Aston Villa FC (-1.5)",
+  "id": "5855643",
+  "line": -1.5,
+  "liquidityNum": 8998.6718,
+  "outcomePrices": "[\"0.25\", \"0.75\"]",
+  "outcomes": "[\"Aston Villa FC\", \"Fulham FC\"]",
+  "question": "Spread: Aston Villa FC (-1.5)",
+  "slug": "epl-ast-ful-2026-10-31-spread-home-1pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.02
+ },
+ {
+  "active": true,
+  "bestAsk": 0.12,
+  "bestBid": 0.1,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31-more-markets",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC - More Markets"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "Fulham FC (-1.5)",
+  "id": "5855646",
+  "line": -1.5,
+  "liquidityNum": 4748.6361,
+  "outcomePrices": "[\"0.11\", \"0.89\"]",
+  "outcomes": "[\"Fulham FC\", \"Aston Villa FC\"]",
+  "question": "Spread: Fulham FC (-1.5)",
+  "slug": "epl-ast-ful-2026-10-31-spread-away-1pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.02
+ },
+ {
+  "active": true,
+  "bestAsk": 0.12,
+  "bestBid": 0.1,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31-more-markets",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC - More Markets"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "Aston Villa FC (-2.5)",
+  "id": "5855649",
+  "line": -2.5,
+  "liquidityNum": 4937.0968,
+  "outcomePrices": "[\"0.11\", \"0.89\"]",
+  "outcomes": "[\"Aston Villa FC\", \"Fulham FC\"]",
+  "question": "Spread: Aston Villa FC (-2.5)",
+  "slug": "epl-ast-ful-2026-10-31-spread-home-2pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.02
+ },
+ {
+  "active": true,
+  "bestAsk": 0.06,
+  "bestBid": 0.02,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31-more-markets",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC - More Markets"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "Fulham FC (-2.5)",
+  "id": "5855652",
+  "line": -2.5,
+  "liquidityNum": 2587.2518,
+  "outcomePrices": "[\"0.04\", \"0.96\"]",
+  "outcomes": "[\"Fulham FC\", \"Aston Villa FC\"]",
+  "question": "Spread: Fulham FC (-2.5)",
+  "slug": "epl-ast-ful-2026-10-31-spread-away-2pt5",
+  "sportsMarketType": "spreads",
+  "spread": 0.04
+ },
+ {
+  "active": true,
+  "bestAsk": 0.94,
+  "bestBid": 0.93,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31-more-markets",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC - More Markets"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "O/U 0.5",
+  "id": "5855673",
+  "line": 0.5,
+  "liquidityNum": 4109.401,
+  "outcomePrices": "[\"0.935\", \"0.065\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Aston Villa FC vs. Fulham FC: O/U 0.5",
+  "slug": "epl-ast-ful-2026-10-31-total-0pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.01
+ },
+ {
+  "active": true,
+  "bestAsk": 0.8,
+  "bestBid": 0.78,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31-more-markets",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC - More Markets"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "O/U 1.5",
+  "id": "5855676",
+  "lastTradePrice": 0.8,
+  "line": 1.5,
+  "liquidityNum": 5152.6796,
+  "outcomePrices": "[\"0.79\", \"0.21\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Aston Villa FC vs. Fulham FC: O/U 1.5",
+  "slug": "epl-ast-ful-2026-10-31-total-1pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.02,
+  "volumeNum": 26.250001
+ },
+ {
+  "active": true,
+  "bestAsk": 0.57,
+  "bestBid": 0.55,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31-more-markets",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC - More Markets"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "O/U 2.5",
+  "id": "5855680",
+  "lastTradePrice": 0.56,
+  "line": 2.5,
+  "liquidityNum": 9901.8571,
+  "outcomePrices": "[\"0.56\", \"0.44\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Aston Villa FC vs. Fulham FC: O/U 2.5",
+  "slug": "epl-ast-ful-2026-10-31-total-2pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.02,
+  "volumeNum": 27.272223
+ },
+ {
+  "active": true,
+  "bestAsk": 0.34,
+  "bestBid": 0.33,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31-more-markets",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC - More Markets"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "O/U 3.5",
+  "id": "5855684",
+  "line": 3.5,
+  "liquidityNum": 9437.1015,
+  "outcomePrices": "[\"0.335\", \"0.665\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Aston Villa FC vs. Fulham FC: O/U 3.5",
+  "slug": "epl-ast-ful-2026-10-31-total-3pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.01
+ },
+ {
+  "active": true,
+  "bestAsk": 0.18,
+  "bestBid": 0.16,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31-more-markets",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC - More Markets"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "O/U 4.5",
+  "id": "5855688",
+  "lastTradePrice": 0.17,
+  "line": 4.5,
+  "liquidityNum": 5253.8466,
+  "outcomePrices": "[\"0.17\", \"0.83\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Aston Villa FC vs. Fulham FC: O/U 4.5",
+  "slug": "epl-ast-ful-2026-10-31-total-4pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.02,
+  "volumeNum": 36.059412
+ },
+ {
+  "active": true,
+  "bestAsk": 0.08,
+  "bestBid": 0.07,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31-more-markets",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC - More Markets"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "O/U 5.5",
+  "id": "5855692",
+  "line": 5.5,
+  "liquidityNum": 5145.6565,
+  "outcomePrices": "[\"0.075\", \"0.925\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Aston Villa FC vs. Fulham FC: O/U 5.5",
+  "slug": "epl-ast-ful-2026-10-31-total-5pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.01
+ },
+ {
+  "active": true,
+  "bestAsk": 0.24,
+  "bestBid": 0.02,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31-more-markets",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC - More Markets"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "O/U 6.5",
+  "id": "5855696",
+  "line": 6.5,
+  "liquidityNum": 2062.0766,
+  "outcomePrices": "[\"0.13\", \"0.87\"]",
+  "outcomes": "[\"Over\", \"Under\"]",
+  "question": "Aston Villa FC vs. Fulham FC: O/U 6.5",
+  "slug": "epl-ast-ful-2026-10-31-total-6pt5",
+  "sportsMarketType": "totals",
+  "spread": 0.22
+ }
+]

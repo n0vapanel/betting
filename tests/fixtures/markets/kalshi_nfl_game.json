@@ -1,0 +1,154 @@
+{
+ "cursor": "",
+ "events": [
+  {
+   "event_ticker": "KXNFLGAME-26OCT26DALPHI",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-27T03:15:00Z",
+     "last_price_dollars": "0.3500",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-27T03:15:00Z",
+     "status": "active",
+     "ticker": "KXNFLGAME-26OCT26DALPHI-PHI",
+     "title": "Philadelphia wins",
+     "volume_fp": "9953994.48",
+     "yes_ask_dollars": "0.3500",
+     "yes_bid_dollars": "0.3400",
+     "yes_sub_title": "Philadelphia"
+    },
+    {
+     "expected_expiration_time": "2026-10-27T03:15:00Z",
+     "last_price_dollars": "0.6600",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-27T03:15:00Z",
+     "status": "active",
+     "ticker": "KXNFLGAME-26OCT26DALPHI-DAL",
+     "title": "Dallas wins",
+     "volume_fp": "7801363.31",
+     "yes_ask_dollars": "0.6600",
+     "yes_bid_dollars": "0.6500",
+     "yes_sub_title": "Dallas"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXNFLGAME",
+   "sub_title": "DAL vs PHI (Oct 26)",
+   "title": "Dallas vs Philadelphia"
+  },
+  {
+   "event_ticker": "KXNFLGAME-26NOV01INDJAC",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-11-01T21:00:00Z",
+     "last_price_dollars": "0.7700",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-11-01T21:00:00Z",
+     "status": "active",
+     "ticker": "KXNFLGAME-26NOV01INDJAC-JAC",
+     "title": "Jacksonville wins",
+     "volume_fp": "8595.68",
+     "yes_ask_dollars": "0.7700",
+     "yes_bid_dollars": "0.7600",
+     "yes_sub_title": "Jacksonville"
+    },
+    {
+     "expected_expiration_time": "2026-11-01T21:00:00Z",
+     "last_price_dollars": "0.2400",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-11-01T21:00:00Z",
+     "status": "active",
+     "ticker": "KXNFLGAME-26NOV01INDJAC-IND",
+     "title": "Indianapolis wins",
+     "volume_fp": "10396.31",
+     "yes_ask_dollars": "0.2400",
+     "yes_bid_dollars": "0.2300",
+     "yes_sub_title": "Indianapolis"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXNFLGAME",
+   "sub_title": "IND vs JAC (Nov 1)",
+   "title": "Indianapolis vs Jacksonville"
+  },
+  {
+   "event_ticker": "KXNFLGAME-26NOV01LACLAR",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-11-02T00:05:00Z",
+     "last_price_dollars": "0.7500",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-11-02T00:05:00Z",
+     "status": "active",
+     "ticker": "KXNFLGAME-26NOV01LACLAR-LAR",
+     "title": "Los Angeles R wins",
+     "volume_fp": "8591.91",
+     "yes_ask_dollars": "0.7500",
+     "yes_bid_dollars": "0.7400",
+     "yes_sub_title": "Los Angeles R"
+    },
+    {
+     "expected_expiration_time": "2026-11-02T00:05:00Z",
+     "last_price_dollars": "0.2500",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-11-02T00:05:00Z",
+     "status": "active",
+     "ticker": "KXNFLGAME-26NOV01LACLAR-LAC",
+     "title": "Los Angeles C wins",
+     "volume_fp": "31936.42",
+     "yes_ask_dollars": "0.2500",
+     "yes_bid_dollars": "0.2400",
+     "yes_sub_title": "Los Angeles C"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXNFLGAME",
+   "sub_title": "LAC vs LAR (Nov 1)",
+   "title": "Los Angeles C vs Los Angeles R"
+  }
+ ],
+ "milestones": [
+  {
+   "details": {
+    "league": "NFL",
+    "main_game_event_ticker": "KXNFLGAME-26NOV01LACLAR",
+    "status": "scheduled"
+   },
+   "id": "c2ef552e-f54b-47a5-a44b-4392c830df1f",
+   "primary_event_tickers": [
+    "KXNFLGAME-26NOV01LACLAR"
+   ],
+   "start_date": "2026-11-01T21:05:00Z",
+   "title": "LA Chargers at LA Rams",
+   "type": "football_game"
+  },
+  {
+   "details": {
+    "league": "NFL",
+    "main_game_event_ticker": "KXNFLGAME-26NOV01INDJAC",
+    "status": "scheduled"
+   },
+   "id": "ae4cf578-ef24-4bba-98b6-d22cd69f9fd2",
+   "primary_event_tickers": [
+    "KXNFLGAME-26NOV01INDJAC"
+   ],
+   "start_date": "2026-11-01T18:00:00Z",
+   "title": "IND Colts at JAC Jaguars",
+   "type": "football_game"
+  },
+  {
+   "details": {
+    "league": "NFL",
+    "main_game_event_ticker": "KXNFLGAME-26OCT26DALPHI",
+    "status": "inprogress"
+   },
+   "id": "12b9bf86-fe44-441b-9748-8bbb30a422c0",
+   "primary_event_tickers": [
+    "KXNFLGAME-26OCT26DALPHI"
+   ],
+   "start_date": "2026-10-27T00:15:00Z",
+   "title": "DAL Cowboys at PHI Eagles",
+   "type": "football_game"
+  }
+ ]
+}

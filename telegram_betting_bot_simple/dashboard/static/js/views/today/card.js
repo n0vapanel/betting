@@ -1,13 +1,15 @@
 // One game as a phone card: when and where, both teams (logo, record, score), the top three numbers
-// (market chance, the AI's chance, the edge between them, for the favourite or the AI's pick) and the
-// price buttons (Winner · Spread · Total, as the game page has them). Fed by the slate; HTML only.
+// (the markets' blended chance, the AI's chance, the edge between them, for the favourite or the AI's pick),
+// a one-line "Markets say" strip (each source's chance for the favourite, ⚖ when they disagree by 5 points
+// or more, "Low confidence" when no market prices the game) and the price buttons (Winner · Spread · Total,
+// as the game page has them). Fed by the slate; HTML only.
 
 import { esc, pct } from "../../ui.js";
 import { icon } from "../../icons.js";
-import { favourite, bestEdge, teamShort } from "./model.js";
+import { favourite, bestEdge, teamShort, marketsOf } from "./model.js";
 import {
   MARKETS, detailHash, statusHtml, statusWords, teamLine, leagueHtml, priceButton, lineSides, badgesHtml, asOfHtml,
-  noOddsHtml, points, CAUTION, NOTABLE, detailHtml,
+  noOddsHtml, points, CAUTION, NOTABLE, detailHtml, marketsWords, disBadge, lowBadge,
 } from "./row.js";
 
 function sideName(game, side) {
@@ -19,7 +21,11 @@ function sideName(game, side) {
 export function topNumbers(game) {
   const out = [];
   const fav = favourite(game, "chance");
-  if (fav) out.push({ label: "Market", value: `${pct(fav.chance)} ${sideName(game, fav.side)}`, words: `Market chance ${pct(fav.chance)} for ${fav.side === "draw" ? "a draw" : game[fav.side]?.name || fav.side}` });
+  const blend = game.chance?.src === "blend";
+  if (fav) {
+    out.push({ label: blend ? "Markets" : "Market", value: `${pct(fav.chance)} ${sideName(game, fav.side)}`,
+      words: `${blend ? "Markets say" : "Market chance"} ${pct(fav.chance)} for ${fav.side === "draw" ? "a draw" : game[fav.side]?.name || fav.side}` });
+  }
   const ai = favourite(game, "ai");
   if (ai) out.push({ label: "AI", value: `${pct(ai.chance)} ${sideName(game, ai.side)}`, words: `AI chance ${pct(ai.chance)} for ${game[ai.side]?.name || ai.side}` });
   const edge = bestEdge(game);
@@ -31,6 +37,29 @@ export function topNumbers(game) {
     });
   }
   return out;
+}
+
+// The slate's short source names, a little longer where the strip has room ("Model" is the NBA team model on
+// its own, as the game page names it: the AI's chance is another number)
+const STRIP_NAMES = { Poly: "Poly", Model: "Team model" };
+
+/**
+ * The "Markets say" strip: ⚖ and "Low confidence" first (never cut off), then each source's chance for the
+ * favourite ("BOS: Sharp 64 · US 62 · Kalshi 63 · Poly 61 thin"). One line, cut with … on a narrow phone,
+ * when the sources agree; when they disagree (⚖) the list wraps onto its own lines, so the outliers that make
+ * the ⚖ are never the part cut off. The label reads it all. "" without a "Markets say" (an older slate) or
+ * with no source beyond the blend.
+ */
+export function marketsStrip(game) {
+  const m = marketsOf(game);
+  if (!m) return "";
+  const who = sideName(game, m.fav);
+  // Each source keeps its name, chance and status together (no-break spaces): a wrapped list breaks between them
+  const list = m.sources.map((s) => `${STRIP_NAMES[s.name] || s.name} ${Math.round(s.p * 100)}${s.status !== "ok" ? ` ${s.status}` : ""}`.replace(/ /g, "\u00a0"));
+  const flags = `${disBadge(m, { long: true })}${lowBadge(m, { long: true })}`;
+  if (!list.length && !flags) return "";
+  // The strip is cut short on a narrow phone, so a screen reader gets the whole of it in words instead
+  return `<p class="mk-strip${m.dis ? " wrap" : ""}"><span class="sr-only">${esc(marketsWords(game))}</span><span class="mk-k" aria-hidden="true">Markets say</span><span class="mk-flags" aria-hidden="true">${flags}</span><span class="mk-src" aria-hidden="true">${list.length ? `<b>${esc(who)}</b> ${esc(list.join(" · "))}` : ""}</span></p>`;
 }
 
 export function cardHtml(game, { entry, withDay, asked, prefetchable, expanded, showLeague = true }) {
@@ -66,6 +95,6 @@ export function cardHtml(game, { entry, withDay, asked, prefetchable, expanded, 
     <span class="chip-row"><a class="chip ask" href="${esc(ask)}">${icon("ask", { size: 16 })}Ask AI</a>
     <a class="text-link" href="${esc(href)}" tabindex="-1" aria-hidden="true">Details ${icon("chevron", { size: 16 })}</a></span></div>` : "";
   return `<article class="card game-card td-card${game.status === "live" ? " is-live" : ""}" data-game="${esc(game.id)}">
-    ${top}${numbers}<div class="td-card-prices">${prices}</div>${expanded && !href ? detailHtml(game, entry, asked).replace('role="row"', "").replace(/ role="cell" aria-colspan="\d+"/, "") : ""}${foot}
+    ${top}${numbers}${marketsStrip(game)}<div class="td-card-prices">${prices}</div>${expanded && !href ? detailHtml(game, entry, asked).replace('role="row"', "").replace(/ role="cell" aria-colspan="\d+"/, "") : ""}${foot}
   </article>`;
 }

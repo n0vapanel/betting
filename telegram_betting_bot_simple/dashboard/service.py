@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime
 import logging
 import statistics
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -19,11 +20,12 @@ from zoneinfo import ZoneInfo
 from ..ai.desk import AnalystDesk
 from ..ai.forecast import AnalystError
 from ..data.cache import TTLCache
+from ..data import slate as slate_mod
 from ..data.espn_client import ESPN_DAY_TZ, LEAGUES as ESPN_LEAGUES, OUT_STATUSES, EspnClient
 from ..data.leagues import SPORTS, pick_leagues
-from ..data.odds_service import OddsService, summarize_markets
+from ..data.odds_service import OddsService, book_roles, is_price_book, moneylines, summarize_markets
 from ..data.store import Store
-from ..engine import bets, calls, nba_model
+from ..engine import bets, calls, consensus, nba_model
 from ..engine.odds_math import decimal_to_american, format_american
 from ..engine.slip import Leg, evaluate_slip
 
@@ -34,6 +36,35 @@ AI_LEAGUES = {"basketball_nba"}
 
 class NotFound(Exception):
     pass
+
+
+def consensus_score(p: Dict[str, Any], outcome: str) -> Optional[Dict[str, float]]:
+    """engine/consensus.py's score, rounded for the record: Brier score (half the squared distance summed over the
+    outcomes, which for two is the usual (p - won)^2 the AI record uses) and log loss (-ln p(outcome)); None when
+    the forecast didn't price that outcome (a tie on a two-way market)."""
+    scored = consensus.score(p or {}, outcome)
+    return {key: round(value, 6) for key, value in scored.items()} if scored else None
+
+
+def _mean(values: Any) -> Optional[float]:
+    values = [float(v) for v in values if v is not None]
+    return round(sum(values) / len(values), 4) if values else None
+
+
+def _frozen(row: Dict[str, Any]) -> Dict[str, Any]:
+    sources = row.get("sources") or []
+    return {"blend": row.get("blend"), "sources": sources,
+            "links": [{"name": s["name"], "url": s["url"]} for s in sources if s.get("url")]}
+
+
+def _restale(source: Dict[str, Any], now: float) -> Dict[str, Any]:
+    """A logged source with its status checked again for its age (the dashboard may have stopped refreshing it)."""
+    limit = (slate_mod.MARKET_STALE if source.get("kind") == "prediction_market"
+             else slate_mod.PREDICTOR_STALE if source.get("name") == "ESPN" else slate_mod.RATING_STALE)
+    age = slate_mod._age(source.get("as_of"), now)
+    if source.get("status") == "ok" and age is not None and age > limit:
+        return {**source, "status": "stale"}
+    return dict(source)
 
 
 class CallRejected(Exception):
@@ -80,6 +111,10 @@ class DashboardService:
         # The per-person features (dashboard/lab.py) set this; its saved bets and rollover plans are
         # graded with everything else in grade_due
         self.lab: Any = None
+        # The all-sports slate (data/slate.py), in the dashboard process: its markets brain's detail for each game
+        # is what the game route shows. The bot's process has none and reads the dashboard's consensus_log instead
+        self.slate: Any = None
+        self._markets_record: Optional[Tuple[Any, Dict[str, Any]]] = None  # (the store's graded mark, the record)
 
     # --- menus -----------------------------------------------------------
 
@@ -146,7 +181,17 @@ class DashboardService:
             card["players"] = self._players(league, info, context)
         if self.analysts and league in AI_LEAGUES:
             card["analysts"] = self.analysts.game_view(league, event_id)
+        self._explain(card, info)
+        card["consensus"] = self.markets_detail(league, event_id, game=game, prediction=info.get("prediction"))
         return card
+
+    def _explain(self, card: Dict[str, Any], info: Dict[str, Any]) -> None:
+        """The game route's typed factors (engine/factors.py): each of the prediction's numbers as a labelled
+        baseline plus sized factors that add up to it ("margin", "total", "home_win" in percent, and the team
+        model's own "model_margin" and "model_total"), rounded so the deltas still sum to the value shown. Only
+        on one game's detail: the boards stay lean."""
+        if card.get("prediction") and info.get("prediction") is not None:
+            card["prediction"]["projections"] = self._projections(info["prediction"])
 
     def forget(self, league: str) -> None:
         """Rebuild the league's game cards on the next request (new analyst forecasts)."""
@@ -337,9 +382,20 @@ class DashboardService:
             "pick": game[favourite],
             "pick_prob": max(home_win, 1 - home_win),
             "sources": {name: {k: round(v, 3) for k, v in values.items()} for name, values in prediction.sources.items()},
-            "factors": prediction.factors,
+            "factors": prediction.factors,  # text lines, for older pages (the game route adds "projections")
             "method": self._method_note(),
         }
+
+    @staticmethod
+    def _projections(prediction: nba_model.GamePrediction) -> Optional[Dict[str, Any]]:
+        explain = getattr(prediction, "projections", None)
+        if not callable(explain):
+            return None
+        try:
+            return {key: projection.to_dict(digits=1) for key, projection in explain().items()}
+        except Exception:
+            logging.exception("Couldn't explain the prediction's numbers")
+            return None
 
     def _method_note(self) -> str:
         p = self.params
@@ -366,7 +422,9 @@ class DashboardService:
                 }
                 for side, offer in outcomes.items()
             }
-        return {"title": book["title"], "markets": markets}
+        # "sharp": Pinnacle or an exchange, shown for the consensus only (no price of theirs is ever offered);
+        # "price": a book a person can bet at; "other": a listed book left out of ODDS_PRICE_BOOKS
+        return {"title": book["title"], "key": book.get("key"), "role": book_roles().role(book), "markets": markets}
 
     def _players(self, league: str, info: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
         match, prediction, teams = info["match"], info["prediction"], info["teams"]
@@ -424,6 +482,8 @@ class DashboardService:
             raise NotFound(f"No game {event_id} in {league}")
         context = self._league_context(league)
         card, info = self._card(league, game, context)
+        self._explain(card, info)
+        card["consensus"] = self.markets_detail(league, event_id, game=game, prediction=info.get("prediction"))
         players: Dict[str, Dict[str, Any]] = {}
         if league in AI_LEAGUES and info.get("prediction") and info.get("match") and context:
             for side, rows in self._players(league, info, context).items():
@@ -482,6 +542,7 @@ class DashboardService:
             if card["live"] or prediction is None:
                 continue
             market = prediction.sources.get("market", {})
+            model = prediction.sources.get("model", {})
             try:
                 self.store.log_ai_prediction({
                     "league": league, "event_id": card["id"], "espn_id": (info.get("match") or {}).get("event_id"),
@@ -495,6 +556,9 @@ class DashboardService:
                         "market_margin": market.get("margin"),
                         "market_total": market.get("total"),
                         "espn_home_win": info.get("espn_home_win"),
+                        # The team model alone: the markets brain's "Model" source (the prediction itself already
+                        # leans on the market, which the brain counts on its own)
+                        "model_home_win": model.get("home_win_prob"),
                     },
                 })
             except Exception:
@@ -578,11 +642,159 @@ class DashboardService:
                 graded += 1
             except Exception:
                 logging.exception("Couldn't grade the AI's %s ticket for %s", row["tier"], row["day"])
+        graded += self._grade_consensus(cutoff, give_up)
         if self.lab is not None:
             graded += self.lab.grade_due(cutoff, give_up)  # saved bets, then the plan days they belong to
         if self.analysts:
             graded += self.analysts.grade_due(self, cutoff, give_up)
         return graded
+
+    # --- the markets brain ("Markets say") -------------------------------------------------------------
+
+    def markets_detail(self, league: str, event_id: str, game: Optional[Dict[str, Any]] = None,
+                       prediction: Optional[nba_model.GamePrediction] = None, now: Optional[float] = None
+                       ) -> Optional[Dict[str, Any]]:
+        """A game's "Markets say": {"blend": Blend|None, "sources": [Source...], "links": [{"name", "url"}]}, or
+        None when nothing has an opinion yet. Never fetches a source or spends an Odds API credit.
+
+        The slate's own detail when the dashboard's slate has one; else (the bot's process, or before the slate's
+        first round) the dashboard's last logged opinions from consensus_log (prediction markets, ESPN, ratings),
+        with the books' consensus from the board in hand (or the saved one) and the team model's own chance. Once
+        a game has started its logged detail is frozen and shown as it was."""
+        if self.slate is not None:
+            try:
+                found = self.slate.markets_for(league, odds_id=event_id)
+            except Exception:
+                logging.exception("Couldn't read the slate's markets for %s", event_id)
+                found = None
+            if found:
+                return found
+        now = time.time() if now is None else now
+        row = None
+        if self.store is not None:
+            try:
+                row = self.store.consensus_row(league, event_id=event_id)
+            except Exception:
+                logging.exception("Couldn't read the logged consensus for %s", event_id)
+        started = slate_mod._parse_time((row or {}).get("start"))
+        if row and row.get("blend") and (row["status"] != "pending" or (started is not None and started <= now)):
+            return _frozen(row)
+        if game is None:
+            saved = getattr(self.odds, "saved_games", None)
+            found_saved = saved(league) if callable(saved) else None
+            game = next((g for g in (found_saved or (None, []))[1] if g.get("id") == event_id), None)
+            as_of = found_saved[0] if found_saved else None
+        else:
+            loaded = getattr(self.odds, "odds_loaded_at", None)
+            as_of = loaded(league) if callable(loaded) else None
+        sources: List[Dict[str, Any]] = []
+        if game is not None:
+            sources += slate_mod.book_sources(moneylines(game), as_of, now)
+        if row:
+            sources += [_restale(source, now) for source in row.get("sources") or []
+                        if source.get("kind") in ("prediction_market", "model_rating")]
+        model = (prediction.sources.get("model") or {}).get("home_win_prob") if prediction else None
+        if model is not None:
+            sources.append(slate_mod.model_source(model, now, now))
+        elif row:
+            sources += [source for source in row.get("sources") or [] if source.get("kind") == "team_model"]
+        start = slate_mod._parse_time((game or {}).get("commence_time") or (row or {}).get("start"))
+        return slate_mod.market_detail(league, sources, start, now)
+
+    def _grade_consensus(self, cutoff: str, give_up: str) -> int:
+        """Score the logged consensus of finished games: each source's and the blend's Brier score and log loss."""
+        if self.store is None or not hasattr(self.store, "consensus_rows"):
+            return 0
+        graded = 0
+        for row in self.store.consensus_rows(status="pending", started_before=cutoff):
+            try:
+                if row["league"] not in ESPN_LEAGUES:
+                    # Tennis tournaments, MMA cards and leagues ESPN doesn't cover: no single-game result to read
+                    self.store.grade_consensus(row["league"], row["game_key"], "void", None,
+                                               {"reason": "no game result here"})
+                    continue
+                final = self.final(row)
+                if final["state"] == "pending":
+                    if row["start"] < give_up:
+                        self.store.grade_consensus(row["league"], row["game_key"], "void", None, {"reason": "no result"})
+                    continue
+                if final["state"] != "final":
+                    self.store.grade_consensus(row["league"], row["game_key"], "void", None, final)
+                    continue
+                home, away = (final["away"], final["home"]) if row.get("swapped") else (final["home"], final["away"])
+                outcome = "home" if home > away else "away" if away > home else "draw"
+                result = {"score": {"home": home, "away": away}, "outcome": outcome,
+                          "blend": consensus_score((row.get("blend") or {}).get("p") or {}, outcome),
+                          "scores": {}}
+                for source in row.get("sources") or []:
+                    if source.get("status") not in ("ok", "thin"):
+                        continue  # stale and missing opinions weren't live prices when the game started
+                    scored = consensus_score(source.get("p") or {}, outcome)
+                    if scored:
+                        result["scores"][str(source.get("name"))] = {**scored, "kind": source.get("kind"),
+                                                                     "status": source.get("status")}
+                self.store.grade_consensus(row["league"], row["game_key"], "graded", outcome, result)
+                graded += 1
+            except Exception:
+                logging.exception("Couldn't grade the consensus for %s", row.get("game_key"))
+        return graded
+
+    def markets_record(self) -> Dict[str, Any]:
+        """Per league and per source, on graded games: n, mean Brier score and log loss, and the blend's on the
+        same games, so the record shows which source has earned its weight."""
+        if self.store is None or not hasattr(self.store, "consensus_graded"):
+            return {"sports": [], "games": 0}
+        # Read only: the grader thread (grade_due, every 10 minutes) scores finished games. Every graded game counts
+        # (no cap), and the record is worked out again only when a game has been graded since
+        cached = getattr(self, "_markets_record", None)
+        if cached is not None:
+            try:
+                if self.store.consensus_graded_mark() == cached[0]:
+                    return cached[1]
+            except Exception:
+                logging.exception("Couldn't read the markets record's mark")
+        mark, graded = self.store.consensus_graded()
+        record = self._markets_record_of(graded)
+        self._markets_record = (mark, record)
+        return record
+
+    @staticmethod
+    def _markets_record_of(graded: List[Dict[str, Any]]) -> Dict[str, Any]:
+        leagues: Dict[str, Dict[str, Any]] = {}
+        for row in graded:
+            result = row.get("result") or {}
+            blend = result.get("blend")
+            if not blend:
+                continue  # a draw on a two-way market: nobody's forecast priced it
+            entry = leagues.setdefault(row["league"], {"blend": [], "sources": {}, "low": 0})
+            entry["blend"].append(blend)
+            if (row.get("blend") or {}).get("confidence") == "low":
+                entry["low"] += 1
+            for name, scored in (result.get("scores") or {}).items():
+                source = entry["sources"].setdefault(name, {"kind": scored.get("kind"), "rows": []})
+                source["rows"].append((scored, blend))
+        sports = []
+        for league, entry in leagues.items():
+            sources = []
+            for name, source in entry["sources"].items():
+                rows = source["rows"]
+                sources.append({
+                    "name": name, "kind": source["kind"], "n": len(rows),
+                    "brier": _mean(r[0]["brier"] for r in rows), "log_loss": _mean(r[0]["log_loss"] for r in rows),
+                    "blend_brier": _mean(r[1]["brier"] for r in rows),
+                    "blend_log_loss": _mean(r[1]["log_loss"] for r in rows),
+                })
+            sources.sort(key=lambda item: (-item["n"], item["name"]))
+            sports.append({"league": league, "title": slate_mod.TITLES.get(league), "n": len(entry["blend"]),
+                           "low_confidence": entry["low"],
+                           "blend": {"n": len(entry["blend"]), "brier": _mean(b["brier"] for b in entry["blend"]),
+                                     "log_loss": _mean(b["log_loss"] for b in entry["blend"])},
+                           "sources": sources})
+        sports.sort(key=lambda item: (-item["n"], item["league"]))
+        return {"sports": sports, "games": sum(item["n"] for item in sports),
+                "note": ("Brier score (lower is better; 0.25 is a coin flip on a two-way game) and log loss on games "
+                         "graded after the final, from each source's last opinion before the start. The blend is "
+                         "the app's best estimate; the market usually wins.")}
 
     def track_record(self, league: str = "basketball_nba") -> Dict[str, Any]:
         """How the AI's pre-game predictions did: accuracy, Brier score next to the market's,
@@ -756,7 +968,8 @@ class DashboardService:
 
     def _book_prices(self, league: str, event_id: str, market: str, side: str, point: Optional[float],
                      max_hold: Optional[float] = None) -> Dict[str, float]:
-        """Each bookmaker's decimal price for one pick, at the same line as the pick.
+        """Each bookmaker's decimal price for one pick, at the same line as the pick: price books only
+        (ODDS_PRICE_BOOKS), never a sharp book or an exchange.
 
         With ``max_hold``, bookmakers whose margin on this market (at this
         line) is higher are left out.
@@ -764,6 +977,8 @@ class DashboardService:
         game = next((g for g in self.odds.league_games(league) if g["id"] == event_id), None)
         prices = {}
         for book in (game or {}).get("books", []):
+            if not is_price_book(book):
+                continue  # Pinnacle and the exchanges anchor the consensus; nobody is offered their prices
             outcomes = book["markets"].get(market, {})
             offer = outcomes.get(side)
             if not offer or offer["point"] != point:
