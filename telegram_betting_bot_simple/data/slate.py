@@ -54,6 +54,14 @@ the start or later is left out (market_detail), and such a price seen before the
 started. A start ESPN flags as not valid (a tennis match whose order of play isn't out: midnight Eastern) is only
 a day: the venues are matched on the date, and the game starts when ESPN says it has.
 
+Venue & conditions (v3 Stage 4, data/context.py): a context worker (one daemon thread, at most every CONTEXT_EVERY
+seconds) hands the games still to play to the ContextService's ``warm``, which builds each game's context block in the
+background (venue, weather, rest and travel, the attribution and any adjustment) as a computed entry in the shared
+cache; it reads past scoreboards through ``scoreboards`` (the boards held here, else past ones fetched once through
+ESPN's cache and kept: they don't change). Each row's ``badges`` then gain the block's codes (wind:26, alt:1580,
+tz-away:3, adj, ...) after the slate's own (live, neutral, b2b-home/b2b-away); building the slate never waits for the
+worker and never fetches for it.
+
 Size: each game leaves out ``espn_id`` or ``odds_id`` when its ``id`` already holds it and sends ESPN logos as their
 path after https://a.espncdn.com/ (the app puts the host back). Each team keeps its full ``name``: Today's search
 finds a game by city or full name ("Brooklyn", "Golden State") and a slip names the team as the game page does,
@@ -151,6 +159,10 @@ KALSHI_AHEAD = 48 * 3600  # Kalshi is refreshed only for leagues with a game on 
 # anonymous limit answers "too many requests" to bursts of large calls (data/markets/kalshi.py)
 # The team model's own chance as the brain's "Model" source (the same words on the game route)
 MODEL_DETAIL = "NBA team model alone: points for and against, home court, rest, injuries"
+# --- context (v3 Stage 4: data/context.py) ---
+CONTEXT_EVERY = 60.0  # the context worker's round: each game's venue & conditions block, in the background
+CONTEXT_SOON = 5.0  # a reader asked for a block not built yet: a round now, at most this often (request_context)
+PAST_KEPT = 600  # past scoreboards (league, day) the context worker keeps: they don't change
 
 
 def _iso(ts: Optional[float]) -> Optional[str]:
@@ -541,6 +553,9 @@ def parse_competition(league: str, sport: str, competition: Mapping[str, Any], e
     address = venue.get("address") or {}
     venue_view = _lean({"name": _text(venue.get("fullName"), 80), "city": _text(address.get("city"), 40),
                         "indoor": venue.get("indoor") if isinstance(venue.get("indoor"), bool) else None})
+    # For the context worker only (data/context.py): ESPN's venue id and the address's state and country
+    place = _lean({"id": _text(venue.get("id"), 20), "state": _text(address.get("state"), 40),
+                   "country": _text(address.get("country"), 40)})
     return {
         "espn_id": _text(event_id, 40),
         "start": _iso(start),
@@ -556,6 +571,7 @@ def parse_competition(league: str, sport: str, competition: Mapping[str, Any], e
         "_neutral": bool(competition.get("neutralSite")),
         "_names": (home_names, away_names),
         "_ids": (home_id, away_id),
+        "_place": place or None,
     }
 
 
@@ -619,6 +635,25 @@ def odds_view(event: Mapping[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optio
     return prices or None, chance
 
 
+def board_lines(event: Mapping[str, Any]) -> Optional[Dict[str, float]]:
+    """The context worker's lines from one saved odds event (data/context.py): the consensus spread (the home side's
+    point), the consensus total and the books' margin-free chance of the over at it; None when there are none."""
+    try:
+        summary = summarize_markets(dict(event))
+    except Exception:
+        return None
+    lines: Dict[str, float] = {}
+    home = (summary.get("spreads") or {}).get("home") or {}
+    if isinstance(home.get("point"), (int, float)):
+        lines["spread"] = float(home["point"])
+    over = (summary.get("totals") or {}).get("over") or {}
+    if isinstance(over.get("point"), (int, float)):
+        lines["total"] = float(over["point"])
+        if isinstance(over.get("fair"), float) and 0 < over["fair"] < 1:
+            lines["p_over"] = round(over["fair"], 6)
+    return lines or None
+
+
 @dataclass
 class _Board:
     """One league's scoreboard for one day."""
@@ -658,7 +693,8 @@ class SlateBuilder:
                  ai_leagues: Iterable[str] = AI_LEAGUES, workers: int = WORKERS,
                  now: Callable[[], float] = time.time, polymarket: Any = None, kalshi: Any = None,
                  ratings: Any = None, markets_every: float = MARKETS_EVERY, log_consensus: bool = True,
-                 on_change: Optional[Callable[..., Any]] = None) -> None:
+                 on_change: Optional[Callable[..., Any]] = None, context: Any = None,
+                 context_every: float = CONTEXT_EVERY) -> None:
         self.odds = odds
         self.espn = espn
         self.store = store
@@ -719,6 +755,16 @@ class SlateBuilder:
         # shared cache are dropped and rebuilt once for everyone; ``board`` is True when the status moved)
         self.on_change = on_change
         self._marks: Dict[str, Tuple[Any, Any, Any]] = {}  # game id -> (status, home score, away score) last round
+        # Venue & conditions (data/context.py's ContextService): warmed by a background round at most every
+        # ``context_every`` seconds; each row's badges gain the context codes from the computed entries
+        self.context = context
+        self.context_every = max(1.0, float(context_every))
+        self._context_thread: Optional[threading.Thread] = None
+        self._context_busy = False
+        self._context_next = 0.0
+        self._context_asked = -math.inf
+        self._past: "OrderedDict[Tuple[str, datetime.date], List[Dict[str, Any]]]" = OrderedDict()
+        self._past_lock = threading.Lock()
 
     # --- serving -----------------------------------------------------------------------------------
 
@@ -893,6 +939,8 @@ class SlateBuilder:
             except Exception:  # the markets brain must never cost the scores
                 log.exception("Slate: the markets brain failed this round")
             self._schedule_markets(games, now)
+            self._apply_context(games)
+            self._schedule_context(games, now)
             self._publish(leagues, games, as_of, now, self._quota())
             return self._next_delay(season, today, self._now())
 
@@ -1107,7 +1155,7 @@ class SlateBuilder:
             except Exception:
                 books = {}
             events.append({"odds_id": event_id, "_ts": start, "home": home, "away": away, "odds": prices,
-                           "chance": chance, "_books": books, "_fetched": fetched_at})
+                           "chance": chance, "_books": books, "_fetched": fetched_at, "_lines": board_lines(event)})
         self._odds[league] = (fetched_at, events)
         return events
 
@@ -1239,6 +1287,10 @@ class SlateBuilder:
             "_time_ok": bool(espn.get("_time_ok", True)) if espn else True,
             "_surface": tennis_surface(league, espn.get("_event") if espn else None),
             "_books": (event.get("_books") or None) if event else None, "_model": model,
+            # For the context worker (data/context.py): the teams' ESPN ids (as oriented here), ESPN's venue id and
+            # address, and the board's lines
+            "_ids": tuple(ids) if espn is not None else None, "_place": espn.get("_place") if espn else None,
+            "_lines": event.get("_lines") if event else None,
         })
 
     def _played(self, league: str, day: datetime.date) -> Set[Any]:
@@ -1671,6 +1723,118 @@ class SlateBuilder:
             self._markets_next = self._now() + self.markets_every
             self._markets_busy = False
             self.wake()
+
+    # --- venue & conditions (v3 Stage 4) ------------------------------------------------------------------
+
+    def _apply_context(self, games: List[Dict[str, Any]]) -> None:
+        """Add each game's context badge codes (wind, rain, cold, hot, roof, alt, tz-*, rest-*, adj) from its computed
+        entry to the row's badges, after the slate's own (live, neutral, b2b-*). Never fetches."""
+        if self.context is None:
+            return
+        for game in games:
+            try:
+                codes = self.context.badges_for(game)
+            except Exception as exc:
+                self._log_failure("context badges", exc, detail=False)
+                return
+            if codes:
+                badges = list(game.get("badges") or [])
+                game["badges"] = badges + [code for code in codes if code not in badges]
+
+    def _context_input(self, game: Mapping[str, Any]) -> Dict[str, Any]:
+        """What the context worker reads of a game (a copy: the worker runs beside the next round)."""
+        return {key: (dict(value) if isinstance(value, dict) else value) for key, value in game.items()
+                if key not in ("_books", "_model", "_names", "badges")}
+
+    def _schedule_context(self, games: Sequence[Mapping[str, Any]], now: float) -> None:
+        """Start a context round in the background when one is due: ContextService.warm over the games still to
+        play; the slate is rebuilt when a row's badges changed."""
+        if self.context is None or self._context_busy or now < self._context_next:
+            return
+        snapshot = [self._context_input(game) for game in games if game.get("status") in ("pre", "live")]
+        self._context_busy = True
+        thread = threading.Thread(target=self._warm_context, args=(snapshot,), name="slate-context", daemon=True)
+        self._context_thread = thread
+        try:
+            thread.start()
+        except RuntimeError:  # shutting down
+            self._context_busy = False
+
+    def _warm_context(self, games: List[Dict[str, Any]]) -> None:
+        again = False
+        try:
+            before = {game["id"]: self.context.badges_for(game) for game in games}
+            self.context.warm(games)
+            if any(self.context.badges_for(game) != before.get(game["id"]) for game in games):
+                self.wake()
+        except Exception:
+            log.exception("Slate: the context round failed")
+        finally:
+            # A game asked for while this round ran: another round at once rather than a minute on
+            pending = getattr(self.context, "pending", None)
+            again = bool(pending()) if callable(pending) else False
+            self._context_next = self._now() + (0.0 if again else self.context_every)
+            self._context_busy = False
+        if again:
+            self.wake()
+
+    def request_context(self) -> None:
+        """A reader asked for a game whose context block isn't built yet (ContextService.for_game queued it): run the
+        context round at a slate round now, instead of up to a minute (or an idle slate's ten) later, so the page's one
+        re-check finds it. At most once every CONTEXT_SOON seconds; a round in progress runs again when it ends."""
+        if self.context is None:
+            return
+        now = self._now()
+        with self._lock:
+            if now - self._context_asked < CONTEXT_SOON:
+                return
+            self._context_asked = now
+            self._context_next = min(self._context_next, now)
+        self.wake()
+
+    def wait_context(self, timeout: float = 30.0) -> None:
+        """Wait for the context round in progress, if any (for tests and tools)."""
+        thread = self._context_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout)
+
+    def scoreboards(self, league: str, days: Iterable[datetime.date], fetch: bool = False
+                    ) -> Dict[datetime.date, List[Dict[str, Any]]]:
+        """The league's games on each of ``days`` (ESPN days), parsed as the slate parses them: the boards the slate
+        holds, else past boards kept from before (they don't change), else, with ``fetch`` (the context worker's
+        background only), the board read through the ESPN client's cache and kept once it is past."""
+        if espn_path(league) is None:
+            return {}
+        today = datetime.datetime.fromtimestamp(self._now(), ESPN_DAY_TZ).date()
+        out: Dict[datetime.date, List[Dict[str, Any]]] = {}
+        for day in days:
+            board = self._boards.get((league, day))
+            if board is not None and board.fetched:
+                out[day] = list(board.games)
+                continue
+            with self._past_lock:
+                kept = self._past.get((league, day))
+            if kept is not None:
+                out[day] = kept
+                continue
+            if (league, day) in self._fallback:
+                out[day] = list(self._fallback.get((league, day)) or [])
+                continue
+            if not fetch or day > today:
+                continue
+            reader = getattr(self.espn, "scoreboard", None) or getattr(self.espn, "fetch_scoreboard", None)
+            try:
+                games = parse_scoreboard(league, reader(league, day))
+            except Exception as exc:
+                self._log_failure(f"{league} past scoreboard", exc)
+                continue
+            out[day] = games
+            if day < today - datetime.timedelta(days=1):
+                with self._past_lock:
+                    self._past[(league, day)] = games
+                    while len(self._past) > PAST_KEPT:
+                        self._past.popitem(last=False)
+        return out
 
     # --- fresh odds on request ------------------------------------------------------------------------
 

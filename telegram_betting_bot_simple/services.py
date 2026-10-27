@@ -81,7 +81,27 @@ def build_service(config: Config) -> Optional[DashboardService]:
     lab = Lab(service, store, PlayerData(espn), public_url=config.public_url,
               daily_cents=getattr(config, "ai_chat_daily_cents", DAILY_AI_CENTS))
     lab.assistant = build_chat_assistant(config, lab, store)
+    service.context = build_context(config, store, cache, espn)
     return service
+
+
+def build_context(config: Any, store: Store, cache: TTLCache, espn: EspnClient) -> Optional[Any]:
+    """Venue & conditions (data/context.py's ContextService) on the shared cache: both processes read its blocks,
+    and the dashboard's slate worker warms them (build_slate hands it the slate). Open-Meteo is left out when
+    WEATHER_ENABLED is off (venue, rest and travel stay). None if the venue table can't load: the app works without
+    it."""
+    try:
+        from .data.context import ContextService
+        from .data.mlb_stats import MlbStats
+        from .data.venues import default_venues
+        from .data.weather import WeatherClient
+        weather = None
+        if getattr(config, "weather_enabled", True):
+            weather = WeatherClient(cache, store, daily_cap=getattr(config, "weather_daily_cap", 1000))
+        return ContextService(default_venues(), weather, MlbStats(cache), store, cache, espn=espn)
+    except Exception:
+        logging.exception("Venue & conditions couldn't start; the app runs without them")
+        return None
 
 
 def build_slate(config: Config, service: DashboardService) -> SlateBuilder:
@@ -105,8 +125,11 @@ def build_slate(config: Config, service: DashboardService) -> SlateBuilder:
         idle_seconds=config.slate_idle_seconds, future_seconds=config.slate_future_seconds,
         odds_per_day=config.slate_odds_per_day, ai_leagues=AI_LEAGUES,
         polymarket=polymarket, kalshi=kalshi, ratings=ratings, on_change=service.invalidate_game,
+        context=getattr(service, "context", None),
     )
     service.slate = slate
+    if getattr(service, "context", None) is not None:
+        service.context.slate = slate  # its past scoreboards come through the slate
     return slate
 
 

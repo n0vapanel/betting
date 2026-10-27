@@ -86,6 +86,12 @@ MARKETS_SOURCE = ("The markets brain: margin-free sharp and US book prices, Kals
                   "predictor, power ratings and our model, blended in code")
 MARKETS_NOTE = ("The blend is the app's best estimate; the market usually wins. Only sources with status ok are "
                 "blended: thin, stale or missing ones are shown, not counted.")
+CONTEXT_SOURCE = ("Venue & conditions: the venue table, Open-Meteo's forecast (Weather data by Open-Meteo.com), MLB's "
+                  "announced weather, ESPN's scoreboards and standings; the attribution and adjustment worked out in "
+                  "code")
+CONTEXT_NOTE = ("Attribution explains the market's line and changes no number; only an adjustment (a forecast or roof "
+                "change since the odds were fetched) moves the totals' chance, by 0.5 x the change within a cap. "
+                "Weather and travel effects other than NFL wind are small and noisy.")
 PASTED_SOURCE = ("The user's pasted slip at their own odds, priced by the brain: chances from the market, the model "
                  "or estimated from their price minus a typical margin when the leg isn't on our boards")
 MAX_PASTED_LEGS = 20
@@ -146,6 +152,11 @@ TOOLS: List[Dict[str, Any]] = [
     {"name": "markets_consensus",
      "description": "What the markets say about one game: the blended chance per outcome (the app's best "
                     "estimate), each source's chance, as-of and status, and whether they disagree.",
+     "input_schema": _obj({"league": _LEAGUE, "event_id": _STR})},
+    {"name": "game_context",
+     "description": "Venue & conditions for one game: venue, weather at the start, rest and travel, why the line "
+                    "is where it is (top factors, summing to it) and any adjustment. Quote context sizes only from "
+                    "this tool.",
      "input_schema": _obj({"league": _LEAGUE, "event_id": _STR})},
     {"name": "player_get_profile",
      "description": "A player's season and recent averages, last 10 games, home/away splits, injury status, "
@@ -324,7 +335,7 @@ class PastedInput(BaseModel):
 
 INPUTS: Dict[str, type] = {
     "sports_find_events": EventsInput, "odds_get_prices": OddsInput, "markets_consensus": OddsInput,
-    "player_get_profile": PlayerInput,
+    "game_context": OddsInput, "player_get_profile": PlayerInput,
     "player_get_props": PlayerInput, "news_get": NewsInput, "brain_price_legs": LegsInput,
     "ticket_price": TicketInput, "ticket_build": BuildInput, "ticket_analyse": TicketInput,
     "rollover_simulate": RolloverInput, "slip_propose": TicketInput, "user_get_context": NoInput,
@@ -436,6 +447,16 @@ def ticket_title(ticket: Mapping[str, Any]) -> str:
     return "Ticket"
 
 
+def adjusted_fact(leg: Mapping[str, Any]) -> Dict[str, Any]:
+    """{"adjusted": {applied, unit, reason}} for a leg whose chance a forecast or roof change since the odds moved
+    (data/context.py: its ai chance then differs from the market's by that adjustment, not by the brain's view of the
+    game), else {}."""
+    note = leg.get("adjusted")
+    if not isinstance(note, Mapping):
+        return {}
+    return {"adjusted": {"applied": note.get("applied"), "unit": note.get("unit"), "reason": note.get("reason")}}
+
+
 def ticket_facts(ticket: Mapping[str, Any]) -> Dict[str, Any]:
     """The numbers of a priced ticket Claude may quote, without the full outcome tables."""
     chance = ticket.get("chance") or {}
@@ -450,7 +471,7 @@ def ticket_facts(ticket: Mapping[str, Any]) -> Dict[str, Any]:
             "ai_chance_given_no_push": _no_push(leg.get("ai_prob"), leg.get("push_prob")),
             "chance_label": leg.get("chance_label"),
             "fair_odds": leg.get("fair_odds"), "edge": leg.get("edge"), "book": leg.get("book"),
-            "started": leg.get("started") or None, "ref": ref_of(leg),
+            "started": leg.get("started") or None, "ref": ref_of(leg), **adjusted_fact(leg),
         })
     facts = {
         "title": ticket_title(ticket), "type": ticket.get("type"), "system": ticket.get("system"),
@@ -474,7 +495,7 @@ def ticket_facts(ticket: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 # Where a Builder leg's chance comes from (engine/builder.py's chance_source), in the words the app uses
-CHANCE_SOURCES = {"blend": "markets_say", "books": "books", "model": "goals_model"}
+CHANCE_SOURCES = {"blend": "markets_say", "books": "books", "model": "goals_model", "adjusted": "books_adjusted"}
 
 
 def builder_ticket_facts(ticket: Mapping[str, Any]) -> Dict[str, Any]:
@@ -482,7 +503,8 @@ def builder_ticket_facts(ticket: Mapping[str, Any]) -> Dict[str, Any]:
     the target, notes and each leg's reasons, main risk and data age.
 
     Each leg's ``chance`` is the builder's, named by ``chance_source`` ("markets_say": the markets brain's blend;
-    "books": the price books' margin-free chance; "goals_model": the soccer goals model's), never "ai_chance", with
+    "books": the price books' margin-free chance; "books_adjusted": that chance moved by a forecast or roof change
+    since the odds, its ``adjusted`` note saying how; "goals_model": the soccer goals model's), never "ai_chance", with
     ``chance_given_no_push`` beside ``market_chance`` on a line that can push; ``edge`` is the expected result per
     unit staked at that chance (as every other tool gives it) and ``edge_vs_price`` the chance minus the price's
     implied chance, in shares (None for a leg priced at fair odds: no bookmaker's price to compare)."""
@@ -708,6 +730,7 @@ STEPS: Dict[str, Callable[[Dict[str, Any]], str]] = {
     "sports_find_events": lambda a: f"Finding {'/'.join(l.split('_')[-1].upper() for l in a.get('leagues') or [])} games…",
     "odds_get_prices": lambda a: "Checking the odds…",
     "markets_consensus": lambda a: "Checking what the markets say…",
+    "game_context": lambda a: "Checking the venue and conditions…",
     "player_get_profile": lambda a: f"Looking up {a.get('name') or 'the player'}…",
     "player_get_props": lambda a: f"Checking {a.get('name') or 'the player'}'s prop lines…",
     "news_get": lambda a: "Checking injury news…",
@@ -764,7 +787,7 @@ class Toolbox:
         self.pasted: Dict[int, Optional[Mapping[str, Any]]] = dict(pasted or {})
         self.runners: Dict[str, Callable[[Any], Tuple[Dict[str, Any], str, List[Dict[str, Any]]]]] = {
             "sports_find_events": self._events, "odds_get_prices": self._odds, "markets_consensus": self._markets,
-            "player_get_profile": self._profile,
+            "game_context": self._game_context, "player_get_profile": self._profile,
             "player_get_props": self._props, "news_get": self._news, "brain_price_legs": self._brain,
             "ticket_price": self._price, "ticket_build": self._build, "ticket_analyse": self._analyse,
             "rollover_simulate": self._rollover, "slip_propose": self._propose, "user_get_context": self._context,
@@ -938,6 +961,10 @@ class Toolbox:
                     "ai_chance_given_no_push": _no_push(ai, offer.get("push")),
                     "fair_odds": round(1 / ai, 2) if ai else None, "edge": _p(offer.get("ev")),
                 })
+                if isinstance(offer.get("adjusted"), Mapping):
+                    # A totals chance a forecast or roof change since the odds moved: by how much, and why
+                    outcomes[-1]["adjusted"] = {key: offer["adjusted"].get(key)
+                                                for key in ("applied", "unit", "reason", "before")}
         # The markets brain's blend for the game-winner outcomes (computed in code from cached sources)
         blend = (self._market_detail(data.league, str(card["id"])) or {}).get("blend") or {}
         for outcome in outcomes:
@@ -1020,6 +1047,30 @@ class Toolbox:
             ", ".join(f"{o} {p:.0%}" for o, p in (content["blend"] or {}).items()) or "no blend")
         return content, summary, []
 
+    def _game_context(self, data: OddsInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
+        """The game's venue & conditions block, compact (data/context.py's compact): read from the cache only."""
+        service = getattr(self.lab, "service", None)
+        reader = getattr(service, "context_for", None)
+        block = reader(data.league, data.event_id) if callable(reader) else None
+        if block is None or block.get("status") == "none":
+            raise ToolError("not_available", f"No venue & conditions for {data.league} games",
+                            "Say the app has no venue or weather context for this sport")
+        from ..data import context as context_mod
+        content = context_mod.compact(block)
+        home, away = self._game_names(data.league, data.event_id)
+        content["game"] = f"{away} @ {home}" if home and away else None
+        content["source"] = CONTEXT_SOURCE
+        content["note"] = CONTEXT_NOTE
+        if content.get("status") != "ready":
+            content["hint"] = ("The venue and conditions are still being worked out: say so, or try again in a "
+                               "minute; never guess them")
+            return content, f"game_context({data.event_id}): loading", []
+        venue = (content.get("venue") or {}).get("name") or "?"
+        moved = [a for a in content.get("adjustments") or [] if a.get("applied")]
+        summary = f"game_context({content['game'] or data.event_id} [{data.league}:{data.event_id}]): {venue}" + (
+            f"; adjusted total {moved[0]['applied']:+g} {moved[0].get('unit') or ''}".rstrip() if moved else "")
+        return content, summary, []
+
     def _find_player(self, name: str, league: str) -> Dict[str, Any]:
         found = self.lab.player_search(name, league)
         players = found.get("players") if isinstance(found, Mapping) else found
@@ -1087,7 +1138,7 @@ class Toolbox:
                          "ai_chance_given_no_push": _no_push(ai, leg.get("push_prob")),
                          "chance_label": leg.get("chance_label"), "fair_odds": leg.get("fair_odds"),
                          "edge": leg.get("edge"), "book_keeps": leg.get("book_cut"), "book": leg.get("book"),
-                         "started": leg.get("started") or None, "ref": ref_of(leg)})
+                         "started": leg.get("started") or None, "ref": ref_of(leg), **adjusted_fact(leg)})
         content = {"legs": trim(legs, items=MAX_LEGS), "removed": priced.get("removed") or [],
                    "odds_as_of": priced.get("odds_as_of"), "source": BRAIN_SOURCE}
         return content, "brain_price_legs: " + "; ".join(f"{l['label']} [{_ref_text(l['ref'])}]" for l in legs), []
@@ -1318,7 +1369,7 @@ class Toolbox:
     def _context(self, data: NoInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
         me = self.lab.me(self.uid) or {}
         keys = ("odds_format", "favourite_sports", "risk_tier", "budget", "reality_check_minutes", "cooloff_until",
-                "credits", "age_confirmed")
+                "credits", "age_confirmed", "units")
         content = trim({key: me.get(key) for key in keys})
         content["source"] = "The user's settings (read only)"
         return content, "user_get_context", []

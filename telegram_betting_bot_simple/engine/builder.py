@@ -102,7 +102,9 @@ UNAVAILABLE: Dict[str, Tuple[str, str]] = {
     "cards": ("Cards", "Props, corners and cards arrive in Stage 6"),
 }
 FLAGS: Tuple[str, ...] = ("disagree", "thin", "low_conf", "stale_price", "live", "model_price")
-CHANCE_SOURCES: Tuple[str, ...] = ("blend", "books", "model")
+# "adjusted": the books' margin-free chance of a totals leg moved by a forecast or roof change since the odds
+# (v3 Stage 4, data/context.py): no longer the books' own number
+CHANCE_SOURCES: Tuple[str, ...] = ("blend", "books", "model", "adjusted")
 
 MAX_LEGS = 12  # tickets.MAX_LEGS
 EXHAUSTIVE_MAX = 4  # up to this many legs every combination of the pool is tried
@@ -530,6 +532,12 @@ class Candidate:
     fair: Optional[float] = None
     push: float = 0.0
     prices: Optional[Dict[str, Decimal]] = None
+    # v3 Stage 4: a totals leg whose chance a forecast or roof change since the odds moved (data/context.py):
+    # {"applied", "reason", ...}; None otherwise
+    adjusted: Optional[Dict[str, Any]] = None
+    # The Why lines in each unit system ({"metric": [...], "imperial": [...]}) when their words differ (a venue's
+    # wind or temperature): ``why`` is the league's "auto" one; the app shows the person's
+    why_units: Optional[Dict[str, List[str]]] = None
 
     def __post_init__(self) -> None:
         ref = dict(self.ref or {})
@@ -556,6 +564,9 @@ class Candidate:
             raise ValueError(f"chance_source must be one of {', '.join(CHANCE_SOURCES)}")
         self.flags = {str(flag) for flag in (self.flags or ())}
         self.why = [str(line) for line in (self.why or ()) if line]
+        if self.why_units:
+            self.why_units = {str(name): [str(line) for line in lines or () if line]
+                              for name, lines in self.why_units.items()} or None
         self.teams = (str(self.teams[0]), str(self.teams[1]))
         self.price_age_s = max(0, int(self.price_age_s or 0))
         if self.prices:
@@ -1348,7 +1359,7 @@ def _ticket_leg(leg: _Leg) -> Any:
     return TicketLeg(key=cand.key, league=cand.league, event_id=cand.ref["id"], market=cand.market,
                      side=cand.side, point=cand.point, price=leg.price, label=cand.label, game=cand.game,
                      start=cand.start, ai_prob=cand.chance, market_prob=cand.fair, push_prob=cand.push,
-                     book=leg.book, group=cand.game_key)
+                     book=leg.book, group=cand.game_key, adjusted=cand.adjusted)
 
 
 def _leg_risk(cand: Candidate) -> str:
@@ -1379,7 +1390,15 @@ def _swap_view(leg: _Leg, odds: float, joint: float, score: float, base_score: f
             "book": leg.book, "chance": round(cand.chance, 4), "chance_source": cand.chance_source,
             "edge": _round(leg.edge), "age": age_text(cand.price_age_s), "flags": sorted(cand.flags),
             "why": cand.why[:3], "risk": _leg_risk(cand), "odds": round(odds, 2), "joint": round(joint, 4),
-            "score_change": round(score - base_score, 4)}
+            "score_change": round(score - base_score, 4), **({"adjusted": dict(cand.adjusted)} if cand.adjusted else {}),
+            **_why_units(cand)}
+
+
+def _why_units(cand: Candidate) -> Dict[str, Any]:
+    """{"why_units": {"metric": [...], "imperial": [...]}} (the first 3 lines each) when the candidate has them."""
+    if not cand.why_units:
+        return {}
+    return {"why_units": {name: lines[:3] for name, lines in cand.why_units.items()}}
 
 
 def _swaps(legs: Tuple[_Leg, ...], index: int, passing: Sequence[_Leg], taken: Set[str], ctx: _Context,
@@ -1445,7 +1464,8 @@ def _ticket(rank: int, score: float, legs: Tuple[_Leg, ...], ctx: _Context, labe
                       "flags": sorted(cand.flags), "teams": list(cand.teams), "why": cand.why[:3],
                       "risk": _leg_risk(cand), "model_price": "model_price" in cand.flags,
                       "inputs": {"chance": cand.chance, "fair": cand.fair, "push": cand.push},
-                      "swaps": _swaps(legs, i, passing, taken, ctx, score)})
+                      "swaps": _swaps(legs, i, passing, taken, ctx, score),
+                      **({"adjusted": dict(cand.adjusted)} if cand.adjusted else {}), **_why_units(cand)})
     return {
         **priced,
         "legs": views,
@@ -1545,7 +1565,7 @@ def restake(result: Mapping[str, Any], stake: Any, now: Optional[datetime.dateti
                                   game=v["game"], start=v["start"], ai_prob=exact.get("chance", v["ai_prob"]),
                                   market_prob=exact.get("fair", v["market_prob"]),
                                   push_prob=exact.get("push", v["push_prob"]) or 0.0, book=v["book"],
-                                  group=v["group"]))
+                                  group=v["group"], adjusted=v.get("adjusted")))
         priced = price_ticket(legs, ticket["type"], stake, now=now)
         merged = {**ticket, **{k: v for k, v in priced.items() if k != "legs"}}
         merged["legs"] = [{**old, **{k: v for k, v in new.items() if k != "edge"}, "ev": new.get("edge")}

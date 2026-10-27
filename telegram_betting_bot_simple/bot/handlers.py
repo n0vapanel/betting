@@ -161,6 +161,26 @@ def markets_line(card: Dict[str, Any]) -> Optional[str]:
     return text
 
 
+def context_line(card: Dict[str, Any]) -> Optional[str]:
+    """The game's one venue & conditions line (HTML), e.g. "🏟 Coors Field · 5,184 ft · 16 mph out to RF · 81°F":
+    imperial units for US leagues, metric otherwise; with "· adjusted" when a forecast or roof change since the
+    odds moved the totals ("· totals adjusted"), and the credit Open-Meteo's terms (CC BY 4.0) ask for wherever its
+    forecast is shown ("· weather: Open-Meteo", linked). None without a ready context block."""
+    from ..data.context import ATTRIBUTION, total_adjustment, units_for, venue_line
+    block = card.get("context")
+    units = units_for(card.get("league"))
+    text = venue_line(block, units)
+    if not text:
+        return None
+    if total_adjustment(block):
+        text += " · totals adjusted"
+    line = f"🏟 {html.escape(text)}"
+    weather = block.get("weather") if isinstance(block.get("weather"), dict) else {}
+    if weather.get("source") == "Open-Meteo" and ((block.get("line") or {}).get(units)):
+        line += f' · weather: <a href="{html.escape(ATTRIBUTION["url"], quote=True)}">Open-Meteo</a>'
+    return line
+
+
 def game_card_text(card: Dict[str, Any], odds_as_of: Optional[str]) -> str:
     """A game's prediction, odds context, injuries and projected leaders (HTML)."""
     league = card.get("league", "")
@@ -204,6 +224,9 @@ def game_card_text(card: Dict[str, Any], odds_as_of: Optional[str]) -> str:
     say = markets_line(card)
     if say:
         lines.append(say)
+    where = context_line(card)
+    if where:
+        lines.append(where)
 
     analysts = [a for a in (card.get("analysts") or {}).get("analysts", []) if a.get("forecast")]
     if analysts:

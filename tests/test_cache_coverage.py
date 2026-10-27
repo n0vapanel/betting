@@ -39,6 +39,8 @@ AUDITED = {
     "data/utils.py": "fetch_json through the cache (The Odds API's and NewsAPI's legacy clients use it)",
     "data/markets/common.py": "Polymarket, Kalshi and the rating sites through the Keeper (a TTLCache)",
     "ai/deepseek.py": "AI: allowlisted (chats and forecasts are never cached across people)",
+    "data/weather.py": "Open-Meteo's forecast and geocoder through the cache (kinds weather, geocode)",
+    "data/mlb_stats.py": "MLB StatsAPI's schedule through the cache (kind mlb_schedule)",
 }
 AI_FILES = {"ai/claude.py", "ai/explain.py", "ai/assistant.py", "ai/deepseek.py"}  # the anthropic SDK and DeepSeek
 TRANSPORT = {"main.py"}  # python-telegram-bot: the bot's own messaging, not a data fetch (also bot/*)
@@ -91,6 +93,13 @@ ANSWERS = [
     (r"gamma-api\.polymarket\.com", []),
     (r"barttorvik\.com", []),
     (r"newsapi\.org", {"articles": []}),
+    (r"api\.open-meteo\.com/v1/forecast", {"latitude": 39.74, "longitude": -104.99, "elevation": 1600.0, "hourly": {
+        "time": ["2026-10-27T00:00", "2026-10-27T01:00"], "temperature_2m": [10.0, 9.5],
+        "precipitation_probability": [0, 5], "precipitation": [0.0, 0.0], "wind_speed_10m": [12.0, 14.0],
+        "wind_direction_10m": [200, 210], "wind_gusts_10m": [25.0, 27.0]}}),
+    (r"geocoding-api\.open-meteo\.com", {"results": [{"name": "Denver", "latitude": 39.74, "longitude": -104.98,
+                                                       "country_code": "US", "elevation": 1609.0}]}),
+    (r"statsapi\.mlb\.com", {"dates": []}),
 ]
 
 
@@ -198,6 +207,8 @@ FETCHES = {
     "Polymarket": {"events", "fetch_moneylines", "fetch_lines"},
     "Kalshi": {"events", "fetch_games", "fetch_lines", "fetch_series", "request"},
     "Ratings": {"power", "espn_predictor", "game_prob"},
+    "WeatherClient": {"forecast", "forecasts", "geocode"},
+    "MlbStats": {"games"},
 }
 NO_FETCH = {
     "EspnClient": {"event_state", "game_state", "board_state"},
@@ -208,6 +219,8 @@ NO_FETCH = {
     "Polymarket": {"leagues", "covers", "cached_events"},
     "Kalshi": {"leagues", "covers", "cached_events", "resting"},
     "Ratings": {"cached_power"},
+    "WeatherClient": {"at", "attribution", "calls_today"},
+    "MlbStats": {"day_state"},
 }
 
 
@@ -215,9 +228,12 @@ def _clients():
     from telegram_betting_bot_simple.data.apis import ApiSportsClient
     from telegram_betting_bot_simple.data.espn_players import PlayerData
     from telegram_betting_bot_simple.data.markets import Kalshi, Polymarket, Ratings
+    from telegram_betting_bot_simple.data.mlb_stats import MlbStats
     from telegram_betting_bot_simple.data.odds_service import OddsService
+    from telegram_betting_bot_simple.data.weather import WeatherClient
     return {"EspnClient": EspnClient, "PlayerData": PlayerData, "OddsService": OddsService,
-            "ApiSportsClient": ApiSportsClient, "Polymarket": Polymarket, "Kalshi": Kalshi, "Ratings": Ratings}
+            "ApiSportsClient": ApiSportsClient, "Polymarket": Polymarket, "Kalshi": Kalshi, "Ratings": Ratings,
+            "WeatherClient": WeatherClient, "MlbStats": MlbStats}
 
 
 def test_every_public_method_of_an_audited_client_is_classified() -> None:
@@ -283,6 +299,16 @@ def _drive_everything(cache: TTLCache) -> None:
         ratings.power(league)
     ratings.espn_predictor(nba, "405")
 
+    # Stage 4's context sources: Open-Meteo (a forecast, the same with its fetch times, a geocode) and MLB StatsAPI
+    from telegram_betting_bot_simple.data.mlb_stats import MlbStats
+    from telegram_betting_bot_simple.data.weather import WeatherClient
+    weather = WeatherClient(cache)
+    soon = espn_client.datetime.datetime.now(espn_client.datetime.timezone.utc)
+    weather.forecast([("coors-field", 39.7560, -104.9941)], soon, soon + espn_client.datetime.timedelta(hours=4))
+    weather.forecasts([("ball-arena", 39.7487, -105.0077)], soon, soon + espn_client.datetime.timedelta(hours=4))
+    weather.geocode("Denver", "US")
+    MlbStats(cache).games(DAY)
+
     try:
         DeepSeekAnalyst("deepseek-key-not-real").analyze("a dossier")
     except Exception:
@@ -296,7 +322,8 @@ def test_every_fetch_goes_through_the_cache(recorder: Recorder) -> None:
     assert {"site.api.espn.com", "site.web.api.espn.com", "sports.core.api.espn.com", "api.the-odds-api.com",
             "v3.football.api-sports.io", "example.test", "newsapi.org", "gamma-api.polymarket.com",
             "api.elections.kalshi.com", "barttorvik.com", "www.tennisabstract.com", "www.eloratings.net",
-            "api.deepseek.com"} <= hosts, hosts
+            "api.deepseek.com", "api.open-meteo.com", "geocoding-api.open-meteo.com",
+            "statsapi.mlb.com"} <= hosts, hosts
     assert recorder.outside() == [], "fetched outside the cache"
     ai = [call for call in recorder.calls if call.site.split(":")[0] in AI_FILES]
     assert ai and all(call.kind is None for call in ai)  # the AI is never cached

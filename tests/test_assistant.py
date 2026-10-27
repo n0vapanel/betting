@@ -235,7 +235,7 @@ def test_a_build_runs_the_tool_loop_and_cards_come_from_the_tool_results(store, 
     # Toolbox.run validates every input instead
     assert all("strict" not in tool and tool["input_schema"]["additionalProperties"] is False
                for tool in first["tools"])
-    assert len(first["tools"]) == 14  # the twelve tools, pasted_slip_analyse and markets_consensus
+    assert len(first["tools"]) == 15  # the twelve tools, pasted_slip_analyse, markets_consensus and game_context
     result = second["messages"][-1]["content"][0]
     assert result["type"] == "tool_result" and result["tool_use_id"] == "toolu_1" and not result["is_error"]
     assert "ceiling_one_in" in result["content"]
@@ -1020,8 +1020,9 @@ def test_the_assistant_s_leagues_are_its_own_list_not_every_scoreboard() -> None
 
     assert set(POPULAR_LEAGUES) <= set(LEAGUE_KEYS) and len(LEAGUE_KEYS) == 15
     assert "soccer_efl_champ" in LEAGUES and "soccer_efl_champ" not in LEAGUE_KEYS
-    # About 16.6 KB with Stage 3's Builder controls on ticket_build (15.9 KB before); 27 KB with every league
-    assert len(json.dumps(TOOLS)) < 17_000
+    # About 16.6 KB with Stage 3's Builder controls on ticket_build (15.9 KB before), 17.7 KB with Stage 4's
+    # game_context; 27 KB with every league
+    assert len(json.dumps(TOOLS)) < 18_000
     assert "soccer_efl_champ" not in assistant_module.ROUTER_PROMPT
 
 

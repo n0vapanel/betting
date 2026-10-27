@@ -112,7 +112,7 @@ function legNotes(notes) {
 }
 
 // A Builder leg's chance is the brain's: "Markets say" (the blend), the books' margin-free chance or the goals model's
-const BUILDER_CHANCE = { blend: "Markets say", books: "Books", model: "Goals model" };
+const BUILDER_CHANCE = { blend: "Markets say", books: "Books", model: "Goals model", adjusted: "Adj" };
 
 function legsHtml(ticket, notesByIndex, builder = false) {
   const weakest = (ticket.legs || []).length > 1 ? ticket.weakest_leg : null;

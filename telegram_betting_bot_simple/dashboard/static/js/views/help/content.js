@@ -1,5 +1,5 @@
-// Help's words: the glossary the Help tab shows, and the guides (Start here, How the AI decides,
-// Rollover explained, Responsible play, FAQ).
+// Help's words: the glossary the Help tab shows, and the guides (Start here, How the AI decides, The Builder,
+// Venue & conditions, Rollover explained, Responsible play, FAQ).
 //
 // The glossary builds on ui.js's GLOSSARY, which the ⓘ sheets on every screen read, and adds what a
 // help page needs on top: a worked example step by step, the other names people search for ("vig",
@@ -25,6 +25,7 @@ export const GROUPS = [
   { key: "money", title: "Money, staking and plans" },
   { key: "ai", title: "The AI and its record" },
   { key: "builder", title: "The Builder" },
+  { key: "context", title: "Venue & conditions" },
 ];
 
 // Terms the ⓘ sheets don't have (yet): same shape as GLOSSARY's entries
@@ -373,6 +374,15 @@ const EXTRAS = {
       "Fair odds are 1 ÷ 0.55, about 1.81. A bookmaker paying less than that is charging its margin."],
     related: ["fair_odds", "market_chance", "moneyline"], topic: "builder", see: "#/today", seeLabel: "See it on a soccer game",
   },
+  explains_vs_moves: {
+    group: "context", aka: ["attribution", "adjustment", "why the line is here", "what moves it"],
+    aliases: ["explains", "moves", "attribution", "adjustment", "adjusted", "adj", "waterfall", "why the line is here", "what moves it", "weather", "wind", "forecast", "roof", "venue", "conditions", "context"],
+    worked: ["An NFL total of 44.5 was priced when the forecast said 8 mph of wind and −2°C: the weather then explained about −1.0 point of it.",
+      "Two hours later the forecast says 19 mph: the weather now explains about −6.8 points. The change since the odds is −6.8 − (−1.0) = −5.8.",
+      "Half of it counts (weight 0.5): −2.9. The NFL total's cap is ±2.0, so −2.0 is applied.",
+      "The over's chance moves from 50% to about 44%, and every totals leg says why. The margin, home field and the rest of \"Why the line is here\" move nothing."],
+    related: ["markets_say", "market_chance", "total"], topic: "conditions", see: "#/today", seeLabel: "See it on a game",
+  },
   same_game: {
     group: "bets", aka: ["same-game parlay", "bet builder"], aliases: ["same game parlay", "sgp", "correlated", "bet builder", "same-game"],
     worked: ["Thunder −6.5 and Over 224.5 in the same game are linked: a blowout makes both more likely.",
@@ -458,6 +468,8 @@ export const TOPICS = [
     words: "ai brain claude model analysts trust numbers decide explain how" },
   { key: "builder", title: "The Builder", blurb: "Presets, every control, and why each leg", iconName: "build",
     words: "builder build presets safe risky crazy custom controls target odds tolerance legs markets near miss swap why tickets" },
+  { key: "conditions", title: "Venue & conditions", blurb: "Weather, travel and venues: what explains the line", iconName: "stadium",
+    words: "venue stadium arena park weather wind rain cold heat temperature altitude elevation roof dome surface capacity park factors travel rest back-to-back b2b time zone jet lag conditions adjustment adjusted explains moves waterfall units metric imperial open-meteo" },
   { key: "rollover", title: "Rollover explained", blurb: "Why long runs almost always fail", iconName: "trend",
     words: "rollover roll over plan days ladder bank half flat classic chance finish" },
   { key: "responsible", title: "Responsible play", blurb: "Limits, breaks and free help", iconName: "lifebuoy",
@@ -512,6 +524,34 @@ export const STRATEGIES = [
   { title: "Roll, but bank half of each day's profit", market: ["22.1%", "0", "77.9%"], edge: ["28.1%", "0.50", "71.9%"] },
   { title: "Pot and ladder: roll a pot of 10% of the start for at most 2 wins, bank it, start a new pot; stop below half the start", market: ["30.2%", "0.40", "55.6%"], edge: ["53.4%", "1.10", "34.1%"] },
   { title: "Flat 5% of the start each day", market: ["30.4%", "0.90", "9.3%"], edge: ["55.9%", "1.10", "2.4%"] },
+];
+
+// "Venue & conditions": the caps on what an adjustment can move, and the starting effect sizes in plain words
+// (engine/context.py's constants, with their sources). Design choices and starting points, refitted from the
+// context log once it has enough graded games.
+export const CONTEXT_CAPS = [
+  ["NFL and college football total", "±2.0 points"],
+  ["NFL and college football side", "±1.0 point"],
+  ["MLB total", "±0.4 runs"],
+  ["NBA, WNBA and college basketball total", "±1.5 points"],
+  ["NHL total", "±0.15 goals"],
+  ["Soccer total", "±0.15 goals a team (±0.30 for the match)"],
+  ["Win chance", "±2.5 points"],
+];
+
+export const CONTEXT_EFFECTS = [
+  { what: "Home field", size: "This season's home win rate from ESPN's standings, pulled toward the usual rate with 400 games' weight (NFL 53.9%, NBA 55.4%, NHL 52.2%, MLB 52.9%, WNBA 55%, college football 57%, college basketball 60%), turned into points through how widely results spread. Soccer: home 45% and draw 27% to start, as goal difference.", source: "ESPN standings, home records", sure: "Normal" },
+  { what: "Altitude", size: "NBA in Denver: about +2.6 points (Denver's home edge is 8.6 points per 100 possessions against 6.0 elsewhere); Utah scaled by its height. Soccer: about 0.25 goals per 1,000 m of height difference above 1,500 m (half a study's slope, as team quality muddies it). NFL in Denver: +0.5 points.", source: "Sportico; BMJ 2007 (1,460 South American matches)", sure: "Normal for the NBA in Denver; small, noisy otherwise" },
+  { what: "No rest", size: "NBA back-to-back: −1.25 points. NHL team on no rest against a rested one: −5.8 points of win chance (45.0% against 50.8%).", source: "The app's NBA model; nhlscraper's back-to-back study (NHL)", sure: "Normal" },
+  { what: "Flying east", size: "Two time zones or more east within 3 days: MLB home team −3.5 points of win chance; NBA −1.3 points.", source: "PNAS 2017 (MLB); Leota et al. (NBA)", sure: "Small, noisy, untested: no study checks whether closing prices already hold it" },
+  { what: "NFL wind", size: "Nothing at 8 mph or less, −2.2 points at 12 mph, −3.8 points at 16 mph or more, in a straight line between.", source: "NFL games since 2000 (CBS Sports): 44.3 points at 0–9 mph, 42.1 at 10–14, 40.5 at 15+", sure: "Normal" },
+  { what: "NFL cold", size: "−1.0 point at 32°F (0°C) or below; with 15 mph of wind or more, 2.0 points more.", source: "NFL games since 2000 (CBS Sports)", sure: "Normal" },
+  { what: "NFL rain", size: "−1.0 point with a 60% chance or more and 0.5 mm an hour or more at kick-off.", source: "Sharp Football Analysis (unders 57.4% in measurable rain)", sure: "Small, noisy" },
+  { what: "MLB temperature", size: "+0.15 runs per 10°F above 70°F (21°C), and less below it: fly balls carry about 3 feet further per 10°F.", source: "Smithsonian", sure: "Small, noisy" },
+  { what: "MLB wind", size: "±0.08 runs per mph of wind blowing out (+) or in (−) above 5 mph, from the park's direction and the forecast, or MLB's own \"Out To RF\". At most ±1 run.", source: "FanGraphs (Wrigley Field: 6.0 runs a game blowing out, 4.1 blowing in)", sure: "Small, noisy" },
+  { what: "MLB park", size: "Baseball Savant's 3-year runs index: (index − 100) ÷ 100 × the league's average total (Coors Field high, T-Mobile Park low). Home runs are shown, not added again.", source: "Baseball Savant park factors", sure: "Normal" },
+  { what: "Soccer weather", size: "Total goals ×1.068 above 22°C, ×0.97 below 6°C, ×1.014 in rain.", source: "Mišák 2025", sure: "Small, noisy" },
+  { what: "Dome or closed roof", size: "The weather counts for nothing, and the panel says \"Roof closed\".", source: "", sure: "" },
 ];
 
 export const HELPLINES = [

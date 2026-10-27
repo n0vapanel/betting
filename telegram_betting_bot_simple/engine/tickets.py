@@ -44,7 +44,7 @@ import math
 import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from .bets import whelan_max_legs
 from .odds_math import decimal_to_american, format_american
@@ -120,6 +120,9 @@ class TicketLeg:
     push_prob: float = 0.0
     book: Optional[str] = None
     group: Optional[str] = None  # correlation group: legs sharing one are from the same game
+    # v3 Stage 4: a totals leg whose ai_prob a forecast or roof change since the odds moved (data/context.py's
+    # adjusted note: {applied, reason, before, ...}); the gap to the market is then that adjustment, not the AI's
+    adjusted: Optional[Mapping[str, Any]] = None
 
     def __post_init__(self) -> None:
         # Floats arrive from JSON; _decimal's str() keeps 1.91 as exactly 1.91 rather than its binary neighbour
@@ -427,6 +430,7 @@ def _leg_view(index: int, leg: TicketLeg, started: bool) -> Dict[str, Any]:
         # Fair odds and edge count a push as money back: with no push they are 1/p and p * odds - 1
         "fair_odds": round(no_push / p, 2) if p else None,
         "chance_label": chance_label(p if p is not None else leg.market_prob),
+        **({"adjusted": dict(leg.adjusted)} if leg.adjusted else {}),
         "edge": _chance(p * float(leg.price) + leg.push_prob - 1) if p is not None else None,
         "book_cut": _chance(1 - leg.market_prob * float(leg.price)) if leg.market_prob is not None else None,
         "started": started,
@@ -497,6 +501,20 @@ def _warnings(legs: Sequence[TicketLeg], ticket_type: str, sizes: Sequence[int],
         elif leg.ai_prob is None:
             left = "only the market's view is shown." if market_view else "the AI's view of the ticket isn't shown."
             warnings.append(f"No AI chance for {leg.label}: {left}")
+        elif leg.adjusted:
+            # The chance moved for a forecast or roof change since the odds (no injury news behind that): the AI gap
+            # is checked on the chance before the adjustment, and the move is said for what it is
+            before = leg.adjusted.get("before") if isinstance(leg.adjusted, Mapping) else None
+            before = float(before) if isinstance(before, (int, float)) and 0 <= before <= 1 else None
+            if (before is not None and leg.market_prob is not None
+                    and abs(ai_given_no_push(before, leg.push_prob) - leg.market_prob) > AI_GAP):
+                warnings.append(f"The AI is far from the market on {leg.label}: check the injury news.")
+            if before is None:
+                warnings.append(f"{leg.label}: chance adjusted for a forecast or roof change since the odds "
+                                "(What moves it).")
+            elif round(before * 100) != round(leg.ai_prob * 100):
+                warnings.append(f"{leg.label}: chance moved {before:.0%} → {leg.ai_prob:.0%} for a forecast or roof "
+                                "change since the odds (What moves it).")
         elif (leg.market_prob is not None
               and abs(ai_given_no_push(leg.ai_prob, leg.push_prob) - leg.market_prob) > AI_GAP):
             warnings.append(f"The AI is far from the market on {leg.label}: check the injury news.")

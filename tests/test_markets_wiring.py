@@ -768,7 +768,7 @@ def test_the_markets_consensus_tool_and_the_blend_in_odds_get_prices(store) -> N
     from tests.test_assistant import FakeLab
     tool = next(t for t in TOOLS if t["name"] == "markets_consensus")
     assert "strict" not in tool and tool["input_schema"]["required"] == ["league", "event_id"]
-    assert len(TOOLS) == 14
+    assert len(TOOLS) == 15  # Stage 4 added game_context
     # A board saved a minute ago by the wall clock, which markets_detail reads (see the game route's test)
     service = DashboardService(BoardOdds(two_games(), store, fetched_at=time.time() - 60), NoEspn(), NY, store=store)
     box = Toolbox(FakeLab(service, store), "tg:42", NY)

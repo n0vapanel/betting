@@ -13,6 +13,15 @@ league's saved odds board (every price book's price at the consensus line),
 flags) and the NBA model's cached lines for "why". Soccer games whose board
 has the 1X2 and over/under 2.5 add the goals model's markets (engine/soccer.py)
 at fair odds, and the game route carries that model as ``soccer``.
+
+Venue & conditions (v3 Stage 4, data/context.py): the game route carries the
+game's context block as ``context`` (read from the shared cache only), and
+when a forecast or roof change since the odds adjusts a game's total, its
+totals chances move by engine.context.adjusted_over in every place the
+brain's chance is used (the league's cards, the game page, the Builder's legs
+and so the slip and odds_get_prices), each such outcome carrying
+``adjusted``: {applied, reason, ...}. The Builder's Why gains the top factor
+of the line's attribution. context_log is graded with everything else.
 """
 
 from __future__ import annotations
@@ -32,6 +41,7 @@ from zoneinfo import ZoneInfo
 from ..ai.desk import AnalystDesk
 from ..ai.forecast import AnalystError
 from ..data.cache import TTLCache, freshest, ttl_for
+from ..data import context as context_mod
 from ..data import slate as slate_mod
 from ..data.espn_client import ESPN_DAY_TZ, LEAGUES as ESPN_LEAGUES, OUT_STATUSES, EspnClient
 from ..data.leagues import SPORTS, pick_leagues
@@ -303,6 +313,9 @@ class DashboardService:
         # The all-sports slate (data/slate.py), in the dashboard process: its markets brain's detail for each game
         # is what the game route shows. The bot's process has none and reads the dashboard's consensus_log instead
         self.slate: Any = None
+        # Venue & conditions (data/context.py's ContextService, v3 Stage 4): the game route's "context" block and the
+        # totals' adjustment, read from the shared cache only (the dashboard's slate worker warms it)
+        self._context: Any = None
         self._markets_record: Optional[Tuple[Any, Dict[str, Any]]] = None  # (the store's graded mark, the record)
 
     # --- menus -----------------------------------------------------------
@@ -375,6 +388,7 @@ class DashboardService:
                                           _partial, stale=stale, kind="game_card")
         card = _started_now(copy.deepcopy(payload["card"]))
         card["consensus"] = self._consensus(league, event_id, game, payload.get("model"), state)
+        card["context"] = self.context_for(league, event_id)
         # Soccer's goals model, from the same 1X2 the builder uses (the blend, else the books'): its own computed entry
         blend = ((card["consensus"] or {}).get("blend") or {}).get("p") if isinstance(card["consensus"], dict) else None
         soccer = self.soccer_model(league, game, blend if isinstance(blend, dict) and "draw" in blend else None)
@@ -453,6 +467,15 @@ class DashboardService:
         """Drop a game's computed entries (its card, parts and "Markets say") here and in the shared table, and with
         ``board`` the league's game cards too: the slate calls this when it sees the game's status or score change,
         so the next view rebuilds once for everyone. Returns how many entries this process dropped."""
+        context_id = str(odds_id) if odds_id else (f"espn:{espn_id}" if espn_id else None)
+        if self.context is not None and context_id:
+            # The game's venue & conditions block goes with its other entries (rebuilt at the context worker's next
+            # round; this process's last copy is served meanwhile)
+            self.cache.invalidate(context_mod.context_key(league, context_id))
+            try:
+                self.context.invalidate(league, context_id)
+            except Exception:
+                logging.exception("Couldn't queue the context of %s", context_id)
         if not odds_id:
             return 0  # a game the odds feed doesn't list has no card here (game() needs its board)
         dropped = 0
@@ -463,6 +486,107 @@ class DashboardService:
         if board:
             self.cache.invalidate(("games", league))
         return dropped
+
+    # --- venue & conditions (v3 Stage 4: data/context.py) ----------------------------------------------------
+
+    @property
+    def context(self) -> Any:
+        """The ContextService (or None). Handed one, the service asks to hear of every change to a game's adjustment
+        of its total (``on_adjust``), so the cards holding the totals' chances are rebuilt at once."""
+        return self._context
+
+    @context.setter
+    def context(self, value: Any) -> None:
+        self._context = value
+        if value is not None and hasattr(value, "on_adjust") and getattr(value, "on_adjust", None) is None:
+            value.on_adjust = self.adjustment_changed
+
+    def adjustment_changed(self, league: str, odds_id: str) -> int:
+        """A game's adjustment to its total appeared, changed or went (ContextService.on_adjust): drop its card and
+        parts and the league's cards here and in the shared table, so the game page, odds_get_prices and the slip
+        price its totals with the new chance at the next view (the Builder's legs follow ``context_mark``). Returns
+        how many entries this process dropped."""
+        dropped = 0
+        drop_prefix = getattr(self.cache, "invalidate_prefix", None)
+        if callable(drop_prefix):
+            dropped += int(drop_prefix(("game_card", league, str(odds_id)), ("game_parts", league, str(odds_id)))
+                           or 0)
+        self.cache.invalidate(("games", league))
+        return dropped
+
+    def context_mark(self) -> str:
+        """A short signature of every game's adjustment to its total ("" without any): part of the keys of the
+        entries that hold many games' totals chances (the Builder's legs and results)."""
+        reader = getattr(self.context, "adjust_mark", None)
+        try:
+            return str(reader()) if callable(reader) else ""
+        except Exception:
+            return ""
+
+    def context_for(self, league: str, event_id: str) -> Optional[Dict[str, Any]]:
+        """The game's context block (venue, conditions, rest and travel, "Why the line is here", "What moves it"),
+        {"status": "loading"} while the worker hasn't built it (the game is queued), or None for a sport with no
+        context or without the context service. Read from the shared cache only: never a fetch."""
+        if self.context is None or context_mod.engine.sport_of(league) is None:
+            return None
+        try:
+            return self.context.for_game(league, str(event_id))
+        except Exception:
+            logging.exception("Couldn't read the context of %s", event_id)
+            return None
+
+    def total_adjustment(self, league: str, event_id: Any) -> Optional[Dict[str, Any]]:
+        """The adjustment to the game's total that moves the brain's chance of its totals legs (a forecast or roof
+        change since the odds), or None. Read-only, from the cache."""
+        if self.context is None or not event_id:
+            return None
+        try:
+            return context_mod.total_adjustment(self.context.held(league, str(event_id)))
+        except Exception:
+            logging.exception("Couldn't read the adjustment of %s", event_id)
+            return None
+
+    def _context_block(self, league: str, event_id: Any) -> Optional[Mapping[str, Any]]:
+        if self.context is None or not event_id:
+            return None
+        try:
+            return self.context.held(league, str(event_id))
+        except Exception:
+            return None
+
+    def _grade_context(self, cutoff: str, give_up: str) -> int:
+        """Grade context_log rows of finished games: the over or under, and each chance's Brier score."""
+        if self.store is None or not hasattr(self.store, "context_rows"):
+            return 0
+        graded = 0
+        for row in self.store.context_rows(status="pending", started_before=cutoff):
+            try:
+                if row["league"] not in ESPN_LEAGUES:
+                    self.store.grade_context(row["league"], row["game_key"], "void", None,
+                                             {"reason": "no game result here"})
+                    continue
+                final = self.final(row)
+                if final["state"] == "pending":
+                    if row["start"] < give_up:
+                        self.store.grade_context(row["league"], row["game_key"], "void", None, {"reason": "no result"})
+                    continue
+                if final["state"] != "final":
+                    self.store.grade_context(row["league"], row["game_key"], "void", None, {"reason": final["state"]})
+                    continue
+                status, outcome, result = context_mod.grade_row(row, final.get("home"), final.get("away"))
+                self.store.grade_context(row["league"], row["game_key"], status, outcome, result)
+                graded += 1
+            except Exception:
+                logging.exception("Couldn't grade the context of %s", row.get("game_key"))
+        return graded
+
+    def context_record(self) -> Dict[str, Any]:
+        """GET /api/record/context: {games, graded, brier_before, brier_after, adjusted_games} (and ``adjusted``: the
+        graded games an adjustment moved, scored before and after). From the store; nothing is fetched."""
+        if self.store is None or not hasattr(self.store, "context_record"):
+            return {"games": 0, "graded": 0, "brier_before": None, "brier_after": None, "adjusted_games": 0,
+                    "adjusted": {"graded": 0, "brier_before": None, "brier_after": None}}
+        return self.store.context_record()
 
     def _explain(self, card: Dict[str, Any], info: Dict[str, Any]) -> None:
         """The game route's typed factors (engine/factors.py): each of the prediction's numbers as a labelled
@@ -572,7 +696,8 @@ class DashboardService:
             "live": start <= datetime.datetime.now(datetime.timezone.utc),
             "home": game["home"],
             "away": game["away"],
-            "markets": self._market_view(game, summary, prediction),
+            "markets": self._market_view(game, summary, prediction, league,
+                                         self.total_adjustment(league, game["id"])),
             "prediction": self._prediction_view(game, prediction, info) if prediction else None,
             "espn_home_win": info.get("espn_home_win"),
             "injuries": info.get("injury_names", {}),
@@ -638,7 +763,11 @@ class DashboardService:
         )
         return info
 
-    def _market_view(self, game: Dict[str, Any], summary: Dict[str, Any], prediction: Optional[nba_model.GamePrediction]) -> Dict[str, Any]:
+    def _market_view(self, game: Dict[str, Any], summary: Dict[str, Any], prediction: Optional[nba_model.GamePrediction],
+                     league: Optional[str] = None, adjustment: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+        """Each outcome's best price, the books' margin-free chance and the brain's chance ("ai"). With ``adjustment``
+        (a forecast or roof change since the odds, data/context.py) the totals' chances move by
+        engine.context.adjusted_over and carry ``adjusted``: {applied, reason, before}."""
         view: Dict[str, Any] = {}
         for market, sides in summary.items():
             view[market] = {}
@@ -646,6 +775,12 @@ class DashboardService:
                 chance = prediction.probability(market, side, offer["point"]) if prediction else offer["fair"]
                 # A push hands the stake back, so it counts in expected value but not as a win
                 push = prediction.push_probability(market, side, offer["point"]) if prediction else 0.0
+                moved = None
+                if adjustment and market == "totals" and league and chance is not None and not push:
+                    after = context_mod.adjusted_chance(league, adjustment, side, offer["point"], chance)
+                    if after is not None and after != chance:
+                        moved = {**context_mod.adjusted_note(adjustment), "before": round(chance, 4)}
+                        chance = after
                 view[market][side] = {
                     "price": offer["price"],
                     "american": format_american(decimal_to_american(offer["price"])) if offer["price"] > 1 else None,
@@ -658,6 +793,8 @@ class DashboardService:
                     "ev": chance * offer["price"] + push - 1 if chance is not None else None,
                     "label": outcome_label(game, market, side, offer["point"]),
                 }
+                if moved:
+                    view[market][side]["adjusted"] = moved
         return view
 
     def _prediction_view(self, game: Dict[str, Any], prediction: nba_model.GamePrediction, info: Dict[str, Any]) -> Dict[str, Any]:
@@ -931,6 +1068,7 @@ class DashboardService:
             except Exception:
                 logging.exception("Couldn't grade the AI's %s ticket for %s", row["tier"], row["day"])
         graded += self._grade_consensus(cutoff, give_up)
+        graded += self._grade_context(cutoff, give_up)
         if self.lab is not None:
             graded += self.lab.grade_due(cutoff, give_up)  # saved bets, then the plan days they belong to
         if self.analysts:
@@ -1239,7 +1377,12 @@ class DashboardService:
                        one_x_two: Optional[Mapping[str, Any]] = None) -> Optional[Tuple[Dict[str, float], Dict[str, Any]]]:
         """(inputs, soccer.derive's result) for a soccer game whose saved board has the 1X2 and over/under 2.5, else
         None. A computed entry (kind "soccer_model") keyed by the game and its inputs, so the game route, the builder
-        and both processes fit it once per board. ``one_x_two``: the blend (default: the slate's, when it has one)."""
+        and both processes fit it once per board. ``one_x_two``: the blend (default: the slate's, when it has one).
+
+        When a forecast or roof change since the odds adjusts the match total (data/context.py), the model is fitted
+        to the over 2.5 chance that adjustment gives (``inputs["over_2_5"]``, with the books' own as
+        ``"over_2_5_before"``), so its rates, team totals and both-teams-to-score follow the same total as the
+        board's totals legs; the adjusted chance is part of the entry's key."""
         if not league.startswith("soccer_") or not game or not game.get("id"):
             return None
         if one_x_two is None:
@@ -1247,6 +1390,11 @@ class DashboardService:
         inputs = soccer_inputs(game, one_x_two)
         if inputs is None:
             return None
+        adjustment = self.total_adjustment(league, game["id"])
+        if adjustment is not None:
+            after = context_mod.adjusted_chance(league, adjustment, "over", SOCCER_LINE, inputs["over_2_5"])
+            if after is not None and after != inputs["over_2_5"] and 0 < after < 1:
+                inputs = {**inputs, "over_2_5": after, "over_2_5_before": inputs["over_2_5"]}
         sig = tuple(round(inputs[key], 6) for key in ("home", "draw", "away", "over_2_5"))
         key = ("soccer_model", league, str(game["id"]), sig)
 
@@ -1267,7 +1415,34 @@ class DashboardService:
         if found is None:
             return None
         inputs, derived = found
-        return soccer_view(str(game.get("home") or "Home"), str(game.get("away") or "Away"), inputs, derived)
+        view = soccer_view(str(game.get("home") or "Home"), str(game.get("away") or "Away"), inputs, derived)
+        note = self.soccer_adjusted(league, game, inputs)
+        if note is not None:
+            view["adjusted"] = note  # the model's over 2.5 (and so its team totals and BTTS) moved with the total
+        return view
+
+    def soccer_adjusted(self, league: str, game: Optional[Mapping[str, Any]], inputs: Mapping[str, Any]
+                        ) -> Optional[Dict[str, Any]]:
+        """The adjusted note of a goals model fitted to an adjusted over 2.5 (soccer_derived): {applied, reason,
+        reasons, before (the books' over 2.5), ...}, else None."""
+        before = inputs.get("over_2_5_before")
+        if before is None or not game:
+            return None
+        adjustment = self.total_adjustment(league, game.get("id"))
+        if adjustment is None:
+            return None
+        return {**context_mod.adjusted_note(adjustment), "before": round(float(before), 4), "line": SOCCER_LINE}
+
+    def mark_soccer_adjusted(self, league: str, game: Optional[Mapping[str, Any]], inputs: Mapping[str, Any],
+                             candidates: Sequence[Any]) -> Sequence[Any]:
+        """The goals model's legs that follow the match total (team totals, both teams to score) carry the adjusted
+        note when the model was fitted to an adjusted over 2.5 (their chance source stays the model's)."""
+        note = self.soccer_adjusted(league, game, inputs)
+        if note is not None:
+            for candidate in candidates:
+                if candidate.market in ("team_totals", "btts"):
+                    candidate.adjusted = dict(note)
+        return candidates
 
     def _builder_games(self, now: float) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]], str]:
         """The games the builder may use, the leagues' entries ({key: {title, odds, ...}}) and an ETag: the
@@ -1330,9 +1505,12 @@ class DashboardService:
         boards (``now``: the caller's clock, for price ages and games under way)."""
         now = time.time() if now is None else now
         games, entries, etag = self._builder_games(now)
-        key = ("builder_candidates", etag, self.odds_mark())
-        return self.cache.get(key, 60.0, lambda: self._assemble_candidates(games, entries, etag, now),
-                              persist=False, kind="builder_candidates")
+        mark = self.context_mark()
+        key = ("builder_candidates", etag, self.odds_mark(), mark)
+
+        def assemble() -> Dict[str, Any]:
+            return {**self._assemble_candidates(games, entries, etag, now), "context_mark": mark}
+        return self.cache.get(key, 60.0, assemble, persist=False, kind="builder_candidates")
 
     def _assemble_candidates(self, games: Sequence[Mapping[str, Any]], entries: Mapping[str, Mapping[str, Any]],
                              etag: str, now: float) -> Dict[str, Any]:
@@ -1434,6 +1612,14 @@ class DashboardService:
         elif "low_conf" in game_flags:
             flag_line = ["Low confidence: no market price in the blend, ratings only"]
         strip = self._strip_words(mkt)
+        # Venue & conditions (data/context.py): the top context factor for each leg's market, and the adjustment to the
+        # total (a forecast or roof change since the odds) that moves the totals legs' chances
+        block = self._context_block(league, odds_id)
+        # Both unit systems' words (the candidates are everyone's): ``why`` is the league's "auto" one, ``why_units``
+        # both when they differ, and the app shows the person's
+        context_why = {kind: context_mod.why_lines(block, kind) for kind in ("totals", "margin")}
+        auto = context_mod.units_for(league)
+        adjustment = context_mod.total_adjustment(block)
         out: List[Any] = []
         for market in BOARD_MARKETS:
             for side, offer in (summary.get(market) or {}).items():
@@ -1449,29 +1635,49 @@ class DashboardService:
                     p = fair
                 if p is None or not 0 < p < 1:
                     continue
+                moved = None
+                if market == "totals" and adjustment is not None:
+                    after = context_mod.adjusted_chance(league, adjustment, side, point, p)
+                    if after is not None and after != p and 0 < after < 1:
+                        moved = {**context_mod.adjusted_note(adjustment), "before": round(p, 4)}
+                        p = after
                 flags = set(game_flags)
                 count = int(offer.get("books") or 0)
                 if count <= 1:
                     flags.add("thin")
-                if source == "blend":
-                    first = strip(side, p)
-                else:
-                    first = f"Books' margin-free chance {_pct(p)} ({count} book{'s' if count != 1 else ''} at this line)"
-                why = [first] + model_line + flag_line
-                if "thin" in flags and len(why) < 3:
-                    why.append("Thin market: one bookmaker at this line")
+
+                def why_in(units: str) -> List[str]:
+                    if source == "blend":
+                        first = strip(side, p)
+                    elif moved:
+                        first = (f"Books' margin-free chance {_pct(moved['before'])}, adjusted to {_pct(p)}: "
+                                 f"{context_mod.note_reason(moved, units)}")
+                    else:
+                        first = (f"Books' margin-free chance {_pct(p)} ({count} book{'s' if count != 1 else ''} at "
+                                 "this line)")
+                    extra = context_why["totals" if market == "totals" else "margin"][units]
+                    why = [first] + ([extra] if extra else []) + model_line + flag_line
+                    if "thin" in flags and len(why) < 3:
+                        why.append("Thin market: one bookmaker at this line")
+                    return why[:3]
+
+                worded = {units: why_in(units) for units in context_mod.SHOWN_UNITS}
                 out.append(engine_builder.Candidate(
                     ref={"league": league, "id": odds_id, "market": market, "side": side, "point": point},
                     league=league, game_key=game_key, teams=(away, home), start=start, price=Decimal(str(price)),
-                    book=str(offer.get("book") or "?"), chance=p, chance_source=source, price_age_s=age,
-                    flags=flags, why=why[:3], label=outcome_label({"home": home, "away": away}, market, side, point),
+                    book=str(offer.get("book") or "?"), chance=p,
+                    # A chance an adjustment moved is no longer the books' own number
+                    chance_source="adjusted" if moved else source, price_age_s=age,
+                    flags=flags, why=worded[auto], label=outcome_label({"home": home, "away": away}, market, side, point),
                     fair=fair if isinstance(fair, float) else None,
-                    prices=_line_prices(event, market, side, point) or None))
+                    prices=_line_prices(event, market, side, point) or None, adjusted=moved,
+                    why_units=worded if worded["metric"] != worded["imperial"] else None))
         found = self.soccer_derived(league, event, detail_p if detail_p and "draw" in detail_p else None)
         if found is not None:
             from ..engine import soccer
-            out += soccer.candidates(league, game_key, (away, home), start, found[1], ref_id=odds_id,
+            legs = soccer.candidates(league, game_key, (away, home), start, found[1], ref_id=odds_id,
                                      price_age_s=age, flags=game_flags)
+            out += self.mark_soccer_adjusted(league, event, found[0], legs)
         return out
 
     @staticmethod

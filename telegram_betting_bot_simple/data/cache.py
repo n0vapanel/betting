@@ -130,6 +130,14 @@ POLICY: Dict[str, Dict[Optional[str], Policy]] = {
     "consensus": _GAME_RESULT,                          # the markets brain's block for one game
     "player_card": _PLAYER,
     "team_context": {None: Policy(30 * MINUTE, 30 * MINUTE)},
+    # Stage 4's context sources (v3 Stage 4 spec, "Cache policy kinds"). Open-Meteo's forecast for a venue: an hour,
+    # 15 minutes once the game starts within 6 hours or is on ("near")
+    "weather": {None: Policy(HOUR, HOUR), "near": Policy(15 * MINUTE, 15 * MINUTE)},
+    "geocode": {None: Policy(30 * DAY, 0)},             # Open-Meteo's geocoder (a city's coordinates)
+    # MLB StatsAPI's schedule (announced weather, roof): 10 minutes on the day itself, 6 hours for other dates
+    "mlb_schedule": {"today": Policy(10 * MINUTE, 10 * MINUTE), "past": Policy(6 * HOUR, 0),
+                     "future": Policy(6 * HOUR, 0), None: Policy(10 * MINUTE, 10 * MINUTE)},
+    "game_context": {None: Policy(15 * MINUTE, 15 * MINUTE)},  # computed: one game's venue & conditions block
 }
 
 # Other spellings of the states (ESPN's status.type.state is "pre", "in" or "post")
@@ -989,19 +997,22 @@ class TTLCache:
             self._store_call("cache_delete_prefix", text)
         return len(doomed)
 
-    def peek(self, key: Hashable, shared: bool = True) -> Optional[Tuple[float, Any]]:
+    def peek(self, key: Hashable, shared: bool = True, recheck: Optional[float] = None
+             ) -> Optional[Tuple[float, Any]]:
         """(fetched_at, value) of the copy in memory, else (``shared``) of the shared table's (kept in memory then),
-        without loading; None when there is neither."""
+        without loading; None when there is neither. ``recheck`` (seconds, with ``shared``): a memory copy fetched
+        longer ago than that is checked against the shared table first and a newer copy there adopted (a reader of
+        entries the other process writes, such as the bot reading the dashboard's context blocks)."""
         with self._lock:
             entry = self._entries.get(key)
-        if entry is not None:
+        if entry is not None and (recheck is None or not shared or self._wall() - entry[1] <= recheck):
             return entry[1], entry[2]
         text = self._text(key)
         if text is None or self._shared is None or not shared:
-            return None
-        row = self._read_row(text)
+            return (entry[1], entry[2]) if entry is not None else None
+        row = self._read_row(text, entry[1] if entry is not None else None)
         if row is None:
-            return None
+            return (entry[1], entry[2]) if entry is not None else None
         entry = self._adopt(key, row, _default_kind(key))
         return entry[1], entry[2]
 

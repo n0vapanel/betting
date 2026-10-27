@@ -41,6 +41,11 @@ const CSS = `
 .view-help .hp-related { margin-top: 4px; }
 
 .view-help .hp-steps { list-style: none; display: grid; gap: 10px; margin: 0; padding: 0; counter-reset: step; }
+.view-help .hp-effects { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.view-help .hp-effects li { padding: 10px 12px; border-radius: 12px; background: var(--card-2); border: 1px solid var(--line); min-width: 0; overflow-wrap: anywhere; }
+.view-help .hp-effects p { margin: 4px 0 0; font-size: 14px; }
+.view-help .hp-effects .hp-src { font-size: 12.5px; color: var(--text-2); }
+.view-help .hp-sure { display: inline-block; margin-left: 4px; font-size: 11px; font-weight: 700; color: var(--text-2); border: 1px dashed var(--line-strong); border-radius: 999px; padding: 0 6px; }
 .view-help .hp-step { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; align-items: start; }
 .view-help .hp-step-icon {
   position: relative; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px;

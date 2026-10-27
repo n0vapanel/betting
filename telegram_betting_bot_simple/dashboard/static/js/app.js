@@ -82,10 +82,12 @@ import {
 import {
   esc, pct, chanceText, money, signedMoney, priceText, toast, sheet, explain, skeleton, errorState, installUi,
   setExplainContext, notice, segmented, timeLabel, openExplainer, holdPage, checkTree, bindCheckTree, confirmSheet,
+  legChanceWord, ticketChanceWord,
 } from "./ui.js";
 import { icon, logo } from "./icons.js";
 import * as desk from "./layout.js";
 import { cache, setPaintCheck, prefetch, routeUrl, SLATE_KEY } from "./cache.js";
+import { legBadges } from "./views/context/badges.js";
 
 export {
   slip, priceSlip, priced, onPriced, me, loadMe, setMe, updateMe, onMeChange, onBreak, oddsFormat, favouriteSports, loadSports,
@@ -524,11 +526,15 @@ function legLine(leg, view, removed) {
   const odds = view?.odds || { decimal: leg.price, american: leg.american };
   const ai = view ? view.ai_prob : leg.ai;
   const market = view ? view.market_prob : leg.fair;
+  // Venue & conditions: the game's context chips (from the slate on this device) and "adj" when the server moved
+  // this leg's chance for a forecast or roof change since the odds
+  const context = legBadges(leg.ref, { adjusted: view?.adjusted || null });
   return `<li class="slip-leg${removed ? " gone" : ""}">
     <div class="grow">
       <div class="row-between"><b>${esc(view?.label || leg.label)}</b><b class="num">${esc(priceText(odds))}</b></div>
       <div class="muted small">${esc(leg.game || view?.game || "")}${leg.start ? ` · ${esc(timeLabel(leg.start))}` : ""}</div>
-      <div class="small">${ai != null ? `AI ${pct(ai)}` : ""}${ai != null && market != null ? " · " : ""}${market != null ? `Market ${pct(market)}` : ""}
+      ${context ? `<div class="slip-ctx">${context}</div>` : ""}
+      <div class="small">${ai != null ? `${legChanceWord(view || leg)} ${pct(ai)}` : ""}${ai != null && market != null ? " · " : ""}${market != null ? `Market ${pct(market)}` : ""}
         ${removed ? ` ${icon("alert", { size: 14 })}<span class="warn">No longer offered</span>` : ""}${view?.started ? ` <span class="warn">Started</span>` : ""}</div>
     </div>
     <button type="button" class="icon-btn" data-remove-leg="${esc(leg.key)}" aria-label="Remove ${esc(leg.label)}">${icon("trash", { size: 18 })}</button>
@@ -574,13 +580,15 @@ function slipNumbersHtml(view) {
     const e = result.expected || {};
     const ml = result.most_likely;
     const chanceWord = c.headline === "profit" ? "Chance of a profit" : "Chance it wins";
+    // "Adjusted" when every leg's own chance was moved by a forecast or roof change (as its price button says), else "AI"
+    const own = ticketChanceWord(result);
     summary = `<dl class="summary">
       ${result.odds ? `<div><dt>Odds</dt><dd>${esc(priceText(result.odds))}</dd></div>` : ""}
       <div><dt>Costs</dt><dd>${money(result.total_stake, { cents: true })}${result.bets > 1 ? ` <span class="muted">(${result.bets} bets)</span>` : ""}</dd></div>
       <div><dt>Pays ${explain("payout")}</dt><dd>${result.type === "multi" || result.bets === 1 ? "" : "up to "}${money(result.max_payout, { cents: true })}</dd></div>
-      <div><dt>${chanceWord} ${explain("one_in")}</dt><dd>${c.ai != null ? `AI ${esc(chanceText(c.ai, c.ai_one_in))}` : ""}${c.ai != null && c.market != null ? "<br>" : ""}${c.market != null ? `Market ${esc(chanceText(c.market, c.market_one_in))}` : ""}${c.ai == null && c.market == null ? "–" : ""}</dd></div>
+      <div><dt>${chanceWord} ${explain("one_in")}</dt><dd>${c.ai != null ? `${own} ${esc(chanceText(c.ai, c.ai_one_in))}` : ""}${c.ai != null && c.market != null ? "<br>" : ""}${c.market != null ? `Market ${esc(chanceText(c.market, c.market_one_in))}` : ""}${c.ai == null && c.market == null ? "–" : ""}</dd></div>
       <div><dt>Bookmaker keeps ${explain("book_cut")}</dt><dd>${result.book_cut != null ? `about ${pct(result.book_cut)}` : "–"}</dd></div>
-      <div><dt>Expected result ${explain("expected_result")}</dt><dd>${e.ai != null ? `${esc(signedMoney(e.ai))} <span class="muted">AI</span>` : ""}${e.ai != null && e.market != null ? "<br>" : ""}${e.market != null ? `${esc(signedMoney(e.market))} <span class="muted">market</span>` : ""}${e.ai == null && e.market == null ? "–" : ""}</dd></div>
+      <div><dt>Expected result ${explain("expected_result")}</dt><dd>${e.ai != null ? `${esc(signedMoney(e.ai))} <span class="muted">${own === "AI" ? "AI" : "adjusted"}</span>` : ""}${e.ai != null && e.market != null ? "<br>" : ""}${e.market != null ? `${esc(signedMoney(e.market))} <span class="muted">market</span>` : ""}${e.ai == null && e.market == null ? "–" : ""}</dd></div>
       ${ml ? `<div><dt>Most likely ${explain("most_likely")}</dt><dd>${esc(ml.result === "lose all" ? `lose ${money(result.total_stake)}` : ml.result)} (${pct(ml.probability)})</dd></div>` : ""}
     </dl>`;
   }

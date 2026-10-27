@@ -29,7 +29,9 @@ NO_CACHE = "no-cache"
 # The modules Today's first paint needs (preloaded); the optional ones only when they exist
 CORE_MODULES = ("app.js", "js/app.js", "js/api.js", "js/store.js", "js/ui.js", "js/icons.js", "js/telegram.js",
                 "js/views/today.js")
-OPTIONAL_CORE = ("js/cache.js", "js/layout.js")
+# (Venue & conditions' badges are drawn on Today's rows and the slip's legs: preloaded with them)
+OPTIONAL_CORE = ("js/cache.js", "js/layout.js", "js/views/context/badges.js", "js/views/context/units.js",
+                 "js/views/context/styles.js")
 CORE_FOLDERS = ("js/views/today",)  # Today's own parts
 LINK = re.compile(r'(?P<attr>\b(?:src|href))="/static/(?P<path>[^"?#]+)(?:\?[^"#]*)?"')
 FIRST_TAG = re.compile(r"<(?:link|script)\b", re.IGNORECASE)

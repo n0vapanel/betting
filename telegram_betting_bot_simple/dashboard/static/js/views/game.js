@@ -5,9 +5,16 @@
 // add up to each number, views/markets/factors.js; the old text lines when the server sends none), injuries,
 // the AI analysts with "Ask now", the players (each opens a player page), every bookmaker's odds, and "Make
 // your call".
+//
+// Venue & conditions (v3 Stage 4, views/context/conditions.js): the panel beside the teams on a wide page (and in the
+// inspector), a one-line summary above the markets on a phone that opens the panel in a bottom sheet; "Why the line
+// is here" (the context's attribution waterfalls: explains only) and "What moves it" (adjustments) under "Markets
+// say"; a light placeholder while the block is on its way, checked again once after 20 s. The context parts are
+// drawn into their own slots (data-cx="top" | "line" | "why"), so that check and a phone/desk switch redraw only
+// them.
 
-import { api, isQuiet, qs } from "../api.js";
-import { setTitle, refreshMainButton, leagueTitle, sportEmoji } from "../app.js";
+import { api, request, isQuiet, qs } from "../api.js";
+import { setTitle, refreshMainButton, leagueTitle, sportEmoji, layout, onLayoutChange } from "../app.js";
 import {
   esc, pct, shortName, timeLabel, section, oddsGrid, splitBar, winChances, badge, explain, skeleton, errorState,
   notice, priceText, pointText, injuryBadge, segmented, emptyState,
@@ -18,6 +25,7 @@ import { marketsSection, bindMarkets, blendChances, consensusOf } from "./market
 import { factorsSection, bindFactors } from "./markets/factors.js";
 import { goalsSection } from "./markets/goals.js";
 import { ensureMarketStyles } from "./markets/styles.js";
+import { gameContext, bindContext, adjustedNote, RECHECK_MS } from "./context/conditions.js";
 
 let current = null; // {game, params} for the Telegram main button
 
@@ -28,6 +36,7 @@ export function mainButton() {
 }
 
 export function onLeave() {
+  current?.cleanup?.();
   current = null;
 }
 
@@ -107,6 +116,7 @@ function prices(game) {
   return section("Prices", `${oddsGrid(game)}
     <p class="note">Best price for each pick across ${most} bookmaker${most === 1 ? "" : "s"}; ${game.prediction ? "“AI” is the brain's chance" : "“Mkt” is the market's chance"}.
       Tap a price to add it to your slip ${explain("multi", { label: "How do slips work?" })}</p>
+    <div data-cx="adj">${adjustedNote(game)}</div>
     ${game.prediction ? `<p class="note">▲ next to a chance: the AI rates that pick above its price (an opinion, not a guarantee). “!”: the AI is far from the bookmakers, so check the injury news ${explain("value_mark", { label: "What do ▲ and ! mean?" })}</p>` : ""}`,
   { info: "spread", aside: "" });
 }
@@ -192,15 +202,20 @@ export async function render(root, params) {
   let side = "away";
   let myCall = null;
   let fxKey = null; // the number the factor list shows (kept across a redraw)
+  let wfKey = null; // the line "Why the line is here" shows (kept across a redraw)
   const short = (name) => shortName(name, league);
-  const state = { game, params, redraw: null };
+  const state = { game, params, redraw: null, cleanup: null };
   current = state;
+  const context = () => gameContext(game, { phone: layout.mode === "phone", pick: wfKey });
 
   if (game.soccer) ensureMarketStyles(); // the Goals model's table styles (markets/styles.js)
   const draw = () => {
-    root.innerHTML = `${hero(game)}
+    const cx = context();
+    root.innerHTML = `<div class="cx-wrap"><div class="cx-top${cx.top ? " has-panel" : ""}">${hero(game)}<div class="cx-slot" data-cx="top">${cx.top}</div></div></div>
       ${actions(game, myCall)}
+      <div data-cx="line">${cx.line}</div>
       ${marketsSection(game, { short })}
+      <div data-cx="why">${cx.why}</div>
       ${whoWins(game)}
       ${prices(game)}
       ${goalsSection(game, { short })}
@@ -229,6 +244,51 @@ export async function render(root, params) {
   // "Markets say": the explainer sheet; the factor list: which number it explains
   bindMarkets(root, game);
   bindFactors(root, game, { onPick: (key) => { fxKey = key; } });
+
+  // Venue & conditions: the phone one-liner's sheet and the waterfall's picker; the context slots alone are redrawn
+  // when the phone/desk layout flips, and once after 20 s while the block is still on its way
+  const unbindContext = bindContext(root, () => game, { onPick: (key) => { wfKey = key; } });
+  const drawContext = () => {
+    if (!root.isConnected) return;
+    const cx = context();
+    for (const name of ["top", "line", "why"]) {
+      const slot = root.querySelector(`[data-cx="${name}"]`);
+      if (slot) slot.innerHTML = cx[name];
+    }
+    root.querySelector(".cx-top")?.classList.toggle("has-panel", Boolean(cx.top));
+  };
+  const stopLayout = onLayoutChange((mode, previous) => {
+    if ((mode === "phone") !== (previous === "phone")) drawContext();
+  });
+  let recheck = null;
+  if (game.context?.status === "loading") {
+    recheck = setTimeout(async () => {
+      recheck = null;
+      try {
+        // Past the prefetch copy (it would still say "loading"): the server's answer now, read from its cache
+        const fresh = (await request(`/api/game${qs({ league, id })}`, { signal: params.signal })).data;
+        if (!root.isConnected || !fresh || typeof fresh !== "object") return;
+        game.context = fresh.context ?? null;
+        // The block may carry an adjustment to the total: the server's totals chances then moved too, so the
+        // prices are drawn again with them (the whole page; otherwise only the context slots)
+        const moved = (m) => JSON.stringify(["over", "under"].map((s) => m?.totals?.[s]?.adjusted ?? null));
+        if (fresh.markets && typeof fresh.markets === "object" && moved(fresh.markets) !== moved(game.markets)) {
+          game.markets = fresh.markets;
+          draw();
+        } else {
+          drawContext();
+        }
+      } catch {
+        /* the placeholder stays; the next visit reads it again */
+      }
+    }, RECHECK_MS);
+  }
+  state.cleanup = () => {
+    clearTimeout(recheck);
+    stopLayout();
+    unbindContext();
+  };
+  params.signal?.addEventListener?.("abort", () => state.cleanup?.(), { once: true });
 
   // Analysts: "Ask now" redraws only their section
   bindAnalysts(root, game, () => {

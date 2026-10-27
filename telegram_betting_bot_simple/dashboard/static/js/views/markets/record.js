@@ -10,7 +10,8 @@
 //   difference ("vs blend 0.236") and the games read "1 of 2": the blend row's own score is never the base of
 //   a difference it didn't make. Four columns (source, games, Brier, log loss), so a phone shows them all.
 //
-//   renderMarketsRecord(box, {signal}) -> draws the tables (or an empty state) into ``box``
+//   renderMarketsRecord(box, {signal}) -> draws the tables (or an empty state) into ``box``, then the Venue &
+//                                         conditions line under them (GET /api/record/context, its own request)
 //   marketsRecordHtml(data)            -> the HTML, for tests
 
 import { api, isQuiet } from "../../api.js";
@@ -18,6 +19,7 @@ import { esc, section, skeleton, notice } from "../../ui.js";
 import { leagueTitle, sportEmoji } from "../../app.js";
 import { ensureMarketStyles } from "./styles.js";
 import { sourceLabel } from "./say.js";
+import { contextRecordHtml } from "../context/conditions.js";
 
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const score = (v) => (num(v) === null ? "–" : v.toFixed(3));
@@ -87,6 +89,7 @@ export function marketsRecordHtml(data) {
 export async function renderMarketsRecord(box, { signal } = {}) {
   ensureMarketStyles();
   box.innerHTML = skeleton("lines", 3);
+  const context = api("/api/record/context", { signal }).catch(() => null);
   let data;
   try {
     data = await api("/api/record/markets", { signal });
@@ -99,5 +102,9 @@ export async function renderMarketsRecord(box, { signal } = {}) {
   }
   if (!box.isConnected) return;
   box.innerHTML = marketsRecordHtml(data);
+  const found = await context;
+  if (!found || !box.isConnected) return;
+  const html = contextRecordHtml(found);
+  if (html) (box.querySelector("#markets-record") || box).insertAdjacentHTML("beforeend", html);
 }
 

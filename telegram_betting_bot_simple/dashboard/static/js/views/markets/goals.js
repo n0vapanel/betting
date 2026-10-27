@@ -66,7 +66,7 @@ export function goalsSection(game, { short = (name) => String(name || "") } = {}
       <div><b class="num">${esc(Number(rates.home).toFixed(2))}</b><span>${esc(h)}</span></div>
       <div><b class="num">${esc(Number(rates.away).toFixed(2))}</b><span>${esc(a)}</span></div>
     </div>
-    <p class="gm-lead">Expected goals, from the market's home, draw and away chances${g.inputs?.over_2_5 != null ? ` and over 2.5 goals (${esc(pct(g.inputs.over_2_5))})` : ""}.</p>
+    <p class="gm-lead">Expected goals, from the market's home, draw and away chances${g.inputs?.over_2_5 != null ? ` and over 2.5 goals (${esc(pct(g.inputs.over_2_5))}${g.adjusted && g.inputs.over_2_5_before != null ? `, adjusted from the market's ${esc(pct(g.inputs.over_2_5_before))} for a weather or roof change since the odds were fetched` : ""})` : ""}.</p>
     ${fitNote}
     <div class="gm-grid">
       ${table("Both teams to score", rows([["Yes", m.btts?.yes], ["No", m.btts?.no]]))}

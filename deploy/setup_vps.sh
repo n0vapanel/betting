@@ -60,6 +60,9 @@
 #   SHARP_BOOKS=pinnacle,betfair_ex_eu,matchbook  books that only anchor the consensus (never a price offered)
 #   ODDS_PRICE_BOOKS=draftkings,fanduel  the books "best price" and every ticket use (default: the rest)
 #   MARKETS_ENABLED=0             turn off Kalshi, Polymarket, ESPN's predictor and the ratings (free; on by default)
+# Venue & conditions (weather from Open-Meteo, free for non-commercial use with attribution; optional):
+#   WEATHER_ENABLED=0             no forecasts (the venue, rest and travel stay; on by default: WEATHER_ENABLED=1)
+#   WEATHER_DAILY_CAP=1000        Open-Meteo calls a day at most, the bot and the dashboard together (default 1000)
 #
 # The dashboard password should be 12 or more characters: a shorter one still works, but the setup
 # warns about it.
@@ -103,6 +106,8 @@ declare -A PATTERNS=(
   [SHARP_BOOKS]='^[a-z0-9][a-z0-9_]{1,39}(,[a-z0-9][a-z0-9_]{1,39}){0,9}$'
   [ODDS_PRICE_BOOKS]='^[a-z0-9][a-z0-9_]{1,39}(,[a-z0-9][a-z0-9_]{1,39}){0,9}$'
   [MARKETS_ENABLED]='^(0|1|true|false)$'
+  [WEATHER_ENABLED]='^(0|1|true|false)$'
+  [WEATHER_DAILY_CAP]='^[0-9]{1,5}$'
 )
 # DOMAIN is checked and saved on its own, since it can also be "off"
 DOMAIN_PATTERN='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$'
@@ -260,6 +265,9 @@ EOF
     warn_short_password "$DASHBOARD_PASSWORD"
   fi
   if [ ${#PRESET[@]} -gt 0 ]; then echo "  Saved from the command line: ${PRESET[*]}"; fi
+  # Venue & conditions' weather (optional): written with their defaults once, so they are easy to find and change
+  if ! grep -q '^WEATHER_ENABLED=' "$ENV_FILE"; then set_env WEATHER_ENABLED 1; fi
+  if ! grep -q '^WEATHER_DAILY_CAP=' "$ENV_FILE"; then set_env WEATHER_DAILY_CAP 1000; fi
   # Behind Caddy: the bot links to the HTTPS address, and the dashboard only listens to Caddy
   if [ -n "$DOMAIN" ]; then
     set_env DOMAIN "$DOMAIN"

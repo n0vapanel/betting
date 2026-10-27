@@ -52,6 +52,11 @@ class Config(BaseSettings):
     # The markets brain's free outside opinions (Polymarket, Kalshi, ESPN's predictor and power ratings, Torvik,
     # Tennis Abstract, eloratings.net), refreshed in the background by the dashboard's slate worker
     markets_enabled: bool = Field(True, validation_alias="MARKETS_ENABLED")
+    # Venue & conditions (v3 Stage 4): Open-Meteo's forecasts and geocoder, free for non-commercial use with
+    # attribution, read in the background by the dashboard's slate worker; WEATHER_DAILY_CAP caps its HTTP calls a
+    # day (the bot and the dashboard together). WEATHER_ENABLED=0 keeps the venue, travel and rest context only
+    weather_enabled: bool = Field(True, validation_alias="WEATHER_ENABLED")
+    weather_daily_cap: int = Field(1000, ge=0, validation_alias="WEATHER_DAILY_CAP")
     # Below this many Odds API requests left this month, serve saved odds instead of fetching
     odds_reserve: int = Field(50, validation_alias="ODDS_RESERVE")
     # Today's all-sports slate (data/slate.py): seconds between ESPN scoreboard checks for a league with a game
@@ -100,11 +105,17 @@ class Config(BaseSettings):
         value = (value or "").strip().rstrip("/")
         return value or None
 
-    @field_validator("markets_enabled", mode="before")
+    @field_validator("markets_enabled", "weather_enabled", mode="before")
     @classmethod
     def _blank_is_on(cls, value: object) -> object:
-        # "MARKETS_ENABLED=" in .env means the default (on), not a startup error
+        # "MARKETS_ENABLED=" (or "WEATHER_ENABLED=") in .env means the default (on), not a startup error
         return True if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("weather_daily_cap", mode="before")
+    @classmethod
+    def _blank_is_default_cap(cls, value: object) -> object:
+        # "WEATHER_DAILY_CAP=" in .env means the default (1,000 calls a day)
+        return 1000 if isinstance(value, str) and not value.strip() else value
 
     @field_validator("ai_chat_web_daily_cents", "ai_chat_daily_total_cents", mode="before")
     @classmethod

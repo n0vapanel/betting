@@ -21,7 +21,7 @@
 
 import { api, isQuiet } from "../../api.js";
 import { slip, priceSlip, priced, onPriced, me, loadMe, onMeChange, legKey, openOnboarding, inTelegram, replaceAddress } from "../../app.js";
-import { esc, pct, money, priceText, timeLabel, notice, skeleton, explain, badge, chip, toast, sheet, confirmSheet, ago } from "../../ui.js";
+import { esc, pct, money, priceText, timeLabel, notice, skeleton, explain, badge, chip, toast, sheet, confirmSheet, ago, legChanceWord } from "../../ui.js";
 import { icon } from "../../icons.js";
 import { haptic, setSecondaryButton } from "../../telegram.js";
 import { copyText } from "../../legacy.js";
@@ -168,7 +168,7 @@ function legRow(leg, view, { gone = false, move = null, weak = false } = {}) {
   const game = gameShort(view?.game || leg.game, league);
   const start = view?.start || leg.start;
   const where = [game, start ? timeLabel(start) : ""].filter(Boolean).join(" · ");
-  const chances = [ai != null ? `AI ${pct(ai)}` : "", market != null ? `Market ${pct(market)}` : "", view?.chance_label || "", view?.book ? `at ${view.book}` : ""].filter(Boolean).join(" · ");
+  const chances = [ai != null ? `${legChanceWord(view || leg)} ${pct(ai)}` : "", market != null ? `Market ${pct(market)}` : "", view?.chance_label || "", view?.book ? `at ${view.book}` : ""].filter(Boolean).join(" · ");
   const flags = [
     gone ? badge("No longer offered", "warn", "alert") : "",
     view?.started ? badge("Started", "warn", "clock") : "",

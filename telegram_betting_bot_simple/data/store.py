@@ -638,6 +638,66 @@ CREATE TABLE IF NOT EXISTS cache_leases (
 );
 """
 
+# v3 Stage 4, context (data/context.py): every forecast the context worker read for a game, with its fetch time, so
+# the forecast as it stood when the odds were fetched can be found later; and the totals' chances before and after an
+# adjustment, frozen at the start and graded after the final (Open-Meteo's daily call counter is data/weather.py's)
+CONTEXT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS weather_log (
+    league TEXT NOT NULL,
+    game_key TEXT NOT NULL,        -- the context entry's game id: the odds feed's id, else "espn:<id>"
+    fetched_at REAL NOT NULL,      -- when the forecast (or MLB's announcement) was fetched
+    start TEXT NOT NULL,           -- the game's ISO start
+    venue TEXT,                    -- the venue row's id
+    source TEXT NOT NULL,          -- "Open-Meteo" or "MLB"
+    effect REAL,                   -- the weather's effect on the total then, in the sport's unit (0 under a roof)
+    conditions TEXT NOT NULL,      -- JSON: the hour at the start (with MLB's announcement), as the engine reads it
+    sig TEXT NOT NULL,             -- a hash of the conditions: a row is added only when they change
+    PRIMARY KEY (league, game_key, fetched_at)
+);
+CREATE TABLE IF NOT EXISTS context_log (
+    league TEXT NOT NULL,
+    game_key TEXT NOT NULL,        -- "espn:<id>" when ESPN shows the game, else "odds:<id>": one row per game
+    event_id TEXT,                 -- the odds feed's game id
+    espn_id TEXT,
+    home TEXT NOT NULL,
+    away TEXT NOT NULL,
+    start TEXT NOT NULL,
+    logged_at REAL NOT NULL,       -- the last refresh before the start: frozen after it
+    line REAL NOT NULL,            -- the total line
+    p_before REAL NOT NULL,        -- the chance of the over before any adjustment (the books' margin-free chance)
+    p_after REAL NOT NULL,         -- after it (the same when nothing was adjusted)
+    applied REAL NOT NULL DEFAULT 0,  -- the adjustment applied to the expected total, in the sport's unit
+    reason TEXT,
+    adjustment TEXT,               -- JSON: the Adjustment, or null
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending, graded or void
+    outcome TEXT,                  -- over, under or push
+    result TEXT,                   -- JSON: the final total and each chance's Brier score
+    graded_at REAL,
+    PRIMARY KEY (league, game_key)
+);
+CREATE INDEX IF NOT EXISTS context_log_by_status ON context_log (status, start);
+"""
+
+WEATHER_LOG_FIELDS = ("league", "game_key", "fetched_at", "start", "venue", "source", "effect", "conditions", "sig")
+CONTEXT_LOG_FIELDS = ("league", "game_key", "event_id", "espn_id", "home", "away", "start", "logged_at", "line",
+                      "p_before", "p_after", "applied", "reason", "adjustment", "status", "outcome", "result",
+                      "graded_at")
+CONTEXT_LOG_JSON = {"adjustment", "result"}
+
+
+def _context_row(values: Sequence[Any]) -> Dict[str, Any]:
+    row = dict(zip(CONTEXT_LOG_FIELDS, values))
+    for key in CONTEXT_LOG_JSON:
+        if row[key] is not None:
+            row[key] = json.loads(row[key])
+    return row
+
+
+def _weather_row(values: Sequence[Any]) -> Dict[str, Any]:
+    row = dict(zip(WEATHER_LOG_FIELDS, values))
+    row["conditions"] = json.loads(row["conditions"]) if row["conditions"] else None
+    return row
+
 
 class _ThreadDb:
     """A thread's kept-open cache connection (Store._cache_db), closed when the thread's locals or the Store go."""
@@ -666,6 +726,7 @@ class Store:
             db.executescript(SCHEMA)
             db.executescript(ACCOUNT_SCHEMA)
             db.executescript(CACHE_SCHEMA)
+            db.executescript(CONTEXT_SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, timeout=10, isolation_level=None)
@@ -1078,6 +1139,135 @@ class Store:
                 (status, outcome, json.dumps(result, default=_json_default), _now(now), league, game_key),
             )
         return cursor.rowcount > 0
+
+    # --- context (v3 Stage 4): forecasts as they stood, the totals' chances, daily call counters ----------------
+
+    def log_weather(self, rows: Sequence[Mapping[str, Any]]) -> int:
+        """Add forecast rows ({league, game_key, fetched_at, start, venue, source, effect, conditions, sig}): a row is
+        written only when its conditions differ from the game's latest row (by ``sig``), so a forecast read again
+        from the cache adds nothing. Returns the rows written."""
+        written = 0
+        with closing(self._connect()) as db, _transaction(db):
+            for row in rows:
+                latest = db.execute("SELECT sig, fetched_at FROM weather_log WHERE league = ? AND game_key = ? "
+                                    "ORDER BY fetched_at DESC LIMIT 1", (row["league"], str(row["game_key"]))).fetchone()
+                if latest is not None and (latest[0] == row["sig"] or latest[1] >= float(row["fetched_at"])):
+                    continue
+                db.execute(
+                    f"INSERT OR IGNORE INTO weather_log ({', '.join(WEATHER_LOG_FIELDS)}) VALUES "
+                    f"({', '.join('?' * len(WEATHER_LOG_FIELDS))})",
+                    (row["league"], str(row["game_key"]), float(row["fetched_at"]), str(row["start"]),
+                     row.get("venue"), str(row.get("source") or "Open-Meteo"),
+                     None if row.get("effect") is None else float(row["effect"]),
+                     json.dumps(row.get("conditions") or {}, default=_json_default), str(row["sig"])))
+                written += 1
+        return written
+
+    def weather_rows(self, league: str, game_key: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """A game's logged forecasts, newest first."""
+        with closing(self._connect()) as db:
+            rows = db.execute(f"SELECT {', '.join(WEATHER_LOG_FIELDS)} FROM weather_log WHERE league = ? AND "
+                              "game_key = ? ORDER BY fetched_at DESC LIMIT ?", (league, str(game_key), _limit(limit))
+                              ).fetchall()
+        return [_weather_row(values) for values in rows]
+
+    def weather_at(self, league: str, game_key: str, at: float) -> Optional[Dict[str, Any]]:
+        """The game's forecast as it stood at ``at``: the latest row fetched at or before it, or None."""
+        with closing(self._connect()) as db:
+            values = db.execute(f"SELECT {', '.join(WEATHER_LOG_FIELDS)} FROM weather_log WHERE league = ? AND "
+                                "game_key = ? AND fetched_at <= ? ORDER BY fetched_at DESC LIMIT 1",
+                                (league, str(game_key), float(at))).fetchone()
+        return _weather_row(values) if values else None
+
+    def prune_weather(self, before: float) -> int:
+        """Drop forecast rows of games that started before ``before`` (epoch seconds)."""
+        with closing(self._connect()) as db:
+            cursor = db.execute("DELETE FROM weather_log WHERE start < ?", (_iso(before),))
+        return cursor.rowcount
+
+    def log_context(self, rows: Sequence[Mapping[str, Any]], now: Optional[float] = None) -> int:
+        """Save each game's total line and chances of the over before and after any adjustment (one transaction):
+        updated on every refresh until the game starts, then frozen; rows for games already started are ignored."""
+        now = _now(now)
+        now_iso = _iso(now)
+        written = 0
+        with closing(self._connect()) as db, _transaction(db):
+            for row in rows:
+                start = str(row["start"])
+                if start <= now_iso:
+                    continue
+                cursor = db.execute(
+                    "INSERT INTO context_log (league, game_key, event_id, espn_id, home, away, start, logged_at, line, "
+                    "p_before, p_after, applied, reason, adjustment) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(league, game_key) DO UPDATE SET event_id = COALESCE(excluded.event_id, "
+                    "context_log.event_id), espn_id = COALESCE(excluded.espn_id, context_log.espn_id), "
+                    "home = excluded.home, away = excluded.away, start = excluded.start, logged_at = excluded.logged_at, "
+                    "line = excluded.line, p_before = excluded.p_before, p_after = excluded.p_after, "
+                    "applied = excluded.applied, reason = excluded.reason, adjustment = excluded.adjustment "
+                    "WHERE context_log.status = 'pending' AND context_log.start > ?",
+                    (row["league"], row["game_key"], row.get("event_id"), row.get("espn_id"), row["home"], row["away"],
+                     start, now, float(row["line"]), float(row["p_before"]), float(row["p_after"]),
+                     float(row.get("applied") or 0.0), row.get("reason"), _dumps(row.get("adjustment")), now_iso),
+                )
+                written += cursor.rowcount
+        return written
+
+    def context_rows(self, league: Optional[str] = None, status: Optional[str] = None,
+                     started_before: Optional[str] = None, limit: Optional[int] = 5000) -> List[Dict[str, Any]]:
+        """Logged context rows, latest start first."""
+        where, args = [], []
+        for clause, value in (("league = ?", league), ("status = ?", status), ("start < ?", started_before)):
+            if value is not None:
+                where.append(clause)
+                args.append(value)
+        sql = f"SELECT {', '.join(CONTEXT_LOG_FIELDS)} FROM context_log"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        with closing(self._connect()) as db:
+            rows = db.execute(sql + " ORDER BY start DESC LIMIT ?", (*args, _limit(limit))).fetchall()
+        return [_context_row(values) for values in rows]
+
+    def context_row(self, league: str, game_key: str) -> Optional[Dict[str, Any]]:
+        with closing(self._connect()) as db:
+            values = db.execute(f"SELECT {', '.join(CONTEXT_LOG_FIELDS)} FROM context_log WHERE league = ? AND "
+                                "game_key = ?", (league, game_key)).fetchone()
+        return _context_row(values) if values else None
+
+    def grade_context(self, league: str, game_key: str, status: str, outcome: Optional[str],
+                      result: Mapping[str, Any], now: Optional[float] = None) -> bool:
+        """Record a game's total and each chance's Brier score (status graded or void); a row is graded once."""
+        if status not in ("graded", "void"):
+            raise ValueError(f"Unknown context status {status!r}")
+        with closing(self._connect()) as db:
+            cursor = db.execute(
+                "UPDATE context_log SET status = ?, outcome = ?, result = ?, graded_at = ? "
+                "WHERE league = ? AND game_key = ? AND status = 'pending'",
+                (status, outcome, json.dumps(result, default=_json_default), _now(now), league, game_key),
+            )
+        return cursor.rowcount > 0
+
+    def context_record(self) -> Dict[str, Any]:
+        """{games, graded, brier_before, brier_after, adjusted_games}: every logged game with a total line, the graded
+        ones, their mean Brier scores before and after the adjustment, and how many had one applied (with
+        ``adjusted``: the same scores over those games only)."""
+        with closing(self._connect()) as db:
+            games = db.execute("SELECT COUNT(*) FROM context_log").fetchone()[0]
+            adjusted_games = db.execute("SELECT COUNT(*) FROM context_log WHERE applied != 0").fetchone()[0]
+            rows = db.execute("SELECT applied, result FROM context_log WHERE status = 'graded'").fetchall()
+        scores = [(applied, json.loads(result)) for applied, result in rows if result]
+        scores = [(applied, r) for applied, r in scores
+                  if isinstance(r.get("brier_before"), (int, float)) and isinstance(r.get("brier_after"), (int, float))]
+
+        def mean(values: List[float]) -> Optional[float]:
+            return round(sum(values) / len(values), 4) if values else None
+
+        moved = [r for applied, r in scores if applied]
+        return {"games": int(games), "graded": len(scores),
+                "brier_before": mean([r["brier_before"] for _, r in scores]),
+                "brier_after": mean([r["brier_after"] for _, r in scores]),
+                "adjusted_games": int(adjusted_games),
+                "adjusted": {"graded": len(moved), "brier_before": mean([r["brier_before"] for r in moved]),
+                             "brier_after": mean([r["brier_after"] for r in moved])}}
 
     # --- the AI analysts' forecasts and what they cost ---------------------------------
 

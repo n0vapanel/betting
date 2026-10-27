@@ -200,3 +200,24 @@ def factor_lines(factors: Iterable[Factor], digits: int = 1) -> List[str]:
         unit = f" {f.unit}" if f.unit else ""
         lines.append(f"{f.label}: {f.delta:+.{digits}f}{unit}" + (" (small, noisy)" if f.confidence == NOISY else ""))
     return lines
+
+
+def fold(projection: Projection, n: int = 6, digits: Optional[int] = None) -> Dict[str, Any]:
+    """``projection.to_dict(digits)`` with the factors sorted by size (largest first), the top ``n`` kept and the
+    rest folded into one "Other (k factors)" entry (key "folded", with ``folded`` = k), so the numbers still add up
+    exactly to the value shown (a single leftover factor is kept as itself). For text surfaces and compact tool
+    results; the app's waterfall folds the same way."""
+    shown = projection.to_dict(digits)
+    factors = sorted(shown["factors"], key=lambda f: -abs(f["delta"]))
+    keep, rest = factors[:max(int(n), 0)], factors[max(int(n), 0):]
+    if len(rest) == 1:  # one factor shows as itself rather than as "Other (1 factor)"
+        keep, rest = factors, []
+    if rest:
+        total = math.fsum(f["delta"] for f in rest)
+        if digits is not None:
+            total = round(total, digits)
+        keep.append({"key": "folded", "label": f"Other ({len(rest)} factors)",
+                     "delta": total, "unit": projection.unit, "direction": _direction(total), "evidence": "",
+                     "source": "", "as_of": None, "confidence": NORMAL, "folded": len(rest)})
+    shown["factors"] = keep
+    return shown

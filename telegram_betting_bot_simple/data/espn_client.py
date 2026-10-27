@@ -423,7 +423,9 @@ class EspnClient:
             self._remember(league, event_id, competitions[0], at)
 
     def standings(self, league: str, season: Optional[int] = None) -> Dict[str, Dict[str, float]]:
-        """Per-team wins, losses and average points for/against, keyed by ESPN team id."""
+        """Per-team wins, losses and average points for/against, keyed by ESPN team id, with the team's home record
+        as ESPN writes it ("home": "W-L", the NFL's "W-L-T", the NHL's "W-L-OTL"; None when ESPN gives none, as
+        in soccer) for data/context_inputs.py's home_rates."""
         sport, path = LEAGUES[league]
 
         def load() -> Dict[str, Dict[str, float]]:
@@ -440,6 +442,7 @@ class EspnClient:
                         "losses": losses,
                         "points_for": stats.get("avgPointsFor"),
                         "points_against": stats.get("avgPointsAgainst"),
+                        "home": _home_record(entry.get("stats", [])),
                     }
             return teams
 
@@ -599,6 +602,25 @@ class EspnClient:
             for event in events
             for competitor in event.get("competitions", [{}])[0].get("competitors", [])
         }
+
+
+def _home_record(stats: Any) -> Optional[str]:
+    """A standings entry's home record: the stat of type "home" ("W-L", "W-L-T", "W-L-OTL"), else MLB's homeWins,
+    homeLosses and homeTies as "W-L" (with "-T" when there were ties); None when there's neither."""
+    by_name = {}
+    for stat in stats or []:
+        if not isinstance(stat, dict):
+            continue
+        if str(stat.get("type") or "").lower() == "home" and (stat.get("summary") or stat.get("displayValue")):
+            return str(stat.get("summary") or stat.get("displayValue"))
+        by_name[stat.get("name")] = stat.get("value")
+    if by_name.get("homeWins") is None or by_name.get("homeLosses") is None:
+        return None
+    try:
+        wins, losses, ties = (int(float(by_name.get(name) or 0)) for name in ("homeWins", "homeLosses", "homeTies"))
+    except (TypeError, ValueError):
+        return None
+    return f"{wins}-{losses}-{ties}" if ties else f"{wins}-{losses}"
 
 
 def _goals(period: Any) -> int:

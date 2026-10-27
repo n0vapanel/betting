@@ -1,6 +1,7 @@
 // Settings: who you are, how numbers look, your sports, and your limits.
 //   Profile      name (shown on the leaderboard), how you're signed in, age confirmation
-//   Display      odds format (decimal or American), theme (browser only: Telegram uses its own)
+//   Display      odds format (decimal or American), units (Auto · Metric · Imperial: every wind speed, temperature,
+//                elevation and travel distance in Venue & conditions), theme (browser only: Telegram uses its own)
 //   Your sports  "All sports" (the default) or the leagues pinned first on Today: pins never hide a sport;
 //                Change opens the sports sheet (Select all / Clear, a tri-state box per sport)
 //   Limits       weekly budget (lowering applies now, raising waits 24 hours), reality check, and a break
@@ -9,7 +10,7 @@
 //   Account      sign out (password sessions), the welcome screen again, the helplines
 // Everything saves through PUT /api/me (POST /api/me/cooloff for a break). The server applies the
 // rules; this screen says what they are before anyone taps, and shows the server's answer afterwards.
-// Deep links: #/settings?focus=limits | budget | break scroll to that part.
+// Deep links: #/settings?focus=limits | budget | break | units scroll to that part.
 
 import { api, isQuiet, prefs } from "../api.js";
 import {
@@ -19,6 +20,7 @@ import {
 import { esc, money, notice, segmented, toast, confirmSheet, explain, section } from "../ui.js";
 import { icon } from "../icons.js";
 import { haptic } from "../telegram.js";
+import { unitsSetting } from "./context/units.js";
 
 const BREAKS = [
   { hours: 24, label: "24 hours" }, { hours: 72, label: "3 days" }, { hours: 168, label: "1 week" },
@@ -26,6 +28,12 @@ const BREAKS = [
 ];
 const REALITY = [{ value: "", label: "Off" }, { value: "15", label: "15 min" }, { value: "30", label: "30 min" }, { value: "60", label: "60 min" }];
 const MONEY = /^\d{1,7}(\.\d{1,2})?$/;
+const UNITS = [{ value: "auto", label: "Auto" }, { value: "metric", label: "Metric" }, { value: "imperial", label: "Imperial" }];
+const UNITS_WORDS = {
+  auto: "Auto: mph, °F, feet and miles for US leagues (NFL, NBA, MLB, NHL, college, WNBA, MLS); km/h, °C, metres and kilometres for the rest.",
+  metric: "km/h, °C, metres and kilometres everywhere.",
+  imperial: "mph, °F, feet and miles everywhere.",
+};
 
 const CSS = `
 .view-settings .st-row { display: flex; align-items: center; gap: 10px; min-height: var(--tap); }
@@ -80,6 +88,9 @@ function displayHtml(p) {
   return section("Display", `<div class="field"><span class="label">Odds format ${explain(american ? "american_odds" : "decimal_odds")}</span>
       ${segmented("format", [{ value: "decimal", label: "Decimal 2.50" }, { value: "american", label: "American +150" }], american ? "american" : "decimal", { label: "Odds format" })}
       <p class="st-example">A $10 bet at ${american ? "+150" : "2.50"} returns $25: your $10 back plus $15 profit.</p></div>
+    <div class="field" id="st-units"><span class="label">Units ${explain("explains_vs_moves", { label: "What Venue & conditions shows" })}</span>
+      ${segmented("units", UNITS, unitsSetting(p), { label: "Units" })}
+      <p class="st-example">${esc(UNITS_WORDS[unitsSetting(p)])} Used for wind, temperature, elevation and travel in Venue &amp; conditions.</p></div>
     ${inTelegram ? "" : `<div class="field"><span class="label">Theme</span>${segmented("theme", [{ value: "system", label: "Phone setting" }, { value: "dark", label: "Dark" }, { value: "light", label: "Light" }], prefs.get("theme", "system"), { label: "Theme" })}</div>`}`);
 }
 
@@ -191,7 +202,7 @@ export async function render(root, params) {
     if (root.isConnected && !root.contains(document.activeElement?.closest?.("input") || null)) draw();
   });
   // Fresh sport names, budget used and AI allowance (they change all the time), then the deep-linked part
-  const target = { limits: "#st-limits", budget: "#st-budget", break: "#st-break" }[params.query.get("focus")];
+  const target = { limits: "#st-limits", budget: "#st-budget", break: "#st-break", units: "#st-units" }[params.query.get("focus")];
   const reveal = () => {
     const el = target && root.isConnected ? root.querySelector(target) : null;
     if (!el) return;
@@ -283,6 +294,10 @@ export async function render(root, params) {
     if (seg) {
       if (seg.getAttribute("aria-pressed") === "true") return;
       if (seg.dataset.seg === "format") save({ odds_format: seg.dataset.value }, "Odds format saved");
+      else if (seg.dataset.seg === "units") {
+        const units = UNITS.find((u) => u.value === seg.dataset.value);
+        if (units) save({ units: units.value }, `Units: ${units.label}`);
+      }
       else if (seg.dataset.seg === "theme") {
         prefs.set("theme", seg.dataset.value);
         applyTheme(seg.dataset.value);

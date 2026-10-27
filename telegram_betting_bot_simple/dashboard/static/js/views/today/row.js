@@ -7,6 +7,7 @@ import { esc, pct, priceText, ago, badge, registerLeg } from "../../ui.js";
 import { slip, sportEmoji, leagueTitle } from "../../app.js";
 import { icon } from "../../icons.js";
 import { offer, legFor, edges, teamShort, marketsOf } from "./model.js";
+import { badgesHtml as contextBadges, parseCode } from "../context/badges.js";
 
 export const MARKETS = [
   { key: "h2h", label: "Winner", sides: ["away", "home", "draw"] },
@@ -236,12 +237,16 @@ export function edgeWords(game) {
   return `AI ${points(best[1]).replace(/^[+−]/, "")} points above the market on ${name}`;
 }
 
-/** Badges a row shows: back-to-back, neutral site, a caution when the AI is far from the market. */
+/**
+ * Badges a row shows: back-to-back, neutral site, a caution when the AI is far from the market. The context codes
+ * (wind, altitude, travel...: views/context/badges.js) have their own Context cell and chips (contextHtml).
+ */
 export function badgesHtml(game) {
   const out = [];
   const list = Array.isArray(game.badges) ? game.badges : [];
   for (const b of list) {
     if (b === "live" || /^b2b-(home|away)$/.test(b)) continue; // live: the status says it; b2b: by the team
+    if (parseCode(b)) continue; // a context code: the Context cell draws it
     if (b === "neutral") out.push(badge("Neutral site", "muted"));
     else if (typeof b === "string") out.push(badge(b.replace(/[-_]/g, " "), "muted"));
   }
@@ -251,8 +256,18 @@ export function badgesHtml(game) {
   if (e && Math.max(...Object.values(e).map(Math.abs)) >= CAUTION && game.status === "pre") {
     out.push(`<span class="badge warn" title="${esc("The AI is far from the bookmakers: check the injury news")}">${icon("alert", { size: 12 })}Far from market</span>`);
   }
-  if (game.venue && game.venue.indoor === false && game.status === "pre") out.push(badge("Outdoors", "muted"));
+  // ESPN's indoor flag is false for a retractable roof: once the roof is announced closed (the "roof" context chip)
+  // "Outdoors" would contradict it
+  if (game.venue && game.venue.indoor === false && game.status === "pre" && !list.includes("roof")) out.push(badge("Outdoors", "muted"));
   return out.join("");
+}
+
+/**
+ * The game's context chips (venue, weather, rest and travel; views/context/badges.js), up to ``max``: "cell" for the
+ * board's Context column, "in" under the time on a narrow board, "card" on a phone card. "" without any.
+ */
+export function contextHtml(game, { variant = "cell", max = 3 } = {}) {
+  return contextBadges(game.badges, { league: game.league, game, variant, max });
 }
 
 /** "12 min ago" for the game's odds, or "–". */
@@ -290,7 +305,7 @@ export function noOddsHtml(game, entry, asked) {
  * A desktop board row. ``ai`` says whether the AI and Edge columns are shown; ``withDay`` adds the weekday to
  * the time (a search across days).
  */
-export function rowHtml(game, { entry, ai, withDay, open, asked, prefetchable, expanded, cols = ai ? 11 : 9 }) {
+export function rowHtml(game, { entry, ai, withDay, open, asked, prefetchable, expanded, cols = ai ? 12 : 10 }) {
   const href = detailHash(game);
   const sides = lineSides(game);
   const lines = sides.length;
@@ -312,11 +327,15 @@ export function rowHtml(game, { entry, ai, withDay, open, asked, prefetchable, e
     <div class="tb-c tb-edge" role="cell"${edges(game) ? ` aria-label="${esc(edgeWords(game))}"` : ""}>${edgeCell(game, sides)}</div>` : "";
   const notes = badgesHtml(game);
   const asOf = asOfHtml(game, { blank: true });
-  // A narrow board (under 820 px) has no Notes column: its badges and "as of" go under the time instead
+  const context = contextHtml(game, { variant: "cell" });
+  const contextIn = context ? contextHtml(game, { variant: "in" }) : "";
+  // A narrow board (under 820 px) has no Notes column: its badges and "as of" go under the time instead; under
+  // 700 px there is no Context column either, and the context chips go there too
   return `<div class="tb-row l${lines}${open ? " is-open" : ""}${game.status === "live" ? " is-live" : ""}${game.status === "final" ? " is-final" : ""}" role="row" data-game="${esc(game.id)}"${href ? ` data-route="${esc(href)}"` : ""}${prefetchable && href ? ` data-prefetch="${esc(href)}"` : ""}>
-    <div class="tb-c tb-when" role="rowheader">${statusHtml(game, { withDay })}<span class="tb-lg-in">${leagueHtml(game, entry)}</span>${notes || asOf ? `<span class="tb-notes-in">${notes}${asOf}</span>` : ""}</div>
+    <div class="tb-c tb-when" role="rowheader">${statusHtml(game, { withDay })}<span class="tb-lg-in">${leagueHtml(game, entry)}</span>${notes || asOf || contextIn ? `<span class="tb-notes-in">${contextIn}${notes}${asOf}</span>` : ""}</div>
     <div class="tb-c tb-lg" role="cell">${leagueHtml(game, entry)}</div>
     <div class="tb-c tb-match" role="cell">${opener}</div>
+    <div class="tb-c tb-ctx" role="cell">${context}</div>
     ${odds}
     ${marketsCell(game, sides)}
     ${aiCells}
@@ -331,12 +350,13 @@ export function rowHtml(game, { entry, ai, withDay, open, asked, prefetchable, e
  * there are no prices. Its one cell spans the row (``cols``: the columns the board shows; Today keeps
  * aria-colspan up to date).
  */
-export function detailHtml(game, entry, asked, { cols = 11 } = {}) {
+export function detailHtml(game, entry, asked, { cols = 12 } = {}) {
   const when = new Date(game._start ?? game.start);
   const venue = game.venue ? [game.venue.name, game.venue.city].filter(Boolean).join(", ") : "";
+  const roofClosed = Array.isArray(game.badges) && game.badges.includes("roof");
   const facts = [
     ["Starts", Number.isNaN(when.getTime()) ? "" : LONG.format(when)],
-    ["Where", venue ? `${venue}${game.venue.indoor === true ? " (indoors)" : game.venue.indoor === false ? " (outdoors)" : ""}` : ""],
+    ["Where", venue ? `${venue}${game.venue.indoor === true ? " (indoors)" : roofClosed ? " (roof closed)" : game.venue.indoor === false ? " (outdoors)" : ""}` : ""],
     ["Records", game.away?.record || game.home?.record ? `${game.away?.name || "Away"} ${game.away?.record || "–"} · ${game.home?.name || "Home"} ${game.home?.record || "–"}` : ""],
     ["Status", game.status === "live" ? `Live${game.clock ? ` (${game.clock})` : ""}` : game.status === "final" ? "Final" : game.status === "postponed" ? "Postponed" : "Not started"],
   ].filter(([, v]) => v);

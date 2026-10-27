@@ -125,6 +125,8 @@ PLAN_FAILED_SETTING = "plan_failed_at"  # users.settings: when a plan's run last
 # Times in the settings of the row holding the gates (see gates_id): each only ever moves later
 GATE_SETTINGS = (PAUSE_SETTING, PLAN_FAILED_SETTING)
 TIMEZONE_SETTING = "timezone"  # users.settings: the person's IANA time zone, sent by the app (the late-night note)
+UNITS_SETTING = "units"  # users.settings: "auto" (imperial in US leagues, metric otherwise), "metric" or "imperial"
+UNITS = ("auto", "metric", "imperial")
 # The users row holding the break, picks pause, weekly budget and the break after a failed plan every password
 # browser shares (see gates_id)
 SHARED_WEB = "*web"
@@ -218,7 +220,8 @@ def candidate_leg(candidate: Any, books: Optional[Iterable[str]] = None) -> Opti
     return TicketLeg(key=candidate.key, league=candidate.league, event_id=candidate.ref["id"],
                      market=candidate.market, side=candidate.side, point=candidate.point, price=price,
                      label=candidate.label, game=candidate.game, start=candidate.start, ai_prob=candidate.chance,
-                     market_prob=candidate.fair, push_prob=candidate.push, book=book, group=candidate.game_key)
+                     market_prob=candidate.fair, push_prob=candidate.push, book=book, group=candidate.game_key,
+                     adjusted=candidate.adjusted)
 
 
 # --- small helpers --------------------------------------------------------------------------------
@@ -900,6 +903,8 @@ class Lab(Gates):
             "timezone": (user.get("settings") or {}).get(TIMEZONE_SETTING),
             # The builder's last controls (PUT /api/me {builder}), or None
             "builder": (user.get("settings") or {}).get(BUILDER_SETTING),
+            # The units every venue & conditions figure is shown in (km/h or mph, °C or °F, m or ft, km or mi)
+            "units": (user.get("settings") or {}).get(UNITS_SETTING) or "auto",
             "credits": self.credits(uid),
             "public_url": self.public_url,
             "ai_enabled": self.assistant is not None,
@@ -916,6 +921,11 @@ class Lab(Gates):
         if "builder" in body:  # the builder's last controls, checked; None clears them
             saved = None if body["builder"] is None else self.save_builder(body["builder"])
             changes["settings"] = {**changes.get("settings", {}), BUILDER_SETTING: saved}
+        if "units" in body:  # "auto", "metric" or "imperial"; None goes back to auto
+            units = body["units"]
+            if units is not None and units not in UNITS:
+                raise CallRejected("Units are auto, metric or imperial")
+            changes["settings"] = {**changes.get("settings", {}), UNITS_SETTING: None if units == "auto" else units}
         for field in ("name", "risk_tier", "reality_check_minutes"):  # None clears these
             if field in body:
                 changes[field] = body[field]
@@ -1083,8 +1093,10 @@ class Lab(Gates):
         from ..engine import soccer
         key = _leg_key(ref["league"], ref["id"], ref["market"], ref["side"], ref["point"])
         game_key = f"{ref['league']}:{ref['id']}"
-        legs = soccer.candidates(ref["league"], game_key, (event["away"], event["home"]), event["commence_time"],
-                                 found[1], ref_id=ref["id"])
+        legs = self.service.mark_soccer_adjusted(
+            ref["league"], event, found[0],
+            soccer.candidates(ref["league"], game_key, (event["away"], event["home"]), event["commence_time"],
+                              found[1], ref_id=ref["id"]))
         candidate = next((c for c in legs if c.key == key), None)
         if candidate is None:
             return None
@@ -1094,14 +1106,16 @@ class Lab(Gates):
 
     def _leg(self, league: str, card: Mapping[str, Any], market: str, side: str, offer: Mapping[str, Any]) -> TicketLeg:
         point = offer.get("point")
-        # Without a model prediction the card's "ai" is just the market's chance again, so it isn't the AI's
-        modelled = card.get("prediction") is not None
+        # Without a model prediction the card's "ai" is just the market's chance again, so it isn't the AI's; a totals
+        # chance an adjustment moved (a forecast or roof change since the odds, data/context.py) is the brain's own
+        modelled = card.get("prediction") is not None or bool(offer.get("adjusted"))
         return TicketLeg(
             key=_leg_key(league, str(card["id"]), market, side, point), league=league, event_id=str(card["id"]),
             market=market, side=side, point=point, price=Decimal(str(offer["price"])), label=offer["label"],
             game=f"{card['away']} @ {card['home']}", start=card["start"],
             ai_prob=offer.get("ai") if modelled else None, market_prob=offer.get("fair"),
             push_prob=offer.get("push") or 0.0, book=offer.get("book"), group=str(card["id"]),
+            adjusted=offer.get("adjusted") or None,
         )
 
     def leg_from_ref(self, ref: Mapping[str, Any]) -> Optional[TicketLeg]:
@@ -1191,6 +1205,16 @@ class Lab(Gates):
         found, removed, moved = self._resolve(refs, books)
         legs = [leg for _, leg, _ in found]
         priced = self._priced(legs, ticket_type, stake, k, system)
+        # A totals leg whose chance an adjustment moved says so: {applied, reason} (its card's offer at that line)
+        adjusted: Dict[str, Any] = {}
+        for _, leg, card in found:
+            offer = (((card or {}).get("markets") or {}).get(leg.market) or {}).get(leg.side) or {}
+            if offer.get("adjusted") and offer.get("point") == leg.point:
+                adjusted[leg.key] = offer["adjusted"]
+        for view in priced["legs"]:
+            note = adjusted.get(_view_key(view) or "")
+            if note:
+                view["adjusted"] = dict(note)
         if removed:
             priced["valid"] = False
             gone = "1 pick is" if len(removed) == 1 else f"{len(removed)} picks are"
@@ -1248,7 +1272,8 @@ class Lab(Gates):
         """
         self.ready(uid)
         priced, found = self._price(body)
-        legs = [{"index": view["index"], "label": view["label"], "notes": self._notes(view, card)}
+        units = self._units(uid)
+        legs = [{"index": view["index"], "label": view["label"], "notes": self._notes(view, card, units)}
                 for view, (_, _, card) in zip(priced["legs"], found)]
         alternatives = self._alternatives(priced, [leg for _, leg, _ in found])
         result: Dict[str, Any] = {"ticket": priced, "legs": legs, "alternatives": alternatives, "explanation": None}
@@ -1290,21 +1315,37 @@ class Lab(Gates):
                              for alt in alternatives],
         }
 
-    def _notes(self, leg: Mapping[str, Any], card: Optional[Mapping[str, Any]]) -> List[str]:
-        """Plain facts about one leg (numbers from the board, the model and ESPN; nothing made up)."""
+    def _units(self, uid: str) -> str:
+        """The person's Units setting ("auto", "metric" or "imperial"), "auto" when it can't be read."""
+        try:
+            return str((self.user(uid).get("settings") or {}).get(UNITS_SETTING) or "auto")
+        except Exception:
+            return "auto"
+
+    def _notes(self, leg: Mapping[str, Any], card: Optional[Mapping[str, Any]], units: str = "auto") -> List[str]:
+        """Plain facts about one leg (numbers from the board, the model and ESPN; nothing made up). ``units``: the
+        person's setting, for an adjustment's reason."""
+        from ..data.context import note_reason, units_for
         notes: List[str] = []
         p, q = leg.get("ai_prob"), leg.get("market_prob")
         if leg.get("started"):
             notes.append("This game has started, so this pick can't go on a new ticket.")
         chance = p if p is not None else q
         model = leg.get("book") == MODEL_BOOK  # priced at the goals model's fair odds: its chance is that model's
+        adjusted = leg.get("adjusted") if isinstance(leg.get("adjusted"), Mapping) else None
+        reason = note_reason(adjusted, units_for(str(leg.get("league") or ""), units)) if adjusted else None
+        if reason:
+            notes.append(f"Adjusted: {reason}")
         if chance is not None:
             whose = "the goals model's" if model else "the AI's" if p is not None else "the market's"
             notes.append(f"{(leg.get('chance_label') or '').capitalize()}: wins about {_chance_words(chance)} "
                          f"by {whose} chance.")
         if model:
             notes.append(f"{FAIR_PRICE_NOTE[:-1]}: no bookmaker here offers this price, and theirs is usually lower.")
-        if p is not None and q is not None:
+        if adjusted and p is not None and q is not None:
+            notes.append(f"The brain's chance ({_pct(p)}) differs from the market's ({_pct(q)}) only by that "
+                         "adjustment.")
+        elif p is not None and q is not None:
             # The AI's chance is outright and the market's is given no push: compare them like for like
             push = leg.get("push_prob") or 0.0
             ai = tickets.ai_given_no_push(p, push)
@@ -1536,7 +1577,7 @@ class Lab(Gates):
         import hashlib
         assembled = self.service.builder_candidates(now=self._now())
         key = ("builder", hashlib.sha1(controls.cache_key().encode()).hexdigest()[:24], assembled["etag"],
-               assembled.get("consensus_as_of"), self.service.odds_mark())
+               assembled.get("consensus_as_of"), self.service.odds_mark(), assembled.get("context_mark") or "")
         return self.service.cache.get(key, BUILDER_TTL, lambda: self._builder_build(controls, assembled),
                                       kind="builder", error_ttl=5)
 

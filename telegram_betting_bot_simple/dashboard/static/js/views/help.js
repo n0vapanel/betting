@@ -2,7 +2,8 @@
 //   #/help              search, the guides and the whole glossary by group
 //   #/help/glossary     the glossary on its own, with the same search
 //   #/help/<guide>      start (the 60-second tour) · ai (how the AI decides) · builder (the Builder's
-//                       presets, controls and tickets) · rollover (rollover explained, with the
+//                       presets, controls and tickets) · conditions (Venue & conditions: what explains the
+//                       line and what moves it, the effect sizes and caps) · rollover (rollover explained, with the
 //                       blueprint's real numbers) · responsible · faq
 //                       (#/help/faq?item=3 opens one answer)
 //   #/help/<term>       one glossary entry: the definition, a worked example step by step, the person's
@@ -20,6 +21,7 @@ import { icon } from "../icons.js";
 import { ensureStyles } from "./help/styles.js";
 import {
   terms, term, GROUPS, TOPICS, topic, START_STEPS, ROLLOVER_TABLE, SURVIVAL, STRATEGIES, HELPLINES, WARNING_SIGNS, FAQ,
+  CONTEXT_CAPS, CONTEXT_EFFECTS,
 } from "./help/content.js";
 
 const chevron = () => icon("chevron", { size: 18 });
@@ -328,6 +330,42 @@ function builderHtml() {
       <a class="btn btn-secondary" href="#/help/near_miss">${icon("info", { size: 18 })}Near misses</a></div>`;
 }
 
+function conditionsHtml() {
+  return `<div class="page-head"><span class="eyebrow">Guide</span><h1>Venue &amp; conditions</h1>
+      <p>Venues, weather, rest and travel explain the line; only newer information moves it.</p></div>
+    <section class="card">
+      <p class="hp-lead">Every game page shows where the game is played, the weather at the start and each team's rest and travel, then splits the market's own numbers into what they're made of.</p>
+      <p class="small muted" style="margin-top:8px">It's read in the background and never costs odds credits. The realistic promise is to match the market and explain it: the bookmakers' prices already hold most of this.</p>
+    </section>
+    ${section("What the panel shows", points([
+      ["map-pin", "<b>The venue</b>: name, city and a map link, its elevation, roof (open, dome or retractable, and whether it's closed), surface, capacity and, for baseball, the park's run and home-run factors (100 is average)."],
+      ["plane", "<b>Rest and travel</b>: each team's last game, how far it travelled, how many time zones it crossed, and its days of rest, with back-to-backs flagged."],
+      ["wind", "<b>Weather</b> for open-air and retractable venues, hour by hour around the start: temperature, wind (the arrow points where it blows) and the chance of rain, plus MLB's own announcement (\"14 mph, Out To RF\", \"Roof Closed\") when it has one. Weather data by <a href=\"https://open-meteo.com/\" target=\"_blank\" rel=\"noopener noreferrer\">Open-Meteo.com</a>."],
+      ["sliders", "<b>Units</b>: Settings → Units. Auto shows mph, °F, feet and miles for US leagues and km/h, °C, metres and kilometres for the rest; Metric or Imperial sets every one. <a href=\"#/settings?focus=units\">Change units</a>"],
+      ["today", "<b>On Today</b>, up to three chips per game: wind, cold, heat, rain, roof closed, altitude, a team that flew east, a short week, and Adj when a number moved. Phone cards show two, slip legs show their game's."],
+    ]))}
+    ${section("Two layers, kept apart", `${points([
+      ["info", "<b>Why the line is here</b> (explains, doesn't move the number): the market's margin and total split into the league baseline, home field, altitude, rest, travel and time zones, the park, the weather as forecast when the odds were fetched, and the rest (\"Team strength and other\"). The rest makes the rows add up exactly to the market's number."],
+      ["sliders", "<b>What moves it</b>: only news the odds couldn't hold, a forecast that changed after they were fetched or a roof announced closed (or open) since. The change counts at half weight up to a cap: applied = clamp(0.5 × change, −cap, +cap). With no market line to anchor to, the full change applies and the screen says so."],
+      ["chart", "<b>Every adjustment is logged</b>: each game with a total line is frozen at the start with the over's chance before and after, then graded. The 0.5 weight rises only after 200 graded games show the adjusted line beating the plain one."],
+    ], "info")}
+      <div class="table-wrap" style="margin-top:10px"><table>
+        <caption class="sr-only">The most an adjustment can move each number</caption>
+        <thead><tr><th scope="col">Number</th><th scope="col">Cap</th></tr></thead>
+        <tbody>${CONTEXT_CAPS.map(([what, cap]) => `<tr><th scope="row">${esc(what)}</th><td>${esc(cap)}</td></tr>`).join("")}</tbody>
+      </table></div>
+      <p class="note" style="margin-top:6px">The 0.5 weight and these caps are design choices, not published values.</p>`, { info: "explains_vs_moves" })}
+    ${section("The starting effect sizes", `<p class="small muted">What each effect is worth to start with, in plain words, with where it comes from. They're refitted once the log has enough graded games.</p>
+      <ul class="hp-effects">${CONTEXT_EFFECTS.map((e) => `<li><b>${esc(e.what)}</b>${e.sure ? ` <span class="hp-sure">${esc(e.sure)}</span>` : ""}<p>${esc(e.size)}</p>${e.source ? `<p class="hp-src">Source: ${esc(e.source)}</p>` : ""}</li>`).join("")}</ul>`)}
+    ${section("The market usually wins", points([
+      ["scale", "Bookmakers already shade totals for strong wind (about 1.5 points for a 15–19 mph NFL forecast), and home field, altitude and rest are priced in: that's why they only explain."],
+      ["alert", "Weather and travel effects other than NFL wind are small and noisy: \"small, noisy\" and \"untested\" say so on each one."],
+      ["alert", "Known limits: a venue move or a rescheduled game isn't spotted; venues outside baseball were placed by hand (checked to 40 km of their city); Open-Meteo is free for non-commercial use with attribution."],
+    ], "warn"))}
+    <div class="hp-actions"><a class="btn btn-primary" href="#/today">${icon("today", { size: 18 })}See it on a game</a>
+      <a class="btn btn-secondary" href="#/help/explains_vs_moves">${icon("info", { size: 18 })}Explains vs moves the number</a></div>`;
+}
+
 function rolloverHtml() {
   const t = ROLLOVER_TABLE;
   const table = `<div class="hp-scens">${t.rows.map((r) => `<div class="hp-scen">
@@ -414,6 +452,7 @@ function renderTopic(root, t, params) {
   else if (t.key === "ai") root.innerHTML = aiHtml();
   else if (t.key === "rollover") root.innerHTML = rolloverHtml();
   else if (t.key === "builder") root.innerHTML = builderHtml();
+  else if (t.key === "conditions") root.innerHTML = conditionsHtml();
   else if (t.key === "responsible") root.innerHTML = responsibleHtml();
   else {
     const raw = params.query.get("item"); // none (plain #/help/faq) opens no answer: Number(null) would be 0

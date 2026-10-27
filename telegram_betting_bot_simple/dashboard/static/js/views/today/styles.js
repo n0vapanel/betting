@@ -128,9 +128,11 @@ const CSS = `
 
 /* --- the desktop board ---------------------------------------------------------------------------------- */
 /* Under 820 px (a desk with the tree and the slip open, or the inspector beside it) there is no Notes column:
-   the badges and "as of" go under the time (.tb-notes-in), so the names keep the room. today.js columnsAt()
-   follows these breakpoints (6 columns, 7 from 820, 9 from 1180; AI and Edge add 2). The League and "Odds as
-   of" columns wait for 1180 px, so the names keep about 330 px beside them. */
+   the badges and "as of" go under the time (.tb-notes-in), so the names keep the room. The Context column (venue,
+   weather, rest and travel chips, views/context/badges.js) comes after the teams from 700 px; under that its chips
+   go under the time too. today.js columnsAt() follows these breakpoints (6 columns, 7 from 700, 8 from 820, 10
+   from 1180; AI and Edge add 2). The League and "Odds as of" columns wait for 1180 px, so the names keep about
+   330 px beside them. */
 .view-today .tb {
   --c-when: 84px; --c-lg: 0px; --c-match: minmax(130px, 1fr); --c-h2h: 60px; --c-sp: 80px; --c-tot: 92px; --c-mkt: 72px;
   --c-ai: 46px; --c-edge: 56px; --c-notes: 76px; --tb-min: 518px;
@@ -138,27 +140,33 @@ const CSS = `
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); overflow: clip; margin-top: 4px;
 }
 .view-today .tb.has-ai { --cols: var(--c-when) var(--c-match) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-ai) var(--c-edge); --tb-min: 620px; }
-.view-today .tb-c.tb-badges { display: none; }
+.view-today .tb-c.tb-badges, .view-today .tb-c.tb-ctx { display: none; }
+@container today (min-width: 700px) {
+  .view-today .tb { --c-ctx: 46px; --tb-min: 564px; --cols: var(--c-when) var(--c-match) var(--c-ctx) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt); }
+  .view-today .tb.has-ai { --tb-min: 666px; --cols: var(--c-when) var(--c-match) var(--c-ctx) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-ai) var(--c-edge); }
+  .view-today .tb-c.tb-ctx { display: flex; }
+  .view-today .tb-notes-in .cxv-in { display: none; }
+}
 .view-today .tb-notes-in { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; min-width: 0; font-size: 11.5px; color: var(--text-2); }
 .view-today .tb-notes-in .badge { font-size: 10.5px; line-height: 1.3; padding: 1px 5px; max-width: 100%; white-space: normal; } /* "Far from market" wraps rather than being cut */
 @container today (min-width: 820px) {
   .view-today .tb {
-    --c-when: 100px; --c-match: minmax(180px, 1fr); --c-h2h: 70px; --c-sp: 88px; --c-tot: 100px; --c-mkt: 76px; --c-ai: 52px; --c-edge: 62px; --c-notes: 104px; --tb-min: 718px;
-    --cols: var(--c-when) var(--c-match) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-notes);
+    --c-when: 92px; --c-match: minmax(164px, 1fr); --c-ctx: 56px; --c-h2h: 70px; --c-sp: 88px; --c-tot: 100px; --c-mkt: 76px; --c-ai: 52px; --c-edge: 62px; --c-notes: 88px; --tb-min: 734px;
+    --cols: var(--c-when) var(--c-match) var(--c-ctx) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-notes);
   }
-  .view-today .tb.has-ai { --tb-min: 832px; --cols: var(--c-when) var(--c-match) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-ai) var(--c-edge) var(--c-notes); }
+  .view-today .tb.has-ai { --tb-min: 848px; --cols: var(--c-when) var(--c-match) var(--c-ctx) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-ai) var(--c-edge) var(--c-notes); }
   .view-today .tb-c.tb-badges { display: flex; }
   .view-today .tb-notes-in { display: none; }
 }
 @container today (min-width: 1180px) {
   .view-today .tb {
-    --c-when: 84px; --c-lg: 108px; --c-match: minmax(200px, 1fr); --c-h2h: 72px; --c-sp: 90px; --c-tot: 100px; --c-mkt: 88px; --c-ai: 54px;
-    --c-edge: 64px; --c-notes: 120px; --c-asof: 84px; --tb-min: 946px;
-    --cols: var(--c-when) var(--c-lg) var(--c-match) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-notes) var(--c-asof);
+    --c-when: 84px; --c-lg: 108px; --c-match: minmax(200px, 1fr); --c-ctx: 100px; --c-h2h: 72px; --c-sp: 90px; --c-tot: 100px; --c-mkt: 88px; --c-ai: 54px;
+    --c-edge: 64px; --c-notes: 108px; --c-asof: 84px; --tb-min: 1034px;
+    --cols: var(--c-when) var(--c-lg) var(--c-match) var(--c-ctx) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-notes) var(--c-asof);
   }
   .view-today .tb.has-ai {
-    --tb-min: 1064px;
-    --cols: var(--c-when) var(--c-lg) var(--c-match) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-ai) var(--c-edge) var(--c-notes) var(--c-asof);
+    --tb-min: 1152px;
+    --cols: var(--c-when) var(--c-lg) var(--c-match) var(--c-ctx) var(--c-h2h) var(--c-sp) var(--c-tot) var(--c-mkt) var(--c-ai) var(--c-edge) var(--c-notes) var(--c-asof);
   }
 }
 .view-today .tb-headwrap {
@@ -261,6 +269,9 @@ const CSS = `
 .view-today .tb-mkt.is-low .mk-v { color: var(--text-2); font-style: italic; }
 .view-today .tb-hrow .tb-mkt, .view-today .tb-hrow .tb-ai, .view-today .tb-hrow .tb-edge { justify-content: end; }
 .view-today .tb-badges { display: flex; flex-wrap: wrap; align-content: center; align-items: center; gap: 4px; }
+.view-today .tb-row .tb-ctx { align-items: center; padding-inline: 4px; overflow: hidden; }
+.view-today .tb-hrow .tb-ctx { padding-inline: 4px; }
+.view-today .tb-notes-in .cxv-in { flex: 0 1 auto; }
 .view-today .tb-badges .badge { font-size: 11px; padding: 1px 6px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .view-today .tb-asof, .view-today .tb-asof-in { font-size: 12px; color: var(--text-2); }
 .view-today .tb-asof-in { display: block; width: 100%; }

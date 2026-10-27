@@ -4,7 +4,9 @@
 // "what blocked it" when nothing could be built, and the ideas when correlation ideas were asked for.
 //
 // Every number is the server's (POST /api/builder/run, /api/builder/price after a swap): this file only lays
-// them out. Every outside text is escaped.
+// them out. Every outside text is escaped. Venue & conditions (v3 Stage 4): a leg's Why carries the server's context
+// line, and a leg whose chance a forecast or roof change moved shows the "adj" chip (its reason in the chip's
+// words), with its game's context chips from the cached slate (views/context/badges.js legBadges).
 //
 //   resultHtml(view)        view = {result, cards: [card], stake, at, busy}
 //   card = {t (the ticket shown: the server's, or the server's re-pricing after a swap), swapped: {index} | null,
@@ -14,6 +16,8 @@ import { esc, pct, money, signedMoney, priceText, timeLabel, badge, explain, not
 import { icon } from "../../../icons.js";
 import { leagueTitle, me } from "../../../app.js";
 import { gameShort, cutPct, mostLikelyText } from "../common.js";
+import { legBadges } from "../../context/badges.js";
+import { unitsFor } from "../../context/units.js";
 
 const FLAG_BADGES = {
   disagree: ["Sources disagree", "warn", "scale"],
@@ -23,7 +27,7 @@ const FLAG_BADGES = {
   stale_price: ["Old price", "warn", "clock"],
   live: ["Under way", "danger", "clock"],
 };
-const SOURCES = { blend: "Markets say", books: "books, margin out", model: "goals model" };
+const SOURCES = { blend: "Markets say", books: "books, margin out", model: "goals model", adjusted: "books, adjusted" };
 
 /** "1 in 3" below even chances, "62%" from there up (the server's one_in). */
 function oneIn(p, n) {
@@ -86,7 +90,8 @@ function expectedBasis(t) {
   if (only === "blend") return { words: "by Markets say", books: false };
   if (only === "books") return { words: "by the books, margin out", books: true };
   if (only === "model") return { words: "by the goals model", books: false };
-  const names = [sources.has("blend") ? "Markets say where loaded" : "", sources.has("books") ? "the books" : "", sources.has("model") ? "the goals model" : ""].filter(Boolean);
+  if (only === "adjusted") return { words: "by the books' chances, adjusted for a forecast or roof change", books: false };
+  const names = [sources.has("blend") ? "Markets say where loaded" : "", sources.has("books") ? "the books" : "", sources.has("model") ? "the goals model" : "", sources.has("adjusted") ? "the books adjusted" : ""].filter(Boolean);
   if (!names.length) return { words: "by the Builder's chances", books: false };
   const [first, ...rest] = names;
   const tail = rest.length ? `${first.startsWith("Markets") ? ", else " : " and "}${rest.join(" or ")}` : "";
@@ -102,7 +107,7 @@ function swapList(card, ti, li, leg) {
   const listId = `bd-sw-${ti}-${li}`;
   const back = card.swapped?.index === li ? card.original.legs[li] : null;
   const items = options.filter((o) => o.key !== leg.key).map((o, k) => {
-    const flags = (o.flags || []).filter((f) => FLAG_BADGES[f]).map((f) => FLAG_BADGES[f][0]).join(", ");
+    const flags = [...(o.flags || []).filter((f) => FLAG_BADGES[f]).map((f) => FLAG_BADGES[f][0]), ...(o.adjusted ? ["adjusted for the forecast"] : [])].join(", ");
     return `<li><button type="button" class="bd-swap-opt" data-bd-pick="${ti}:${li}:${options.indexOf(o)}">
       <span class="bd-so-top"><b>${esc(o.label)}</b><b class="num">${esc(Number(o.price).toFixed(2))}</b></span>
       <span class="bd-so-meta">${esc(gameShort(o.game, o.ref?.league))} · ${esc(o.book || "")} · chance ${esc(pct(o.chance))} · edge ${esc(pts(o.edge))} · price ${esc(o.age || "")} old${flags ? ` · ${esc(flags)}` : ""}</span>
@@ -123,7 +128,8 @@ function legHtml(card, ti, leg, li) {
   const locked = card.swapped && card.swapped.index !== li; // swaps were worked out for the ticket as built
   const n = (leg.swaps || []).filter((o) => o.key !== leg.key).length + (card.swapped?.index === li ? 1 : 0);
   const open = card.open === li;
-  const why = (leg.why || []).filter(Boolean);
+  // The server writes the Why in both unit systems (why_units); show the person's
+  const why = ((leg.why_units && leg.why_units[unitsFor(leg.league || leg.ref?.league)]) || leg.why || []).filter(Boolean);
   const chance = leg.chance ?? leg.ai_prob;
   const source = SOURCES[leg.chance_source] || (leg.chance_source ? leg.chance_source : "");
   const age = leg.age ? `${leg.age} old` : "";
@@ -136,7 +142,7 @@ function legHtml(card, ti, leg, li) {
       <span>Chance <b class="num">${esc(pct(chance))}</b>${source ? ` <small>${esc(source)}</small>` : ""}</span>
       <span>Edge <b class="num">${esc(pts(leg.edge))}</b></span>
       ${age ? `<span class="${(leg.flags || []).includes("stale_price") ? "warn" : ""}">${icon("clock", { size: 12 })} <b>${esc(age)}</b></span>` : ""}
-      ${weak ? badge("Weakest leg", "warn", "alert") : ""}${legFlags(leg)}
+      ${weak ? badge("Weakest leg", "warn", "alert") : ""}${legFlags(leg)}${legBadges(leg.ref, { adjusted: leg.adjusted || null, max: 3 })}
     </div>
     ${why.length || leg.risk ? `<p class="bd-why">${why.length ? `<b>Why:</b> ${why.map(esc).join(" · ")}` : ""}${leg.risk ? `${why.length ? " " : ""}<span class="bd-risk"><b>Risk:</b> ${esc(leg.risk)}</span>` : ""}</p>` : ""}
     ${card.swapped?.index === li && !why.length ? '<p class="bd-why muted">Swapped in: its reasons come with the next build.</p>' : ""}

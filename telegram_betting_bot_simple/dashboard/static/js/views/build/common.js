@@ -3,7 +3,7 @@
 // alternatives). Every number shown comes from the server's pricing (engine/tickets.py via
 // /api/tickets/*); these helpers only format it.
 
-import { esc, pct, chanceText, money, signedMoney, priceText, shortName, explain, badge } from "../../ui.js";
+import { esc, pct, chanceText, money, signedMoney, priceText, shortName, explain, badge, ticketChanceWord } from "../../ui.js";
 import { icon } from "../../icons.js";
 import { oddsFormat, me, onBreak } from "../../app.js";
 
@@ -69,6 +69,7 @@ export function slipLeg(view, ref) {
     american: view.odds?.american,
     ai: view.ai_prob,
     fair: view.market_prob,
+    ...(view.adjusted ? { adjusted: true } : {}), // its chance moved for a forecast or roof change: "Adj" on the slip
   };
 }
 
@@ -82,6 +83,7 @@ export function chanceWord(chance) {
 /** The two chance tiles (the AI's and the market's), "1 in X" for anything below even chances. */
 export function chanceTiles(t, { info = true } = {}) {
   const c = t.chance || {};
+  const own = ticketChanceWord(t); // "Adjusted" when every leg's own chance is a forecast or roof adjustment
   const tile = (who, p, oneIn, missing) => `<div class="bx-tile">
       <span>${who}</span>
       ${p == null ? `<b>–</b><small>${esc(missing)}</small>`
@@ -90,7 +92,7 @@ export function chanceTiles(t, { info = true } = {}) {
   return `<div class="row-between"><span class="label" style="margin:0">${esc(chanceWord(c))} ${info ? explain("one_in") : ""}</span>
       ${c.label ? badge(capital(c.label), "muted") : ""}</div>
     <div class="bx-tiles">
-      ${tile("AI", c.ai, c.ai_one_in, "No AI model for every pick")}
+      ${tile(own, c.ai, c.ai_one_in, "No AI model for every pick")}
       ${tile("Market", c.market, c.market_one_in, "No market chance for every pick")}
     </div>`;
 }
@@ -106,9 +108,9 @@ export function mostLikelyText(ml, total) {
   return `${what} (${pct(ml.probability)})`;
 }
 
-function both(ai, market, format) {
+function both(ai, market, format, own = "AI") {
   const parts = [];
-  if (ai != null) parts.push(`${format(ai)} <span class="muted">AI</span>`);
+  if (ai != null) parts.push(`${format(ai)} <span class="muted">${own === "AI" ? "AI" : "adjusted"}</span>`);
   if (market != null) parts.push(`${format(market)} <span class="muted">market</span>`);
   return parts.length ? parts.join("<br>") : "–";
 }
@@ -139,21 +141,22 @@ export function summaryRows(t, { compact = false } = {}) {
   const c = t.chance || {};
   const e = t.expected || {};
   const spread = c.headline === "profit" || t.bets > 1;
+  const own = ticketChanceWord(t);
   const rows = [];
   if (t.odds) rows.push([`Odds ${explain(oddsFormat() === "american" ? "american_odds" : "decimal_odds")}`, esc(priceText(t.odds))]);
   rows.push(["Costs", `${money(t.total_stake, { cents: true })}${t.bets > 1 ? ` <span class="muted">(${t.bets} bets × ${money(t.unit_stake, { cents: true })})</span>` : ""}`]);
   rows.push([`Pays${spread ? " up to" : ""} ${explain("payout")}`, money(t.max_payout, { cents: true })]);
   if (compact) {
     const parts = [];
-    if (c.ai != null) parts.push(`${esc(chanceText(c.ai, c.ai_one_in))} <span class="muted">AI</span>`);
+    if (c.ai != null) parts.push(`${esc(chanceText(c.ai, c.ai_one_in))} <span class="muted">${own === "AI" ? "AI" : "adjusted"}</span>`);
     if (c.market != null) parts.push(`${esc(chanceText(c.market, c.market_one_in))} <span class="muted">market</span>`);
     rows.push([`${esc(chanceWord(c))} ${explain("one_in")}`, parts.join("<br>") || "–"]);
   } else if (c.headline === "profit") {
-    rows.push(["Any money back", both(c.any_return?.ai, c.any_return?.market, (p) => pct(p))]);
-    rows.push(["Every pick wins", both(c.every_leg?.ai, c.every_leg?.market, (p) => pct(p))]);
+    rows.push(["Any money back", both(c.any_return?.ai, c.any_return?.market, (p) => pct(p), own)]);
+    rows.push(["Every pick wins", both(c.every_leg?.ai, c.every_leg?.market, (p) => pct(p), own)]);
   }
   rows.push([`Bookmaker keeps ${explain("book_cut")}`, cutText(t.book_cut)]);
-  rows.push([`Expected result ${explain("expected_result")}`, both(e.ai, e.market, (v) => esc(signedMoney(v)))]);
+  rows.push([`Expected result ${explain("expected_result")}`, both(e.ai, e.market, (v) => esc(signedMoney(v)), own)]);
   if (t.most_likely) rows.push([`Most likely ${explain("most_likely")}`, esc(mostLikelyText(t.most_likely, t.total_stake))]);
   return `<dl class="summary">${rows.map(([dt, dd]) => `<div><dt>${dt}</dt><dd>${dd}</dd></div>`).join("")}</dl>`;
 }
@@ -168,7 +171,7 @@ export function outcomesTable(t) {
     : `${money(o.min_return, { cents: true })}–${money(o.max_return, { cents: true })}`);
   return `<details class="bx-outcomes"><summary>${icon("chart", { size: 16 })}Spread of outcomes</summary>
     <div class="table-wrap"><table>
-      <thead><tr><th>Result</th><th>Pays back</th><th>AI</th><th>Market</th></tr></thead>
+      <thead><tr><th>Result</th><th>Pays back</th><th>${ticketChanceWord(t)}</th><th>Market</th></tr></thead>
       <tbody>${rows.map((o) => `<tr><td>${esc(RESULT_NAMES[o.result] || o.result)}</td><td class="num">${pays(o)}</td><td class="num">${pct(o.ai)}</td><td class="num">${pct(o.market)}</td></tr>`).join("")}</tbody>
     </table></div></details>`;
 }

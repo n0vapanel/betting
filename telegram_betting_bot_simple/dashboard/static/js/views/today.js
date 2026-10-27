@@ -95,10 +95,11 @@ const sameSet = (a, b) => a.size === b.size && [...a].every((k) => b.has(k));
 const firstChunk = (mode) => (mode === "phone" ? Math.max(4, Math.ceil(Math.min(screen?.height || 800, 1400) / 200) + 1) : 30);
 
 /**
- * The columns the table shows at the board's width (today/styles.js: Notes from 820 px, League and "Odds as
- * of" from 1180 px; AI and Edge when a game has the AI's chance): a separator's or fold-out's aria-colspan.
+ * The columns the table shows at the board's width (today/styles.js: Context from 700 px, Notes from 820 px, League
+ * and "Odds as of" from 1180 px; AI and Edge when a game has the AI's chance): a separator's or fold-out's
+ * aria-colspan.
  */
-const columnsAt = (width, ai) => (width >= 1180 ? 9 : width >= 820 ? 7 : 6) + (ai ? 2 : 0);
+const columnsAt = (width, ai) => (width >= 1180 ? 10 : width >= 820 ? 8 : width >= 700 ? 7 : 6) + (ai ? 2 : 0);
 
 // What each redrawn part of the toolbar was last drawn with: an unchanged part isn't touched (focus stays)
 const drawnHtml = new WeakMap();
@@ -357,6 +358,7 @@ export async function render(root, params) {
     return `<p class="note">“Markets” is one chance blended from the sources that price the game: sharp bookmakers and exchanges, US bookmakers, prediction markets and ratings, each with its margin removed ${explain("markets_say")}.
       ⚖ marks a game whose sources disagree by 5 points or more (the number is how far apart they are) ${explain("disagreement")}; “Low” means no market price can be counted (none, or only thin or out-of-date ones), so it rests on ratings alone, pulled a quarter of the way toward the sport's usual home-win rate.
       ${ai ? `“AI” is the model's chance (NBA for now) ${explain("ai_chance")}; “Edge” is AI minus the bookmakers' chance (“Mkt”, margin removed) in points: ▲ 3 or more, ! 8 or more, which usually means news the model hasn't caught.` : "The AI's own chances are NBA-only for now."}
+      “Ctx” chips are the venue, weather, rest and travel (wind, cold, heat, rain, roof closed, altitude, a team that flew east, a short week): they explain the line, and “Adj” marks a game whose total moved for a forecast or roof change since the odds ${explain("explains_vs_moves", { label: "Explains vs moves the number" })}.
       Prices are the best at bookmakers you can bet with; tap one to add it to your slip.</p>`;
   }
 

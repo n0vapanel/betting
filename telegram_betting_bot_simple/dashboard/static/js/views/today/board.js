@@ -33,6 +33,7 @@ const HEAD = [
   { cls: "tb-when", label: "Time", sort: "time" },
   { cls: "tb-lg", label: "League", sort: "league" },
   { cls: "tb-match", label: "Away @ Home" },
+  { cls: "tb-ctx", label: "Context", short: "Ctx", title: "Venue, weather, rest and travel: what explains the line (Adj: a forecast or roof change moved a number)" },
   ...MARKETS.map((m) => ({ cls: `tb-${m.key}`, label: m.label })),
   { cls: "tb-mkt", label: "Markets", short: "Mkts", sort: "dis", byOther: true, sortWords: "sort by how far the sources disagree",
     title: "Markets say: one chance blended from the bookmakers, the exchanges, prediction markets and ratings. ⚖ marks sources 5 points or more apart: sort by how far apart they are" },
@@ -54,8 +55,10 @@ function headHtml(sort, ai) {
       : h.short ? h.label : "";
     const inner = h.sort
       ? `<button type="button" class="tb-sort" data-sort="${h.sort}"${h.title ? ` title="${esc(h.title)}"` : ""}${name ? ` aria-label="${esc(name)}"` : ""}>${text}<span class="tb-arrow" aria-hidden="true">${sorted ? (dir === "ascending" ? "▲" : "▼") : ""}</span></button>`
-      : `<span${h.title ? ` title="${esc(h.title)}"` : ""}>${esc(h.label)}</span>`;
-    return `<div class="tb-c ${h.cls}" role="columnheader"${h.sort ? ` aria-sort="${h.byOther ? "none" : dir}"` : ""}>${inner}</div>`;
+      : `<span${h.title ? ` title="${esc(h.title)}"` : ""}>${h.short ? text : esc(h.label)}</span>`;
+    // A short header ("Ctx") hides its full name below 1,180 px: the column header keeps it as its name
+    const named = !h.sort && h.short ? ` aria-label="${esc(h.label)}"` : "";
+    return `<div class="tb-c ${h.cls}" role="columnheader"${named}${h.sort ? ` aria-sort="${h.byOther ? "none" : dir}"` : ""}>${inner}</div>`;
   }).join("")}</div></div>`;
 }
 
@@ -78,7 +81,7 @@ const tight = (html) => html.replace(/\n\s*/g, "");
  * The board's parts (see the header). Separators: the person's pinned leagues first, a day per heading in a
  * search, a league per heading when sorted by league.
  */
-export function boardParts({ mode, games, prepared, state, ai, asked, pinned, inspected, canPrefetch, cols = ai ? 11 : 9 }) {
+export function boardParts({ mode, games, prepared, state, ai, asked, pinned, inspected, canPrefetch, cols = ai ? 12 : 10 }) {
   const multiDay = state.search.trim().length > 0;
   const table = mode !== "phone";
   const items = [];

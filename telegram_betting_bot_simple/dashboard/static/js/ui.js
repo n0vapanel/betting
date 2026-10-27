@@ -716,6 +716,13 @@ export const GLOSSARY = {
     example: "Celtics −4.5 @ 1.91: price 3 h 40 min old (max 3 h).",
     see: "#/build/builder",
   },
+  explains_vs_moves: {
+    title: "Explains vs moves the number",
+    short: "Venue, weather, rest and travel explain the market's line; only news newer than the odds moves a number.",
+    body: "\"Why the line is here\" splits the market's own margin and total into home field, altitude, rest and travel, the park, the weather as forecast when the odds were fetched, and what's left (team strength and other). It changes no chance. \"What moves it\" is separate: only a forecast or a roof that changed after the odds were fetched moves a number, by half the change (weight 0.5) up to a cap. With no market line to anchor to, the full change applies and the screen says so. The weight and caps are design choices, not published values, and the market usually wins.",
+    example: "An NFL total of 44.5 was priced when the forecast said 8 mph of wind and 28°F (−2°C): the weather explained −1.0 point (the cold). Now it says 19 mph: wind −3.8, cold −1.0 and cold with wind −2.0 make −6.8, a change of −5.8. Half is −2.9, capped at −2.0, so the over's chance moves from 50% to about 44%.",
+    see: "#/help/conditions",
+  },
   dixon_coles: {
     title: "Goals model (Dixon–Coles)",
     short: "How the app prices soccer markets the odds board doesn't carry, from the market's own odds.",
@@ -983,7 +990,10 @@ export function oddsButton(card, market, side, { wide = false } = {}) {
   const key = legKey(leg.ref);
   legRegistry.set(key, leg);
   const modelled = Boolean(card.prediction);
-  const chance = modelled ? offer.ai : offer.fair;
+  // A totals chance a forecast or roof change since the odds moved (Venue & conditions: offer.adjusted) is the
+  // brain's own, labelled "Adj" where there is no model
+  const adjusted = !modelled && Boolean(offer.adjusted) && offer.ai != null;
+  const chance = modelled || adjusted ? offer.ai : offer.fair;
   const point = pointText(market, side, offer.point);
   // Like with like: on a line that can push (a whole-number spread or total) the AI's chance is an outright
   // one, while the market's margin-free chance is a chance given no push, so the AI's is put on that footing
@@ -995,7 +1005,7 @@ export function oddsButton(card, market, side, { wide = false } = {}) {
   const far = modelled && !card.live && edge >= 0.08;
   const selected = slip.has(key);
   const name = offer.label || `${side} ${market}`;
-  const chanceWords = chance != null ? `${modelled ? "AI" : "market"} chance ${pct(chance)}` : "";
+  const chanceWords = chance != null ? `${modelled ? "AI" : adjusted ? "adjusted" : "market"} chance ${pct(chance)}${adjusted && offer.fair != null ? ` (market ${pct(offer.fair)})` : ""}` : "";
   // The marks say in words what they mean (screen readers, and phones that have no hover for the title);
   // Today and Game explain them in their legend too (GLOSSARY.value_mark)
   const markWords = value ? MARK_WORDS.value : far ? MARK_WORDS.far : "";
@@ -1005,9 +1015,27 @@ export function oddsButton(card, market, side, { wide = false } = {}) {
       aria-label="${esc(`${name}, odds ${priceText(offer)}${chanceWords ? `, ${chanceWords}` : ""}${markWords ? `. ${markWords}` : ""}`)}"${card.live ? " disabled" : ""}>
     ${point ? `<span class="o-point">${esc(point)}</span>` : ""}
     <span class="o-price">${esc(priceText(offer))}</span>
-    ${chance != null ? `<span class="o-chance">${modelled ? "AI" : "Mkt"} ${pct(chance)}${mark}</span>` : ""}
+    ${chance != null ? `<span class="o-chance">${modelled ? "AI" : adjusted ? "Adj" : "Mkt"} ${pct(chance)}${mark}</span>` : ""}
     <span class="o-check" aria-hidden="true">${icon("check", { size: 12 })}</span>
   </button>`;
+}
+
+/**
+ * The word for a leg's own chance, as its price button says it: "Adj" when a forecast or roof change since the odds
+ * moved it (Venue & conditions; ``adjusted`` on the server's priced leg, or on a slip leg from a button without a
+ * model), else "AI".
+ */
+export function legChanceWord(leg) {
+  return leg && leg.adjusted ? "Adj" : "AI";
+}
+
+/**
+ * The name for a priced ticket's own chances and expected result, beside the market's: "Adjusted" when every leg's
+ * chance is an adjusted one (no model behind any of them), else "AI".
+ */
+export function ticketChanceWord(ticket) {
+  const legs = Array.isArray(ticket?.legs) ? ticket.legs : [];
+  return legs.length && legs.every((leg) => leg && leg.adjusted) ? "Adjusted" : "AI";
 }
 
 /** Each team's chance to win: the AI's when the league has a model, else the market's (margin removed). */

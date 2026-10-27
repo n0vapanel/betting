@@ -19,7 +19,7 @@ import { api, prefs } from "./api.js";
 const DEFAULT_ME = {
   uid: null, name: null, is_telegram: false, age_confirmed: false, odds_format: "decimal", currency: "USD",
   favourite_sports: [], risk_tier: null, budget: null, reality_check_minutes: null, cooloff_until: null,
-  on_break: false, credits: null, public_url: null, ai_enabled: false,
+  on_break: false, credits: null, public_url: null, ai_enabled: false, units: "auto",
 };
 
 const listeners = { me: new Set(), slip: new Set(), priced: new Set() };
@@ -302,7 +302,7 @@ window.addEventListener("storage", (event) => {
 
 /**
  * The slip store.
- *   slip.legs                -> [{ref, key, label, game, start, league, price, american, ai, fair}]
+ *   slip.legs                -> [{ref, key, label, game, start, league, price, american, ai, fair, adjusted?}]
  *   slip.has(refOrKey)       -> boolean
  *   slip.add(leg) / slip.remove(refOrKey) / slip.toggle(leg) -> toggle returns true when added
  *   slip.clear()
@@ -405,8 +405,11 @@ export function legFromOffer(card, market, side, offer) {
     league: card.league,
     price: offer.price,
     american: offer.american,
-    ai: card.prediction ? offer.ai : null, // without a model the card's "ai" is the market again
+    // Without a model the card's "ai" is the market again, unless an adjustment moved it (Venue & conditions)
+    ai: card.prediction || offer.adjusted ? offer.ai : null,
     fair: offer.fair,
+    // ...and then the slip calls it "Adj", as the price button does
+    ...(!card.prediction && offer.adjusted ? { adjusted: true } : {}),
   };
 }
 

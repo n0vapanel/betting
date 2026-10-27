@@ -339,6 +339,8 @@ class MeUpdate(BaseModel):
     timezone: Optional[str] = Field(None, min_length=1, max_length=64)
     # The builder's last controls (kept in users.settings "builder"); null clears them
     builder: Optional[BuilderControls] = None
+    # Venue & conditions' units: auto (imperial in US leagues, metric otherwise), metric or imperial
+    units: Optional[Literal["auto", "metric", "imperial"]] = None
 
 
 class CooloffBody(BaseModel):
@@ -950,6 +952,14 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         ratings, the model), the games graded, the mean Brier score and log loss, and the blend's on the same
         games. Read from the store; nothing is fetched."""
         return calls_errors(svc.markets_record)
+
+    @app.get("/api/record/context", dependencies=signed_in)
+    def context_record(svc: DashboardService = Depends(get_service)) -> Dict[str, Any]:
+        """Venue & conditions' record: {games, graded, brier_before, brier_after, adjusted_games} (and ``adjusted``:
+        the graded games an adjustment moved, scored before and after it). Every game with a total line is logged
+        before its start with the chance of the over before and after any adjustment, and graded after the final.
+        Read from the store; nothing is fetched."""
+        return calls_errors(svc.context_record)
 
     @app.get("/api/cache/stats", dependencies=signed_in)
     def cache_stats() -> Dict[str, Any]:

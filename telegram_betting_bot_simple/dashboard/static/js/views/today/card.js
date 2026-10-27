@@ -9,7 +9,7 @@ import { icon } from "../../icons.js";
 import { favourite, bestEdge, teamShort, marketsOf } from "./model.js";
 import {
   MARKETS, detailHash, statusHtml, statusWords, teamLine, leagueHtml, priceButton, lineSides, badgesHtml, asOfHtml,
-  noOddsHtml, points, CAUTION, NOTABLE, detailHtml, marketsWords, disBadge, lowBadge,
+  noOddsHtml, points, CAUTION, NOTABLE, detailHtml, marketsWords, disBadge, lowBadge, contextHtml,
 } from "./row.js";
 
 function sideName(game, side) {
@@ -94,7 +94,9 @@ export function cardHtml(game, { entry, withDay, asked, prefetchable, expanded, 
   const foot = game.odds_id ? `<div class="gc-foot"><span class="small muted td-card-asof">${game.odds_as_of ? `Odds ${asOfHtml(game)}` : ""}</span>
     <span class="chip-row"><a class="chip ask" href="${esc(ask)}">${icon("ask", { size: 16 })}Ask AI</a>
     <a class="text-link" href="${esc(href)}" tabindex="-1" aria-hidden="true">Details ${icon("chevron", { size: 16 })}</a></span></div>` : "";
+  // Up to two context chips (wind, altitude, travel...), under the teams and outside the link: each reads its words
+  const context = contextHtml(game, { variant: "card", max: 2 });
   return `<article class="card game-card td-card${game.status === "live" ? " is-live" : ""}" data-game="${esc(game.id)}">
-    ${top}${numbers}${marketsStrip(game)}<div class="td-card-prices">${prices}</div>${expanded && !href ? detailHtml(game, entry, asked).replace('role="row"', "").replace(/ role="cell" aria-colspan="\d+"/, "") : ""}${foot}
+    ${top}${context}${numbers}${marketsStrip(game)}<div class="td-card-prices">${prices}</div>${expanded && !href ? detailHtml(game, entry, asked).replace('role="row"', "").replace(/ role="cell" aria-colspan="\d+"/, "") : ""}${foot}
   </article>`;
 }

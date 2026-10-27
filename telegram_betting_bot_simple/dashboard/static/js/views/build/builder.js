@@ -654,8 +654,8 @@ export function mountBuilder(root, { params, refresh }) {
   function swappedTicket(base, priced, li, option) {
     const legs = (priced.legs || []).map((pl, i) => {
       const old = base.legs.find((l) => sameRef(l.ref, pl.ref || refOf(pl)));
-      if (old && i !== li) return { ...old, ...pl, edge: old.edge, why: old.why, risk: old.risk, swaps: old.swaps, chance: old.chance, chance_source: old.chance_source, age: old.age, flags: old.flags };
-      return { ...pl, ref: option.ref, chance: option.chance, edge: option.edge, age: option.age, flags: option.flags, why: option.why || [], risk: option.risk || null, swaps: base.legs[li].swaps, chance_source: option.chance_source || null };
+      if (old && i !== li) return { ...old, ...pl, edge: old.edge, why: old.why, why_units: old.why_units, risk: old.risk, swaps: old.swaps, chance: old.chance, chance_source: old.chance_source, age: old.age, flags: old.flags };
+      return { ...pl, ref: option.ref, chance: option.chance, edge: option.edge, age: option.age, flags: option.flags, why: option.why || [], why_units: option.why_units || null, risk: option.risk || null, swaps: base.legs[li].swaps, chance_source: option.chance_source || null };
     });
     return {
       ...priced, legs, refs: priced.refs || legs.map((l) => l.ref), label: "Custom",
