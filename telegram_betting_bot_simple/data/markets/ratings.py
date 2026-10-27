@@ -70,14 +70,16 @@ import statistics
 import time
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from ..cache import ttl_for
 from .aliases import _person_score, _plain, _team_score, kind as name_kind, team_key
 from .common import HttpError, Keeper, http_get, iso, num, season_now, text
 
 log = logging.getLogger(__name__)
 
-POWER_TTL = 12 * 3600  # ratings: 12 hours
-TEAMS_TTL = 7 * 24 * 3600  # ESPN's team lists change a few times a year
-PREDICTOR_TTL = 3600  # ESPN's predictor: 1 hour
+# From the shared cache's policy table (data/cache.py's ttl_for), the one place these times live:
+POWER_TTL = ttl_for("ratings").ttl  # ratings: 12 hours
+TEAMS_TTL = ttl_for("teams").ttl  # ESPN's team lists change a few times a year: a week
+PREDICTOR_TTL = ttl_for("predictor").ttl  # ESPN's predictor: 1 hour
 PREDICTOR_KEEP = 3 * 24 * 3600  # predictors saved for a restart are kept this long
 
 CORE = "https://sports.core.api.espn.com/v2/sports"

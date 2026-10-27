@@ -6,16 +6,19 @@ import logging
 import sys
 import threading
 import time
+from typing import Callable, Optional
 
 import uvicorn
 
 from ..config import load_config
+from ..data.cache import stats_line
 from ..services import build_service, build_slate
 from .app import create_app
 from .service import DashboardService
 
 GRADE_EVERY_SECONDS = 600
 ANALYZE_EVERY_SECONDS = 600
+CACHE_LOG_EVERY_SECONDS = 3600
 
 
 def grade_forever(service: DashboardService) -> None:
@@ -40,6 +43,20 @@ def analyze_forever(service: DashboardService) -> None:
         time.sleep(ANALYZE_EVERY_SECONDS)
 
 
+def log_cache_forever(every: float = CACHE_LOG_EVERY_SECONDS, rounds: Optional[int] = None,
+                      sleep: Callable[[float], None] = time.sleep) -> None:
+    """Log the shared cache's one-line summary (data/cache.py's stats_line: reads, hit shares, loads, failures,
+    memory size) every hour; ``rounds`` stops it early (tests)."""
+    done = 0
+    while rounds is None or done < rounds:
+        sleep(every)
+        try:
+            logging.info(stats_line())
+        except Exception:
+            logging.exception("Summarising the cache failed")
+        done += 1
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     config = load_config()
@@ -49,6 +66,7 @@ def main() -> None:
     slate = None
     if service is not None:
         threading.Thread(target=grade_forever, args=(service,), name="grader", daemon=True).start()
+        threading.Thread(target=log_cache_forever, name="cache-summary", daemon=True).start()
         if service.analysts is not None:
             threading.Thread(target=analyze_forever, args=(service,), name="analysts", daemon=True).start()
         # Today's all-sports slate: the last one saved is served at once, then ESPN's scoreboards keep it

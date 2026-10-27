@@ -59,6 +59,7 @@ from .auth import (
     valid_session,
     verify_init_data,
 )
+from ..data.cache import all_stats, stats_line
 from ..data.slate import SlateBuilder, SlateBytes
 from ..engine.pasted import MAX_IMAGE_BYTES, MAX_LEGS as MAX_PASTED_LEGS, MAX_PASTE_CHARS
 from .assets import StaticAssets
@@ -853,6 +854,16 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         ratings, the model), the games graded, the mean Brier score and log loss, and the blend's on the same
         games. Read from the store; nothing is fetched."""
         return calls_errors(svc.markets_record)
+
+    @app.get("/api/cache/stats", dependencies=signed_in)
+    def cache_stats() -> Dict[str, Any]:
+        """The shared short-term memory at work (signed-in only): ``cache`` is this process's shared cache (per kind
+        of data: hits, stale hits, shared hits from the other process, misses, loads, failures, evictions; and the
+        SQLite table's rows and bytes), ``process`` every cache in the process added up, ``line`` the one-line
+        summary the dashboard logs hourly. Counts only: no keys, values or secrets."""
+        shared = getattr(service, "cache", None)
+        return {"cache": shared.stats(table=True) if shared is not None and hasattr(shared, "stats") else None,
+                "process": all_stats(), "line": stats_line()}
 
     # --- version 2: per person (settings, tickets, saved bets, plans, players, chat) -----------------
 

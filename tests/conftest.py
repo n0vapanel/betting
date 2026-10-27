@@ -51,6 +51,16 @@ class FakeEspn:
     def standings(self, league, season=None):
         return {}
 
+@pytest.fixture(autouse=True)
+def _isolated_cache_globals(monkeypatch):
+    """The shared cache's process-wide state goes back after each test: the secrets build_service registers (a
+    test's made-up key must not refuse another test's cache keys) and data/utils.fetch_json's process cache (one
+    test's canned answer must not be served to the next)."""
+    from telegram_betting_bot_simple.data import cache as cache_module, utils
+    monkeypatch.setattr(cache_module, "_SECRETS", cache_module._SECRETS)
+    monkeypatch.setattr(utils, "_cache", None)
+
+
 @pytest.fixture()
 def service():
     return DashboardService(FakeOdds(), FakeEspn(), ZoneInfo("America/New_York"))

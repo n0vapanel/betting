@@ -27,16 +27,20 @@ the line is kept: guessing which price is the over would be worse than none.
 
 from __future__ import annotations
 
+import copy
 import datetime
 import html
 import logging
 import re
+import threading
 import unicodedata
-from collections import Counter
+from collections import Counter, OrderedDict
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Any, Callable, Dict, Hashable, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Hashable, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
-from .espn_client import COMMON, LEAGUES, SITE, EspnClient
+from .espn_client import COMMON, ESPN_DAY_TZ, LEAGUES, SITE, EspnClient
+from .cache import freshest, ttl_for
+from .utils import policy
 
 SEARCH = "https://site.web.api.espn.com/apis/common/v3/search"
 NEWS = "https://site.api.espn.com/apis/fantasy/v2/games/{game}/news/players"
@@ -48,18 +52,22 @@ MAX_NEWS = 20
 
 log = logging.getLogger(__name__)
 
-MINUTE = 60
-TTL = {
-    "search": 60 * MINUTE,
-    "bio": 30 * MINUTE,
-    "overview": 10 * MINUTE,
-    "gamelog": 30 * MINUTE,
-    "past_gamelog": 24 * 60 * MINUTE,  # a finished season doesn't change
-    "splits": 60 * MINUTE,
-    "news": 15 * MINUTE,
-    "props": 10 * MINUTE,
-    "schedule": 60 * MINUTE,
+# Each lookup's kind of data in the shared cache's policy table (data/cache.py's ttl_for, read through
+# data/utils.policy): a player's overview and game log keep for an hour on his game days and six hours otherwise,
+# a finished season's log ("past") for a day; splits six hours; news ten minutes; DraftKings' props ten minutes,
+# never served past that without being flagged stale (props)
+KINDS = {
+    "search": "search",
+    "bio": "bio",
+    "overview": "player",
+    "gamelog": "gamelog",
+    "splits": "splits",
+    "news": "news",
+    "props": "props",
+    "schedule": "schedule",
 }
+GAME_DAY = "gameday"  # the policy state of a player whose team plays today (ESPN's day), or who isn't known yet
+NEXT_GAMES_KEPT = 5000  # players whose next game date is remembered (for the game-day state)
 
 # The fantasy game whose news feed carries one player's items (ESPN's ?athletes= filter doesn't)
 FANTASY_GAMES = {
@@ -281,13 +289,23 @@ def _count(value: Any, default: int, most: int) -> int:
     return max(1, min(number, most))
 
 
+CHANGED_SHAPE = "ESPN's response has changed shape"
+UNREACHABLE = "ESPN couldn't be reached"
+
+
 def _why(error: Optional[BaseException], missing: str) -> str:
     """A plain-English reason: ``missing`` when ESPN simply has nothing, else what went wrong."""
     if error is None or "HTTP 404" in str(error):
         return missing
     if isinstance(error, (KeyError, TypeError, ValueError, AttributeError, IndexError)):
-        return "ESPN's response has changed shape, so this part is unavailable."
-    return f"ESPN couldn't be reached ({str(error)[:120]})."
+        return f"{CHANGED_SHAPE}, so this part is unavailable."
+    return f"{UNREACHABLE} ({str(error)[:120]})."
+
+
+def _failed_part(card: Mapping[str, Any]) -> bool:
+    """Whether a card was built while part of ESPN failed (not merely had nothing to show)."""
+    texts = [str(card.get("reason") or "")] + [str(line) for line in card.get("missing") or []]
+    return any(UNREACHABLE in text or CHANGED_SHAPE in text for text in texts)
 
 
 class PlayerData:
@@ -297,21 +315,48 @@ class PlayerData:
         self.espn = espn
         self.cache = espn.cache
         self._now = now or (lambda: datetime.datetime.now(datetime.timezone.utc))
+        # (league, athlete id) -> his next game's date ("" when none is listed), from the overviews read so far
+        self._next_games: "OrderedDict[Tuple[str, str], str]" = OrderedDict()
+        self._next_lock = threading.Lock()
 
     # --- plumbing ---
 
-    def _cached(self, key: Hashable, ttl: float, loader: Callable[[], Any]) -> Tuple[Any, Optional[BaseException]]:
+    def _cached(self, key: Hashable, lookup: str, loader: Callable[[], Any],
+                state: Optional[str] = None) -> Tuple[Any, Optional[BaseException]]:
         """The cached value (loaded if needed) or None plus the error; never raises.
 
-        Loaders parse inside, so the cache keeps a few kilobytes per player
-        instead of ESPN's full responses, and a changed response shape fails
-        here like a network error does.
+        Every lookup goes through the shared cache with its kind (KINDS) and the policy table's time to live
+        for ``state``. Loaders parse inside, so the cache keeps a few kilobytes per player instead of ESPN's
+        full responses, and a changed response shape fails here like a network error does.
         """
+        kind = KINDS[lookup]
+        ttl, stale = policy(kind, state)
         try:
-            return self.cache.get(key, ttl, loader), None
+            return self.cache.get(key, ttl, loader, stale=stale, kind=kind), None
         except Exception as exc:  # network, HTTP and parsing errors alike
             log.info("ESPN player lookup %r failed: %s", key, exc)
             return None, exc
+
+    def _note_next_game(self, target: _League, athlete_id: str, game: Optional[Mapping[str, Any]]) -> None:
+        with self._next_lock:
+            key = (target.key, athlete_id)
+            self._next_games[key] = str((game or {}).get("date") or "")
+            self._next_games.move_to_end(key)
+            while len(self._next_games) > NEXT_GAMES_KEPT:
+                self._next_games.popitem(last=False)
+
+    def _player_state(self, target: _League, athlete_id: str) -> Optional[str]:
+        """GAME_DAY when the player's next game is today (ESPN's day) or already under way, or isn't known yet
+        (the shorter time to live); None on other days."""
+        with self._next_lock:
+            when = self._next_games.get((target.key, athlete_id))
+        if when is None:
+            return GAME_DAY
+        start = _parse_utc(when)
+        if start is None:
+            return None
+        today = self._now().astimezone(ESPN_DAY_TZ).date()
+        return GAME_DAY if start.astimezone(ESPN_DAY_TZ).date() <= today else None
 
     @staticmethod
     def _key(kind: str, target: _League, *parts: Any) -> Tuple[Any, ...]:
@@ -350,7 +395,7 @@ class PlayerData:
             return result
         players, error = self._cached(
             ("espn-player", "search", text.lower(), target.key if target else None),
-            TTL["search"],
+            "search",
             lambda: self._search(text, target),
         )
         if players is None:
@@ -396,13 +441,15 @@ class PlayerData:
         if problem:
             return result
         base = f"{COMMON}/{target.sport}/{target.path}/athletes/{athlete_id}"
+        state = self._player_state(target, athlete_id)
         bio, bio_error = self._cached(
-            self._key("bio", target, athlete_id), TTL["bio"], lambda: _parse_bio(self.espn._get(base))
+            self._key("bio", target, athlete_id), "bio", lambda: _parse_bio(self.espn._get(base)), state
         )
         summary, summary_error = self._cached(
             self._key("overview", target, athlete_id),
-            TTL["overview"],
+            "overview",
             lambda: _parse_overview(target.sport, self.espn._get(f"{base}/overview")),
+            state,
         )
         if bio:
             result.update(bio)
@@ -413,6 +460,8 @@ class PlayerData:
         if result["next_game"] is None and result["team_id"]:
             # Between games the overview shows the previous one, so ask the team's schedule
             result["next_game"] = self._scheduled_game(target, result["team_id"])
+        if bio:
+            self._note_next_game(target, athlete_id, result["next_game"])
         if not bio:
             result["reason"] = _why(bio_error, f"ESPN has no {target.key} player with id {athlete_id}.")
         elif not summary:
@@ -425,7 +474,7 @@ class PlayerData:
         url = f"{SITE}/{target.sport}/{target.path}/teams/{team_id}/schedule"
         events, _ = self._cached(
             self._key("schedule", target, team_id),
-            TTL["schedule"],
+            "schedule",
             lambda: [_schedule_brief(event) for event in self.espn._get(url).get("events") or []],
         )
         # A postponed game can sit at "pre" with an old date, so skip anything long past
@@ -468,8 +517,9 @@ class PlayerData:
         url = f"{COMMON}/{target.sport}/{target.path}/athletes/{athlete_id}/gamelog"
         return self._cached(
             self._key("gamelog", target, athlete_id, year),
-            TTL["past_gamelog"] if year else TTL["gamelog"],
+            "gamelog",
             lambda: _parse_gamelog(target.sport, self.espn._get(url, {"season": year} if year else None)),
+            "past" if year else self._player_state(target, athlete_id),  # a finished season doesn't change
         )
 
     def _recent(
@@ -506,7 +556,7 @@ class PlayerData:
             return result
         url = f"{COMMON}/{target.sport}/{target.path}/athletes/{athlete_id}/splits"
         key = self._key("splits", target, athlete_id)
-        data, error = self._cached(key, TTL["splits"], lambda: _parse_splits(target.sport, self.espn._get(url)))
+        data, error = self._cached(key, "splits", lambda: _parse_splits(target.sport, self.espn._get(url)))
         if data is None:
             result["reason"] = _why(error, "ESPN has no splits for this player.")
             return result
@@ -536,7 +586,7 @@ class PlayerData:
         key = self._key("news", target, athlete_id)
         items, error = self._cached(
             key,
-            TTL["news"],
+            "news",
             lambda: _parse_news(self.espn._get(NEWS.format(game=game), {"days": 30, "playerId": athlete_id})),
         )
         if items is None:
@@ -582,13 +632,16 @@ class PlayerData:
             f"/competitions/{event_id}/odds/{DRAFTKINGS}/propBets"
         )
         key = ("espn-player", "props", target.key, event_id)
-        players, error = self._cached(key, TTL["props"], lambda: _parse_props(target.sport, self._prop_items(url)))
-        if players is None:
+        # Kept as plain JSON (prices as text) so the bot and the dashboard share one copy; Decimal again here
+        saved, error = self._cached(
+            key, "props", lambda: _props_to_json(_parse_props(target.sport, self._prop_items(url))))
+        if saved is None:
             result["reason"] = _why(error, "DraftKings hasn't posted player props for this game (or has taken them down).")
             return result
+        players = _props_from_json(saved)
         # The cache serves its last copy when a refresh fails, so a copy older than the TTL is one ESPN didn't renew
         age = self.cache.age(key)
-        result.update(as_of=self._fetched_at(key), stale=age is not None and age >= TTL["props"])
+        result.update(as_of=self._fetched_at(key), stale=age is not None and age >= policy(KINDS["props"])[0])
         result["players"] = players
         result["count"] = sum(len(props) for props in players.values())
         if not players:
@@ -607,6 +660,22 @@ class PlayerData:
     # --- the compact card ---
 
     def card(self, league: str, athlete_id: Any) -> Dict[str, Any]:
+        """The compact card (see _card), built once per time to live for everyone: a computed entry (kind
+        "player_card") in the shared cache keyed by the league and the player, kept for its freshest input's time to
+        live (the news', ten minutes)."""
+        target, athlete_id, problem = _check(league, athlete_id)
+        if problem:
+            return self._card(league, athlete_id)
+        state = self._player_state(target, athlete_id)
+        fresh = freshest(ttl_for("player_card", state), *(ttl_for(KINDS[part], state)
+                                                           for part in ("bio", "overview", "gamelog", "news")))
+        key = ("computed", "player_card", target.key, athlete_id)
+        # Built while part of ESPN failed: kept a few seconds for everyone, then rebuilt (TTLCache.get_computed)
+        card = self.cache.get_computed(key, fresh.ttl, lambda: self._card(target.key, athlete_id), _failed_part,
+                                       stale=fresh.stale, kind="player_card")
+        return copy.deepcopy(card)
+
+    def _card(self, league: str, athlete_id: Any) -> Dict[str, Any]:
         """Everything a player page or the AI needs in a few hundred tokens.
 
         {id, league, name, team, team_abbr, position, headshot, status, injury,
@@ -660,6 +729,35 @@ class PlayerData:
             self._key("news", target, athlete_id),
         ])
         return card
+
+
+def _props_to_json(players: Mapping[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Props with their Decimal prices as text (JSON for the shared cache's table)."""
+    return {athlete: [{field: str(value) if isinstance(value, Decimal) else value for field, value in prop.items()}
+                      for prop in props] for athlete, props in players.items()}
+
+
+def _props_from_json(players: Mapping[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+    """_props_to_json undone: the three prices as Decimal again (new dicts: the cached copy stays as it is)."""
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for athlete, props in players.items():
+        rows = []
+        for prop in props:
+            row = dict(prop)
+            for field in ("over_price", "under_price", "yes_price"):
+                if row.get(field) is not None:
+                    row[field] = Decimal(str(row[field]))
+            rows.append(row)
+        out[athlete] = rows
+    return out
+
+
+def _parse_utc(text: Any) -> Optional[datetime.datetime]:
+    try:
+        moment = datetime.datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=datetime.timezone.utc)
 
 
 # --- hit rates and averages (pure functions over game-log rows) ---

@@ -1,5 +1,6 @@
 """What the market sources share: the Quote shape and the thin rule, small parsing helpers, a paced HTTP getter,
-and the Keeper that caches each source's copies, persists the last good one and never raises into callers.
+and the Keeper that caches each source's copies (on data/cache.py's TTLCache, so the bot and the dashboard share
+them), persists the last good one and never raises into callers.
 
 Quote = {"p": float,                       # implied chance: bid/ask midpoint when both exist, else the last price
          "bid": float|None, "ask": float|None, "last": float|None,
@@ -14,15 +15,15 @@ bid or without an ask has no spread to judge and is thin too (only one side can 
 from __future__ import annotations
 
 import datetime
-import hashlib
 import json
 import logging
 import math
-import threading
 import time
 from typing import Any, Callable, Dict, Hashable, Iterable, List, Mapping, Optional, Tuple
 
 import requests
+
+from ..cache import TTLCache
 
 log = logging.getLogger(__name__)
 
@@ -183,144 +184,110 @@ def http_get(url: str, params: Optional[Dict[str, Any]] = None, text: bool = Fal
         return response.status_code, None
 
 
-# --- the keeper: TTL cache + last good copy + persistence ------------------------------------------------
+# --- the keeper: one source's copies, on the shared TTLCache's rules ------------------------------------------
 
 class Keeper:
-    """Copies of one source's results, each loaded at most once per TTL.
+    """Copies of one source's results, each loaded at most once per TTL, on data/cache.py's TTLCache, so the
+    markets sources follow the same rules as every other fetch:
 
     - A fresh copy (younger than the TTL) is served from memory.
-    - A stale one is refreshed by calling the loader. Before that, the store's copy is read: another process
+    - A stale one is refreshed by calling the loader. Before that, the store's shared copy is read: another process
       (the bot and the dashboard share the store) may already have refreshed it, and after a restart it is the
       starting point, so a restart has data at once and doesn't refetch what is still fresh.
-    - With a store, a short lease (Store.try_lease) keeps two processes from fetching the same thing at once;
-      the one that loses serves the store's copy.
+    - With a store, a short lease keeps two processes from fetching the same thing at once; the one that loses
+      serves its last good copy (with none, it fetches too rather than show nothing).
     - When the loader fails, the last good copy is served (or ``empty`` when there has never been one), only the
       error's type is logged, nothing is raised, and the key isn't retried for a while (30 s, doubling to 15 min).
-    - Every good copy is saved to the store (as a named blob in its slates table), so a restart has data.
+    - Every good copy is saved to the store's shared cache table, so a restart has data. Copies Stage 2 saved as
+      named blobs in the slates table are read once, the first time a key has no other copy.
     """
 
     RETRY_BASE = 30.0
-    RETRY_CAP = 15 * 60.0
+    RETRY_CAP = TTLCache.ERROR_CAP  # 15 minutes
     LEASE = 90.0
+    KEEP = 7 * 24 * 3600.0  # how long put()'s copies stay in the shared table
 
-    def __init__(self, source: str, store: Any = None, clock: Optional[Callable[[], float]] = None) -> None:
+    def __init__(self, source: str, store: Any = None, clock: Optional[Callable[[], float]] = None,
+                 cache: Optional[TTLCache] = None) -> None:
         self.source = source
         self.store = store
         self.clock = clock or time.time
-        self._copies: Dict[Hashable, Tuple[float, Any]] = {}
-        self._failures: Dict[Hashable, Tuple[int, float]] = {}  # key -> (failures in a row, retry at)
-        self._locks: Dict[Hashable, threading.Lock] = {}
-        self._lock = threading.Lock()
+        # Its own cache (on the source's clock, which tests drive) unless one is given; lease_wait=0: a process
+        # that finds the other loading serves its copy at once instead of holding up the slate's pass
+        self.cache = cache or TTLCache(store, name=source, clock=clock, lease_seconds=self.LEASE, lease_wait=0,
+                                       error_detail=False)
+        self._upgraded: set = set()
+
+    def _key(self, key: Hashable) -> Tuple[Any, ...]:
+        return ("markets", self.source, *(key if isinstance(key, tuple) else (key,)))
 
     @staticmethod
     def _name(source: str, key: Hashable) -> str:
+        """Stage 2's blob name for a copy in the slates table."""
         parts = key if isinstance(key, tuple) else (key,)
         return "markets:" + ":".join([source, *(str(part) for part in parts)])
 
-    def _read_store(self, key: Hashable) -> Optional[Tuple[float, Any]]:
-        if self.store is None or not hasattr(self.store, "slate"):
-            return None
-        try:
-            saved = self.store.slate(self._name(self.source, key))
-            if not saved:
-                return None
-            fetched_at, _etag, body = saved
-            return float(fetched_at), json.loads(body)
-        except Exception as exc:  # a broken store must not stop the source
-            log.warning("%s: reading the saved copy failed (%s)", self.source, type(exc).__name__)
-            return None
-
-    def _write_store(self, key: Hashable, fetched_at: float, value: Any) -> None:
-        if self.store is None or not hasattr(self.store, "save_slate"):
+    def _upgrade(self, key: Hashable) -> None:
+        """The first time ``key`` is asked for with no copy in memory or the shared table, start it from the copy
+        Stage 2 saved in the slates table, if there is one."""
+        if key in self._upgraded:
+            return
+        self._upgraded.add(key)
+        if self.store is None or not hasattr(self.store, "slate") or self.cache.peek(self._key(key)) is not None:
             return
         try:
-            body = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
-            etag = hashlib.sha1(body).hexdigest()[:16]
-            self.store.save_slate(self._name(self.source, key), body, etag, fetched_at)
-        except Exception as exc:
-            log.warning("%s: saving the copy failed (%s)", self.source, type(exc).__name__)
-
-    def _lease(self, key: Hashable) -> bool:
-        if self.store is None or not hasattr(self.store, "try_lease"):
-            return True
-        try:
-            return bool(self.store.try_lease(self._name(self.source, key), self.LEASE))
-        except Exception:
-            return True
+            saved = self.store.slate(self._name(self.source, key))
+            if saved:
+                fetched_at, _etag, body = saved
+                self.cache.seed(self._key(key), json.loads(body), float(fetched_at), kind=self.source)
+        except Exception as exc:  # a broken store must not stop the source
+            log.warning("%s: reading the saved copy failed (%s)", self.source, type(exc).__name__)
 
     def peek(self, key: Hashable) -> Optional[Tuple[float, Any]]:
         """(fetched_at, value) of the last good copy in memory or in the store, without fetching."""
-        with self._lock:
-            copy = self._copies.get(key)
-        saved = self._read_store(key) if copy is None else None
-        if saved is not None:
-            with self._lock:
-                self._copies.setdefault(key, saved)
-            return saved
-        return copy
+        self._upgrade(key)
+        try:
+            return self.cache.peek(self._key(key))
+        except Exception as exc:
+            log.warning("%s: reading the saved copy failed (%s)", self.source, type(exc).__name__)
+            return None
 
     def seed(self, key: Hashable, fetched_at: float, value: Any) -> None:
         """Start ``key`` from a copy saved elsewhere, unless a copy is already held."""
-        with self._lock:
-            self._copies.setdefault(key, (float(fetched_at), value))
+        self.cache.seed(self._key(key), value, float(fetched_at), kind=self.source)
 
     def put(self, key: Hashable, value: Any) -> float:
         """Keep ``value`` as the good copy of ``key`` now (and save it); returns its time."""
-        fetched_at = self.clock()
-        with self._lock:
-            self._copies[key] = (fetched_at, value)
-        self._write_store(key, fetched_at, value)
-        return fetched_at
+        return self.cache.put(self._key(key), value, ttl=self.KEEP, persist=True, kind=self.source)
 
     def fetched_at(self, key: Hashable) -> Optional[float]:
         copy = self.peek(key)
         return copy[0] if copy else None
 
-    def get(self, key: Hashable, ttl: float, loader: Callable[[], Any], empty: Any = None) -> Any:
+    def get(self, key: Hashable, ttl: float, loader: Callable[[], Any], empty: Any = None, stale: float = 0.0) -> Any:
         """The copy of ``key``: fresh from memory or the store, else freshly loaded, else the last good one,
         else ``empty``. Never raises."""
-        value, _ = self.get_with_time(key, ttl, loader, empty)
+        value, _ = self.get_with_time(key, ttl, loader, empty, stale)
         return value
 
-    def get_with_time(self, key: Hashable, ttl: float, loader: Callable[[], Any], empty: Any = None
-                      ) -> Tuple[Any, Optional[float]]:
-        """As get, with the copy's fetch time (None for ``empty``)."""
-        with self._lock:
-            copy = self._copies.get(key)
-            key_lock = self._locks.setdefault(key, threading.Lock())
-        if copy and self.clock() - copy[0] < ttl:
-            return copy[1], copy[0]
-        with key_lock:
-            with self._lock:
-                copy = self._copies.get(key)
-            now = self.clock()
-            if copy and now - copy[0] < ttl:
-                return copy[1], copy[0]
-            saved = self._read_store(key)
-            if saved and (copy is None or saved[0] > copy[0]):
-                copy = saved
-                with self._lock:
-                    self._copies[key] = saved
-                if now - saved[0] < ttl:
-                    return saved[1], saved[0]
-            failures, retry_at = self._failures.get(key, (0, 0.0))
-            if now < retry_at or not self._lease(key):
-                return (copy[1], copy[0]) if copy else (empty, None)
-            try:
-                value = loader()
-            except Exception as exc:
-                failures += 1
-                wait = min(self.RETRY_BASE * 2 ** (failures - 1), self.RETRY_CAP)
-                self._failures[key] = (failures, now + wait)
-                log.warning("%s %s: refresh failed (%s); %s", self.source, key, type(exc).__name__,
-                            "keeping the last good copy" if copy else "nothing saved yet")
-                return (copy[1], copy[0]) if copy else (empty, None)
-            self._failures.pop(key, None)
-            fetched_at = self.clock()
-            with self._lock:
-                self._copies[key] = (fetched_at, value)
-            self._write_store(key, fetched_at, value)
-            return value, fetched_at
+    def get_with_time(self, key: Hashable, ttl: float, loader: Callable[[], Any], empty: Any = None,
+                      stale: float = 0.0) -> Tuple[Any, Optional[float]]:
+        """As get, with the copy's fetch time (None for ``empty``). ``stale`` serves a copy that much past its TTL
+        at once while one background refresh runs."""
+        self._upgrade(key)
+        ran = []
+
+        def load() -> Any:
+            ran.append(True)
+            return loader()
+
+        try:
+            return self.cache.get_with_time(self._key(key), ttl, load, stale=stale, error_ttl=self.RETRY_BASE,
+                                            backoff_cap=self.RETRY_CAP, persist=True, kind=self.source, backoff=True)
+        except Exception as exc:
+            if ran:  # a remembered failure (backing off) is not logged again
+                log.warning("%s %s: refresh failed (%s); nothing saved yet", self.source, key, type(exc).__name__)
+            return empty, None
 
 
 def season_now(sport: str, now: Optional[float] = None) -> int:

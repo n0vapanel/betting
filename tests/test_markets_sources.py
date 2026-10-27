@@ -20,6 +20,7 @@ from telegram_betting_bot_simple.data.markets import (COVERAGE, TARGET_LEAGUES, 
 from telegram_betting_bot_simple.data.markets import aliases, common, kalshi as kalshi_mod
 from telegram_betting_bot_simple.data.markets import polymarket as poly_mod, ratings as ratings_mod
 from telegram_betting_bot_simple.data.markets.common import HttpError, Keeper, complement, is_thin, parse_time
+from telegram_betting_bot_simple.data.cache import key_text
 from telegram_betting_bot_simple.data.store import Store
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures", "markets")
@@ -400,7 +401,7 @@ def test_a_restart_starts_from_the_saved_copy(tmp_path):
     clock = Clock()
     fetch = Fetch(polymarket_routes(fixture("polymarket_epl_moneyline.json")), clock)
     first = Polymarket(store=store, fetch=fetch, clock=clock).events("soccer_epl")
-    assert first and store.slate("markets:polymarket:h2h:306")
+    assert first and store.cache_get(key_text(("markets", "polymarket", "h2h", 306)))  # the shared cache table
     restarted_fetch = Fetch([("gamma-api", RuntimeError("down"))], clock)
     clock.now += 60
     restarted = Polymarket(store=store, fetch=restarted_fetch, clock=clock)
@@ -424,11 +425,52 @@ def test_keeper_never_raises_and_returns_empty_without_a_copy():
 def test_keeper_lease_lets_one_process_fetch(tmp_path):
     store = Store(str(tmp_path / "lease.db"))
     clock = Clock()
-    a, b = Keeper("lease", store, clock), Keeper("lease", store, clock)
-    b._lease = lambda key: False  # the other process holds the lease
+    a, b = Keeper("lease", store, clock), Keeper("lease", Store(str(tmp_path / "lease.db")), clock)  # two processes
     assert a.get("x", 60, lambda: [1], empty=[]) == [1]
     clock.now += 120
-    assert b.get("x", 60, lambda: [2], empty=[]) == [1]  # serves the store's copy instead of fetching
+    name = key_text(("markets", "lease", "x"))
+    assert store.cache_lease(name, a.cache.holder, Keeper.LEASE, clock.now)  # a is refreshing x right now ...
+    assert b.get("x", 60, lambda: [2], empty=[]) == [1]  # ... so b serves the shared copy instead of fetching too
+    store.cache_release(name, a.cache.holder)
+    assert b.get("x", 60, lambda: [2], empty=[]) == [2]  # the lease is free: b refreshes it
+    assert a.get("x", 60, lambda: [3], empty=[]) == [2]  # and a picks up b's copy from the table, without a fetch
+
+
+def test_keeper_is_a_thin_wrapper_over_the_shared_cache(tmp_path):
+    """One rule set: the keeper's copies live in a TTLCache (memory and the shared table), are counted in its stats
+    under the source's name, and a Stage 2 copy saved as a slates blob is the starting point after the upgrade."""
+    store = Store(str(tmp_path / "keeper.db"))
+    clock = Clock()
+    store.save_slate("markets:ratings:power:basketball_nba", b'{"BOS": {"rating": 5.5}}', "etag", NOW - 600)
+    keeper = Keeper("ratings", store, clock)
+    assert keeper.peek(("power", "basketball_nba")) == (NOW - 600, {"BOS": {"rating": 5.5}})
+    assert keeper.get(("power", "basketball_nba"), 3600, lambda: pytest.fail("still fresh"), empty={}) == {
+        "BOS": {"rating": 5.5}}
+    assert keeper.get("teams", 60, lambda: {"BOS": "Boston"}, empty={}) == {"BOS": "Boston"}
+    assert store.cache_get(key_text(("markets", "ratings", "teams")))  # saved for the other process and a restart
+    counts = keeper.cache.stats()["kinds"]["ratings"]
+    assert counts["hits"] == 1 and counts["misses"] == 1 and counts["loads"] == 1
+    when = keeper.put(("predictors", "basketball_nba"), {"401": [NOW, {"home": 0.6}]})
+    restarted = Keeper("ratings", Store(str(tmp_path / "keeper.db")), clock)
+    assert restarted.peek(("predictors", "basketball_nba")) == (when, {"401": [NOW, {"home": 0.6}]})
+
+
+def test_keeper_backs_off_failures_doubling_to_fifteen_minutes(caplog):
+    clock = Clock()
+    keeper = Keeper("test", None, clock)
+    calls = []
+
+    def broken():
+        calls.append(clock.now)
+        raise HttpError(503, "Venue")
+
+    with caplog.at_level(logging.WARNING):
+        for _ in range(400):  # a read every 15 seconds for 100 minutes
+            assert keeper.get("k", 60, broken, empty=[]) == []
+            clock.now += 15
+    gaps = [b - a for a, b in zip(calls, calls[1:])]
+    assert gaps[:7] == [30, 60, 120, 240, 480, 900, 900] and max(gaps) == 15 * 60
+    assert caplog.text.count("refresh failed (HttpError)") == len(calls)  # each real failure once, not each read
 
 
 # --- aliases and matching -------------------------------------------------------------------------------

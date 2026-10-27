@@ -32,6 +32,7 @@ import math
 import os
 import secrets
 import sqlite3
+import threading
 import time
 from contextlib import closing, contextmanager
 from decimal import Decimal, InvalidOperation
@@ -618,6 +619,44 @@ def _with_days(db: sqlite3.Connection, rows: Sequence[Sequence[Any]]) -> List[Di
     return plans
 
 
+# The shared cache (data/cache.py's TTLCache): one copy of each fetched or computed value for the bot and the
+# dashboard, and short leases so one process loads a key while the other waits for its copy
+CACHE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS shared_cache (
+    key TEXT PRIMARY KEY,          -- data/cache.py's key_text: stable JSON of the key (never a secret)
+    kind TEXT NOT NULL,            -- what it is, for stats ("summary", "player", "markets", ...)
+    fetched_at REAL NOT NULL,      -- epoch seconds the value was fetched or computed
+    expires_at REAL NOT NULL,      -- fetched_at + its TTL
+    stale_until REAL NOT NULL,     -- expires_at + its stale window; the row is pruned a day after this
+    value BLOB NOT NULL            -- gzip-compressed JSON
+);
+CREATE INDEX IF NOT EXISTS shared_cache_by_stale ON shared_cache (stale_until);
+CREATE TABLE IF NOT EXISTS cache_leases (
+    key TEXT PRIMARY KEY,
+    holder TEXT NOT NULL,          -- the cache (process) loading the key
+    until REAL NOT NULL            -- epoch seconds; a lapsed lease is free
+);
+"""
+
+
+class _ThreadDb:
+    """A thread's kept-open cache connection (Store._cache_db), closed when the thread's locals or the Store go."""
+
+    __slots__ = ("db",)
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self.db = db
+
+    def close(self) -> None:
+        try:
+            self.db.close()
+        except Exception:  # closing is best effort
+            pass
+
+    def __del__(self) -> None:
+        self.close()
+
+
 class Store:
     def __init__(self, path: str) -> None:
         self.path = path
@@ -626,6 +665,7 @@ class Store:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
             db.executescript(ACCOUNT_SCHEMA)
+            db.executescript(CACHE_SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, timeout=10, isolation_level=None)
@@ -697,6 +737,106 @@ class Store:
             )
             db.execute("COMMIT")
             return True
+
+    # --- the shared cache (data/cache.py): values as gzip JSON, keyed by key_text --------------------------
+
+    @contextmanager
+    def _cache_db(self) -> Iterator[sqlite3.Connection]:
+        """This thread's own connection for the shared cache's small reads and writes, kept open: a connection per
+        call costs ~2 ms in opening, syncing and checkpointing the WAL on close, about 7 ms per cache miss (two
+        reads, a lease, the value, the release); kept open, a write is ~0.05 ms. ``synchronous=NORMAL`` on this
+        connection only (safe with WAL: a power cut may lose the last cache writes, never corrupts the file; a cache
+        row or a lease is cheap to lose). A connection that errors is dropped and the next call opens a new one; one
+        whose thread has ended is closed when the thread's locals go."""
+        local = self.__dict__.setdefault("_cache_local", threading.local())
+        held = getattr(local, "held", None)
+        if held is None:
+            db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
+            db.execute("PRAGMA synchronous=NORMAL")
+            db.execute("PRAGMA cache_size=-256")  # 256 KiB of pages: one connection per thread adds up
+            held = local.held = _ThreadDb(db)
+        try:
+            yield held.db
+        except sqlite3.Error:
+            local.held = None
+            held.close()
+            raise
+
+    def cache_get(self, key: str, newer_than: Optional[float] = None) -> Optional[Tuple[float, float, float, bytes]]:
+        """(fetched_at, expires_at, stale_until, gzip JSON) of the shared copy of ``key``, or None; with
+        ``newer_than``, None unless the copy was fetched after that (its value isn't read otherwise)."""
+        with self._cache_db() as db:
+            if newer_than is None:
+                row = db.execute("SELECT fetched_at, expires_at, stale_until, value FROM shared_cache WHERE key = ?",
+                                 (key,)).fetchone()
+            else:
+                row = db.execute("SELECT fetched_at, expires_at, stale_until, value FROM shared_cache "
+                                 "WHERE key = ? AND fetched_at > ?", (key, float(newer_than))).fetchone()
+        return (float(row[0]), float(row[1]), float(row[2]), bytes(row[3])) if row else None
+
+    def cache_put(self, key: str, kind: str, value: bytes, fetched_at: float, expires_at: float,
+                  stale_until: float) -> bool:
+        """Save the shared copy of ``key`` unless the table holds a newer one; True when written."""
+        with self._cache_db() as db:
+            cursor = db.execute(
+                "INSERT INTO shared_cache (key, kind, fetched_at, expires_at, stale_until, value) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, "
+                "fetched_at = excluded.fetched_at, expires_at = excluded.expires_at, "
+                "stale_until = excluded.stale_until, value = excluded.value "
+                "WHERE excluded.fetched_at >= shared_cache.fetched_at",
+                (key, kind, fetched_at, expires_at, stale_until, sqlite3.Binary(value)),
+            )
+        return cursor.rowcount > 0
+
+    def cache_delete(self, key: str, upto: Optional[float] = None) -> int:
+        """Delete the shared copy of ``key`` (with ``upto``, only if it was fetched no later than that)."""
+        with self._cache_db() as db:
+            if upto is None:
+                return db.execute("DELETE FROM shared_cache WHERE key = ?", (key,)).rowcount
+            return db.execute("DELETE FROM shared_cache WHERE key = ? AND fetched_at <= ?", (key, upto)).rowcount
+
+    def cache_delete_prefix(self, prefix: str) -> int:
+        """Delete every key that is the JSON array ``prefix`` + "]" or continues it (``prefix`` + ","): the rows
+        of the tuple keys starting with a tuple (data/cache.py's invalidate_prefix)."""
+        with self._cache_db() as db:
+            # "," is 0x2C and "-" 0x2D, so the range is exactly the keys starting with prefix + ","
+            return db.execute("DELETE FROM shared_cache WHERE key = ? OR (key >= ? AND key < ?)",
+                              (prefix + "]", prefix + ",", prefix + "-")).rowcount
+
+    def cache_lease(self, key: str, holder: str, seconds: float, now: Optional[float] = None) -> bool:
+        """Claim ``key`` for ``holder`` for ``seconds`` unless another holder's claim is still running (a holder
+        renews its own)."""
+        now = _now(now)
+        with self._cache_db() as db:
+            cursor = db.execute(
+                "INSERT INTO cache_leases (key, holder, until) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE "
+                "SET holder = excluded.holder, until = excluded.until "
+                "WHERE cache_leases.holder = excluded.holder OR cache_leases.until <= ?",
+                (key, holder, now + seconds, now),
+            )
+        return cursor.rowcount > 0
+
+    def cache_release(self, key: str, holder: str) -> None:
+        """Drop ``holder``'s claim on ``key`` (another holder's is left alone)."""
+        with self._cache_db() as db:
+            db.execute("DELETE FROM cache_leases WHERE key = ? AND holder = ?", (key, holder))
+
+    def cache_prune(self, now: Optional[float] = None, keep: float = 86400.0) -> int:
+        """Delete shared copies more than ``keep`` seconds past their stale_until, and lapsed leases; returns the
+        copies deleted."""
+        now = _now(now)
+        with self._cache_db() as db:
+            deleted = db.execute("DELETE FROM shared_cache WHERE stale_until < ?", (now - keep,)).rowcount
+            db.execute("DELETE FROM cache_leases WHERE until < ?", (now,))
+        return deleted
+
+    def cache_summary(self) -> Dict[str, Any]:
+        """{"rows", "bytes" (compressed), "kinds": {kind: rows}} of the shared cache table."""
+        with self._cache_db() as db:
+            kinds = {str(kind): int(count) for kind, count in
+                     db.execute("SELECT kind, COUNT(*) FROM shared_cache GROUP BY kind ORDER BY kind")}
+            size = db.execute("SELECT COALESCE(SUM(LENGTH(value)), 0) FROM shared_cache").fetchone()[0]
+        return {"rows": sum(kinds.values()), "bytes": int(size or 0), "kinds": kinds}
 
     # --- people's predictions ---------------------------------------------------
 

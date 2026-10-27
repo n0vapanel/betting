@@ -657,7 +657,8 @@ class SlateBuilder:
                  idle_seconds: float = 600, future_seconds: float = 3600, odds_per_day: int = ODDS_PER_DAY,
                  ai_leagues: Iterable[str] = AI_LEAGUES, workers: int = WORKERS,
                  now: Callable[[], float] = time.time, polymarket: Any = None, kalshi: Any = None,
-                 ratings: Any = None, markets_every: float = MARKETS_EVERY, log_consensus: bool = True) -> None:
+                 ratings: Any = None, markets_every: float = MARKETS_EVERY, log_consensus: bool = True,
+                 on_change: Optional[Callable[..., Any]] = None) -> None:
         self.odds = odds
         self.espn = espn
         self.store = store
@@ -713,6 +714,11 @@ class SlateBuilder:
         self._predictor_asked: Dict[Tuple[str, str], float] = {}  # (league, ESPN id) -> when the worker last asked
         self._logged_sig: Dict[Tuple[str, str], str] = {}  # what consensus_log last got for each game
         self._saved_seen: Dict[str, Optional[Dict[str, Any]]] = {}  # started games' logged detail, read once
+        # Told when a game's status or score changes between rounds: on_change(league, odds_id=, espn_id=, board=)
+        # (services.build_slate passes DashboardService.invalidate_game, so the game's computed entries in the
+        # shared cache are dropped and rebuilt once for everyone; ``board`` is True when the status moved)
+        self.on_change = on_change
+        self._marks: Dict[str, Tuple[Any, Any, Any]] = {}  # game id -> (status, home score, away score) last round
 
     # --- serving -----------------------------------------------------------------------------------
 
@@ -881,6 +887,7 @@ class SlateBuilder:
             # and request_odds keep updating the sources); the slate is built as of now
             now = self._now()
             leagues, games, as_of = self._assemble(season, today, now)
+            self._note_changes(games)
             try:
                 self._apply_markets(games, now)
             except Exception:  # the markets brain must never cost the scores
@@ -888,6 +895,27 @@ class SlateBuilder:
             self._schedule_markets(games, now)
             self._publish(leagues, games, as_of, now, self._quota())
             return self._next_delay(season, today, self._now())
+
+    def _note_changes(self, games: Sequence[Mapping[str, Any]]) -> None:
+        """Tell on_change about each game whose status or score moved since the last round (the first round only
+        notes them). A failing hook costs only its own call."""
+        marks: Dict[str, Tuple[Any, Any, Any]] = {}
+        changed: List[Tuple[Mapping[str, Any], bool]] = []
+        for game in games:
+            mark = (game.get("status"), (game.get("home") or {}).get("score"), (game.get("away") or {}).get("score"))
+            marks[game["id"]] = mark
+            before = self._marks.get(game["id"])
+            if before is not None and before != mark:
+                changed.append((game, before[0] != mark[0]))
+        self._marks = marks
+        if self.on_change is None:
+            return
+        for game, status_moved in changed:
+            try:
+                self.on_change(game["league"], odds_id=game.get("odds_id"), espn_id=game.get("espn_id"),
+                               board=status_moved)
+            except Exception:
+                log.exception("Slate: dropping the computed entries of %s failed", game.get("id"))
 
     def _read_season(self, now: float) -> Optional[List[Dict[str, Any]]]:
         """The Odds API's in-season leagues (its free listing), else the last good. Read at once the first time,

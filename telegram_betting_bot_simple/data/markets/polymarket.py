@@ -57,6 +57,7 @@ import re
 import time
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from ..cache import ttl_for
 from .aliases import team_key
 from .common import (HttpError, Keeper, as_list, complement, http_get, iso, make_quote, normalise, num,
                      parse_time, pick_line, rounded, text)
@@ -67,9 +68,10 @@ BASE = "https://gamma-api.polymarket.com"
 PAGE = 100  # Gamma's page size
 MAX_PAGES = 8  # at most 800 markets per league and kind
 TRUNCATED_LOG_EVERY = 3600  # a fetch cut short at MAX_PAGES is logged at most this often per tag
-TTL = 5 * 60  # prediction markets: 5 minutes ...
-LIVE_TTL = 60  # ... and 1 minute while a game of the league is on
-LINES_TTL = 15 * 60  # spreads and totals move less and cost more: every 15 minutes
+# From the shared cache's policy table (data/cache.py's ttl_for), the one place these times live:
+TTL = ttl_for("markets").ttl  # prediction markets: 5 minutes ...
+LIVE_TTL = ttl_for("markets", "live").ttl  # ... and 1 minute while a game of the league is on
+LINES_TTL = ttl_for("market_lines").ttl  # spreads and totals move less and cost more: every 15 minutes
 LIVE_FOR = 4 * 3600  # a game counts as possibly live from its start for this long when the venue doesn't say
 DROP_AFTER = 12 * 3600  # an open market for a game that started longer ago than this is left behind
 

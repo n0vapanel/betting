@@ -10,13 +10,17 @@ from __future__ import annotations
 
 import datetime
 import re
+import threading
+import time
 import unicodedata
-from typing import Any, Dict, List, Optional, Tuple
+from collections import OrderedDict
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import requests
 
-from .cache import TTLCache
+from .cache import TTLCache, freshest, ttl_for
+from .utils import policy
 
 SITE = "https://site.api.espn.com/apis/site/v2/sports"
 STANDINGS = "https://site.api.espn.com/apis/v2/sports"
@@ -139,40 +143,284 @@ def team_match_score(name: str, team: Dict[str, Any]) -> float:
     return best
 
 
+# Scoreboard keys ESPN sends that nothing here reads, dropped (at any depth) before a board is cached: leaders,
+# headlines, highlights, team and athlete links, box-score statistics, the books' odds, play details and tennis
+# rosters are 80-90% of a board (a 330 KB NHL night keeps 38 KB). find_game, played_on and the slate's
+# parse_scoreboard read ids, names, logos, records, scores, linescores, status, dates, venue and groupings
+LEAN_DROP = frozenset({
+    "links", "leaders", "statistics", "headlines", "highlights", "odds", "details", "featuredAthletes", "roster",
+    "broadcasts", "broadcast", "geoBroadcasts", "tickets", "situation", "probables", "notes",
+})
+# The slate's own fetch (fetch_scoreboard) reuses a board at most this old (one the other process or a request
+# loaded a moment ago) and otherwise loads it, so the slate keeps its own intervals (20 s live at the fastest)
+SLATE_REUSE = 5.0
+LIVE_SOON = 10 * 60  # a board with a game starting this soon is paced as live (as the slate's LIVE_SOON)
+STATES_KEPT = 5000  # games whose state (pre, live, final) and score the client remembers, newest first
+
+
+def lean_events(value: Any) -> Any:
+    """A scoreboard's events without the keys in LEAN_DROP."""
+    if isinstance(value, dict):
+        return {key: lean_events(item) for key, item in value.items() if key not in LEAN_DROP}
+    if isinstance(value, list):
+        return [lean_events(item) for item in value]
+    return value
+
+
+# The parts of a game summary anything here reads (the game's status and score, ESPN's predictor, the injury lists,
+# the box score and the books' lines: game_result, box_score, closing_line, ratings.parse_predictor, the dashboard's
+# cards). The rest (play-by-play, win probability, news, videos, leaders, standings) is about 90% of a summary
+# (a final NBA game's 516 KB keeps about 57 KB), so it is dropped before the summary is cached
+SUMMARY_KEEP = ("header", "predictor", "injuries", "boxscore", "pickcenter")
+
+
+def lean_summary(data: Any) -> Any:
+    """A game summary with only the SUMMARY_KEEP parts."""
+    if not isinstance(data, dict):
+        return data
+    return {key: data[key] for key in SUMMARY_KEEP if key in data}
+
+
+def _score(value: Any) -> Optional[int]:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(number) if number.is_integer() else None
+
+
+def competition_state(competition: Any) -> Optional[Tuple[str, Optional[int], Optional[int], Optional[float]]]:
+    """(state, home score, away score, start in epoch seconds) of an ESPN competition: state is "pre", "live" or
+    "final" (a postponed or cancelled game counts as final: nothing more will happen to it); None if unreadable."""
+    if not isinstance(competition, dict):
+        return None
+    kind = (competition.get("status") or {}).get("type") or {}
+    if not isinstance(kind, dict):
+        return None
+    name = str(kind.get("name") or "").upper()
+    if kind.get("completed") or kind.get("state") == "post" or any(
+            word in name for word in ("POSTPONED", "CANCELED", "CANCELLED", "FORFEIT", "ABANDONED")):
+        state = "final"
+    elif kind.get("state") == "in":
+        state = "live"
+    elif kind.get("state") == "pre":
+        state = "pre"
+    else:
+        return None
+    sides = {c.get("homeAway"): c for c in competition.get("competitors") or [] if isinstance(c, dict)}
+    start = None
+    if isinstance(competition.get("date"), str):
+        try:
+            start = datetime.datetime.fromisoformat(competition["date"].replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            start = None
+    return (state, _score((sides.get("home") or {}).get("score")), _score((sides.get("away") or {}).get("score")),
+            start)
+
+
 class EspnClient:
-    def __init__(self, cache: Optional[TTLCache] = None) -> None:
-        self.cache = cache or TTLCache()
+    """ESPN's public endpoints, every request through the shared TTLCache (data/cache.py) with a kind and the
+    policy table's time to live (data/utils.py's policy). Game summaries are state-aware: a live game's for
+    seconds, a pre-game one for minutes, a final one for a day. The client remembers each game's state and score
+    from the scoreboards and summaries it reads (``game_state``, ``event_state``)."""
+
+    def __init__(self, cache: Optional[TTLCache] = None, clock: Optional[Callable[[], float]] = None) -> None:
+        self.cache = cache if cache is not None else TTLCache()  # an empty TTLCache is falsy (len 0)
+        self.clock = clock or time.time
+        self._states: "OrderedDict[Tuple[str, str], Tuple[str, Optional[int], Optional[int], Optional[float]]]" = \
+            OrderedDict()
+        self._states_lock = threading.Lock()
 
     def _get(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """One GET to ESPN (no key needed). Only ever called inside a cache loader."""
         response = requests.get(url, params=params, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         if not response.ok:
             raise RuntimeError(f"ESPN returned HTTP {response.status_code} for {url}")
         return response.json()
 
-    def scoreboard(self, league: str, day: datetime.date) -> List[Dict[str, Any]]:
-        """The league's events on ``day`` (a US Eastern date)."""
-        ttl = 300 if day >= datetime.date.today() - datetime.timedelta(days=1) else 6 * 3600
-        return self.cache.get(("espn", "scoreboard", league, day), ttl, lambda: self.fetch_scoreboard(league, day))
+    def _cached(self, key: Tuple[Any, ...], kind: str, loader: Callable[[], Any], state: Optional[str] = None,
+                stale: Optional[float] = None, life: Any = None) -> Any:
+        return self._read(key, kind, loader, policy(kind, state), stale, life)[0]
 
-    def fetch_scoreboard(self, league: str, day: datetime.date) -> List[Dict[str, Any]]:
-        """The league's events on ``day`` straight from ESPN, not cached: the all-sports slate (data/slate.py)
-        keeps its own trimmed copy of every league's boards, which would pile up here as raw JSON. ESPN takes
-        one day at a time (a date range is a 400)."""
+    def _read(self, key: Tuple[Any, ...], kind: str, loader: Callable[[], Any], rule: Tuple[float, float],
+              stale: Optional[float] = None, life: Any = None) -> Tuple[Any, float]:
+        """(value, when it was fetched on the cache's clock) under ``rule`` (ttl, stale window)."""
+        ttl, window = rule
+        options: Dict[str, Any] = {"stale": window if stale is None else stale, "kind": kind}
+        if life is not None:
+            options["life"] = life
+        read = getattr(self.cache, "get_with_time", None)
+        if callable(read):
+            return read(key, ttl, loader, **options)
+        return self.cache.get(key, ttl, loader, **options), self._cache_now()
+
+    def _cache_now(self) -> float:
+        """Now on the cache's clock (the one its copies' fetch times are on), else the client's."""
+        now = getattr(self.cache, "now", None)
+        return float(now()) if callable(now) else self.clock()
+
+    # --- what the client knows of each game's state ---
+
+    def _remember(self, league: str, event_id: Any, competition: Any, at: float) -> None:
+        """Note a game's state and score as read from data fetched at ``at`` (the cache's clock), unless what is
+        noted already comes from data fetched later: an old copy (a pre-game summary, a board from before the
+        final whistle) never moves a game back."""
+        found = competition_state(competition)
+        if found is None or event_id in (None, ""):
+            return
+        with self._states_lock:
+            key = (league, str(event_id))
+            known = self._states.get(key)
+            if known is not None and known[4] > at:
+                return
+            self._states[key] = (*found, at)
+            self._states.move_to_end(key)
+            while len(self._states) > STATES_KEPT:
+                self._states.popitem(last=False)
+
+    def _remember_events(self, league: str, events: Any, at: float) -> None:
+        if espn_path(league) is None or league in SCOREBOARD_ONLY:
+            return  # tennis and MMA events are tournaments and cards, not one game
+        for event in events or []:
+            if isinstance(event, dict):
+                self._remember(league, event.get("id"), (event.get("competitions") or [None])[0], at)
+
+    def event_state(self, league: str, event_id: Any) -> Optional[Dict[str, Any]]:
+        """{"state": "pre"|"live"|"final", "home": score, "away": score} as last read from a scoreboard or a summary
+        (the most recently fetched; a "pre" game whose start has passed reads as "live"); None when the client hasn't
+        seen the game."""
+        with self._states_lock:
+            found = self._states.get((league, str(event_id)))
+        if found is None:
+            return None
+        state, home, away, start = found[:4]
+        if state == "pre" and start is not None and start <= self.clock():
+            state = "live"
+        return {"state": state, "home": home, "away": away}
+
+    def game_state(self, league: str, event_id: Any) -> str:
+        """The game's state for the cache's policy: "pre", "live" or "final" ("pre" when not seen yet)."""
+        found = self.event_state(league, event_id)
+        return found["state"] if found else "pre"
+
+    # --- scoreboards ---
+
+    @staticmethod
+    def _scoreboard_key(league: str, day: datetime.date) -> Tuple[Any, ...]:
+        return ("espn", "scoreboard", league, day.isoformat())
+
+    def _load_scoreboard(self, league: str, day: datetime.date) -> List[Dict[str, Any]]:
         target = espn_path(league)
         if target is None:
             raise KeyError(league)
         sport, path = target
         params = {"dates": day.strftime("%Y%m%d"), "limit": SCOREBOARD_LIMIT, **SCOREBOARD_PARAMS.get(league, {})}
-        return self._get(f"{SITE}/{sport}/{path}/scoreboard", params).get("events", [])
+        events = lean_events(self._get(f"{SITE}/{sport}/{path}/scoreboard", params).get("events", []))
+        self._remember_events(league, events, self._cache_now())  # here too: a background refresh's count at once
+        return events
+
+    def _board_life(self, day: datetime.date) -> Callable[[Any], Tuple[float, float]]:
+        """A loaded board's life: the policy of the board it is (board_state of its own events)."""
+        return lambda events: ttl_for("scoreboard", self.board_state(day, events))
+
+    def board_state(self, day: datetime.date, events: Any = None) -> str:
+        """A board's state for the policy table's "scoreboard" rows, as the slate paces its boards: "live" (a game
+        on, or starting within 10 minutes), "today" (games still to finish), "idle" (all done), "future" (a day
+        ahead) or "past" (two days or more ago). A board not held yet is "today" (or "future"/"past")."""
+        today = datetime.datetime.fromtimestamp(self.clock(), ESPN_DAY_TZ).date()
+        if day < today - datetime.timedelta(days=1):
+            return "past"
+        if day > today:
+            return "future"
+        if events is None:
+            return "today"
+        now, waiting = self.clock(), False
+        for event in events or []:
+            found = competition_state((event.get("competitions") or [None])[0]) if isinstance(event, dict) else None
+            if found is None:
+                continue
+            state, _, _, start = found
+            if state == "live" or (state == "pre" and start is not None and start - now < LIVE_SOON):
+                return "live"
+            waiting = waiting or state == "pre"
+        return "today" if waiting else "idle"
+
+    def scoreboard(self, league: str, day: datetime.date) -> List[Dict[str, Any]]:
+        """The league's events on ``day`` (a US Eastern date), from the shared cache, kept as long as the slate
+        keeps that board (board_state): the slate refreshes today's boards, so a request rarely waits for ESPN."""
+        if espn_path(league) is None:
+            raise KeyError(league)
+        key = self._scoreboard_key(league, day)
+        held = self.cache.peek(key) if hasattr(self.cache, "peek") else None
+        # Past its time to live a board is served at once while one background refresh runs (the policy's stale
+        # window): a game page needs only the event's and teams' ids from it, which never change
+        events, at = self._read(key, "scoreboard", lambda: self._load_scoreboard(league, day),
+                                policy("scoreboard", self.board_state(day, held[1] if held else None)),
+                                life=self._board_life(day))
+        self._remember_events(league, events, at)
+        return events
+
+    def fetch_scoreboard(self, league: str, day: datetime.date) -> List[Dict[str, Any]]:
+        """The league's events on ``day`` for the all-sports slate (data/slate.py), which fetches each board on its
+        own schedule: a copy younger than SLATE_REUSE seconds is reused (the other process's, say), anything older
+        is loaded. ESPN takes one day at a time (a date range is a 400). Raises when ESPN fails, even if the cache
+        still holds the last good board, so the slate's own back-off and fallback see the failure."""
+        if espn_path(league) is None:
+            raise KeyError(league)
+        key = self._scoreboard_key(league, day)
+        # error_ttl=0: the slate backs off a failing board itself (its pace, the round breaker), so the cache
+        # neither remembers nor delays the slate's failures
+        # life: the board's own policy, so the request path (scoreboard) keeps the slate's copy as long as the slate
+        # paces that board, not SLATE_REUSE seconds
+        events, at = self.cache.get_with_time(key, SLATE_REUSE, lambda: self._load_scoreboard(league, day),
+                                              stale=0.0, error_ttl=0.0, kind="scoreboard", life=self._board_life(day))
+        age = self.cache.age(key)
+        if age is not None and age >= SLATE_REUSE + 1.0:
+            raise RuntimeError(f"ESPN didn't refresh the {league} scoreboard for {day.isoformat()}")
+        self._remember_events(league, events, at)
+        return events
+
+    # --- one game ---
 
     def summary(self, league: str, event_id: str) -> Dict[str, Any]:
-        """Game summary: injuries, ESPN predictor, leaders, last-five games and more."""
+        """Game summary (lean_summary: the header with status and score, ESPN's predictor, injuries, box score and
+        the books' lines). Kept for the game's state: seconds while it is live, minutes before it, a day once final.
+        The state is both what the client knows of the game (its scoreboards) and what the copy itself says, the
+        less final of the two: a pre-game or live copy is never kept as a final one, however final the board says
+        the game is (nor is a final copy kept as long while a board says the game is still on)."""
         sport, path = LEAGUES[league]
-        return self.cache.get(
-            ("espn", "summary", league, event_id),
-            600,
-            lambda: self._get(f"{SITE}/{sport}/{path}/summary", {"event": event_id}),
-        )
+        key = ("espn", "summary", league, str(event_id))
+
+        def load() -> Dict[str, Any]:
+            data = lean_summary(self._get(f"{SITE}/{sport}/{path}/summary", {"event": event_id}))
+            self._remember_summary(league, event_id, data, self._cache_now())  # a background refresh's at once
+            return data
+
+        # This process's copy (a copy only in the shared table is judged by the life it was saved with)
+        held = self.cache.peek(key, shared=False) if hasattr(self.cache, "peek") else None
+        known = self.event_state(league, event_id)
+        states = [state for state in ((known or {}).get("state"), self._copy_state(held[1]) if held else None)
+                  if state] or ["pre"]
+        rule = freshest(*(ttl_for("summary", state) for state in states))
+        data, at = self._read(key, "summary", load, rule,
+                              life=lambda copy: ttl_for("summary", self._copy_state(copy) or "pre"))
+        self._remember_summary(league, event_id, data, at)  # the other process's copy, from the shared table
+        return data
+
+    def _copy_state(self, data: Any) -> Optional[str]:
+        """A summary copy's own state ("pre", "live" or "final"; a pre-game copy whose start has passed is "live"),
+        None if unreadable."""
+        competitions = (data.get("header") or {}).get("competitions") if isinstance(data, dict) else None
+        found = competition_state(competitions[0]) if competitions else None
+        if found is None:
+            return None
+        state, _, _, start = found
+        return "live" if state == "pre" and start is not None and start <= self.clock() else state
+
+    def _remember_summary(self, league: str, event_id: Any, data: Any, at: float) -> None:
+        competitions = (data.get("header") or {}).get("competitions") if isinstance(data, dict) else None
+        if competitions:
+            self._remember(league, event_id, competitions[0], at)
 
     def standings(self, league: str, season: Optional[int] = None) -> Dict[str, Dict[str, float]]:
         """Per-team wins, losses and average points for/against, keyed by ESPN team id."""
@@ -195,7 +443,8 @@ class EspnClient:
                     }
             return teams
 
-        return self.cache.get(("espn", "standings", league, season), 3600 if season is None else 24 * 3600, load)
+        return self._cached(("espn", "standings", league, season), "standings", load,
+                            state=None if season is None else "past")
 
     def roster(self, league: str, team_id: str) -> List[Dict[str, Any]]:
         """The team's players: id, name, position and injury status ('' when healthy)."""
@@ -214,7 +463,7 @@ class EspnClient:
                 })
             return players
 
-        return self.cache.get(("espn", "roster", league, team_id), 3 * 3600, load)
+        return self._cached(("espn", "roster", league, str(team_id)), "roster", load)
 
     def player_seasons(self, league: str, athlete_id: str) -> List[Dict[str, Any]]:
         """Per-game averages for each season of an NBA/WNBA player's career, oldest first.
@@ -248,7 +497,7 @@ class EspnClient:
                     seasons[season] = parsed
             return [{"season": season, **stats} for season, stats in sorted(seasons.items())]
 
-        return self.cache.get(("espn", "player", league, athlete_id), 12 * 3600, load)
+        return self._cached(("espn", "player", league, str(athlete_id)), "career", load)
 
     def find_game(self, league: str, home: str, away: str, commence_time: str) -> Optional[Dict[str, Any]]:
         """The ESPN event for an odds-feed game: matched on date and both team names."""

@@ -460,10 +460,15 @@ def test_props_say_when_they_were_fetched_and_flag_a_copy_espn_did_not_renew(clo
     del fake.routes[route]
     old = data.props("basketball_nba", "401909866")
     assert (old["count"], old["as_of"], old["stale"], old["reason"]) == (7, "2026-10-26T12:00:00Z", True, None)
-    # Once ESPN answers again the lines are fresh
+    # Within the failure's 30 s back-off the copy is served again without asking ESPN (nobody hammers it)
     fake.routes[route] = load("props_nba_401909866.json")
+    calls = len(fake.calls)
+    held = data.props("basketball_nba", "401909866")
+    assert (held["as_of"], held["stale"], len(fake.calls)) == ("2026-10-26T12:00:00Z", True, calls)
+    # Once the back-off is over and ESPN answers again, the lines are fresh
+    clock.advance(31)
     again = data.props("basketball_nba", "401909866")
-    assert (again["as_of"], again["stale"]) == ("2026-10-26T12:11:00Z", False)
+    assert (again["as_of"], again["stale"]) == ("2026-10-26T12:11:31Z", False)
 
 
 def test_props_not_posted_gives_a_reason():

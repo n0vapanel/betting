@@ -59,6 +59,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from ..cache import ttl_for
 from .aliases import team_key
 from .common import (HttpError, Keeper, complement, http_get, iso, make_quote, normalise, num, parse_time,
                      pick_line, rounded, text)
@@ -66,9 +67,10 @@ from .common import (HttpError, Keeper, complement, http_get, iso, make_quote, n
 log = logging.getLogger(__name__)
 
 BASE = "https://api.elections.kalshi.com/trade-api/v2"
-TTL = 5 * 60
-LIVE_TTL = 60
-LINES_TTL = 15 * 60
+# From the shared cache's policy table (data/cache.py's ttl_for): 5 minutes, 1 while live; lines 15 minutes
+TTL = ttl_for("markets").ttl
+LIVE_TTL = ttl_for("markets", "live").ttl
+LINES_TTL = ttl_for("market_lines").ttl
 LIVE_FOR = 4 * 3600
 MAX_PAGES = 5
 MIN_INTERVAL = 1.0  # at most one request a second

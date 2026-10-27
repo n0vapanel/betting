@@ -77,7 +77,7 @@ from ..data.store import MAX_CENTS, Store
 from ..engine import bets, calls, pasted, rollover, target, tickets
 from ..engine.odds_math import decimal_to_american, format_american, remove_vig
 from ..engine.tickets import TicketLeg, chance_label, one_in
-from .service import AI_LEAGUES, CallRejected, DashboardService, NotFound
+from .service import AI_LEAGUES, GAMES_TTL, CallRejected, DashboardService, NotFound
 
 log = logging.getLogger(__name__)
 
@@ -482,7 +482,7 @@ def replay(plan: Mapping[str, Any]) -> Run:
 
 # Pasted slips (engine/pasted.py reads them; the Lab matches and prices them at the person's own odds)
 NBA = "basketball_nba"
-GAMES_CACHE_SECONDS = 60  # DashboardService.games keeps a league's cards this long
+GAMES_CACHE_SECONDS = GAMES_TTL  # DashboardService.games keeps a league's cards this long (the "games" policy)
 PASTE_LOADS = 3  # leagues not already cached that one pasted slip may load (each fetch costs odds quota)
 FETCH_COST = 3  # quota one league's odds fetch costs (moneyline, spreads and totals)
 SAME_START = 36 * 3600  # a slip's start time and a board's game this close are the same game

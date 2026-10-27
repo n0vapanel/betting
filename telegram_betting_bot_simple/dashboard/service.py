@@ -9,7 +9,10 @@ from prices the browser sends.
 
 from __future__ import annotations
 
+import copy
 import datetime
+import hashlib
+import json
 import logging
 import statistics
 import time
@@ -19,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 from ..ai.desk import AnalystDesk
 from ..ai.forecast import AnalystError
-from ..data.cache import TTLCache
+from ..data.cache import TTLCache, freshest, ttl_for
 from ..data import slate as slate_mod
 from ..data.espn_client import ESPN_DAY_TZ, LEAGUES as ESPN_LEAGUES, OUT_STATUSES, EspnClient
 from ..data.leagues import SPORTS, pick_leagues
@@ -32,6 +35,27 @@ from ..engine.slip import Leg, evaluate_slip
 MODEL_VERSION = "v1"
 # Leagues with the full model (predicted score, players); others show the market's view
 AI_LEAGUES = {"basketball_nba"}
+
+# Computed results in the shared cache (data/cache.py), keyed by their inputs and kept for their freshest input's
+# time to live, so a game's card is built once for everyone (the bot and the dashboard share the SQLite tier):
+GAMES_TTL = ttl_for("games").ttl  # a league's game cards
+GAME_KINDS = ("game_card", "game_parts", "consensus")  # one game's entries: dropped together (invalidate_game)
+
+
+def _partial(value: Any) -> bool:
+    """Whether a game's computed entry was built while part of ESPN failed (see TTLCache.get_computed)."""
+    return bool(isinstance(value, dict) and value.get("partial"))
+
+
+def _now_utc() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _started_now(card: Dict[str, Any]) -> Dict[str, Any]:
+    """A card from a computed entry with its "live" (the game has started) worked out now from its start: the entry
+    can be older than tip-off, and calls close at tip-off."""
+    card["live"] = _parse_time(card["start"]) <= _now_utc()
+    return card
 
 
 class NotFound(Exception):
@@ -97,12 +121,14 @@ class DashboardService:
         workers: int = 8,
         store: Optional[Store] = None,
         analysts: Optional[AnalystDesk] = None,
+        cache: Optional[TTLCache] = None,
     ) -> None:
         self.odds = odds
         self.espn = espn
         self.tz = tz
         self.params = params
-        self.cache = TTLCache()
+        # The process's one shared cache (services.build_service passes it); an empty TTLCache is falsy, hence "is"
+        self.cache = cache if cache is not None else TTLCache()
         self.pool = ThreadPoolExecutor(max_workers=workers)
         # People's predictions and the AI's track record; None turns those features off
         self.store = store
@@ -162,7 +188,8 @@ class DashboardService:
                 "updated": datetime.datetime.now(self.tz).strftime("%-I:%M %p %Z"),
             }
 
-        result = self.cache.get(("games", league), 60, load)
+        ttl, stale = ttl_for("games")
+        result = self.cache.get(("games", league), ttl, load, stale=stale, kind="games")
         loaded = self.odds.odds_loaded_at(league)
         odds_as_of = (
             datetime.datetime.fromtimestamp(loaded, self.tz).strftime("%-I:%M %p %Z") if loaded else None
@@ -170,20 +197,104 @@ class DashboardService:
         return {**result, "quota": dict(self.odds.quota), "model": MODEL_VERSION, "odds_as_of": odds_as_of}
 
     def game(self, league: str, event_id: str) -> Dict[str, Any]:
-        """One game in full: all bookmakers' odds, prediction breakdown and player projections."""
+        """One game in full: all bookmakers' odds, prediction breakdown and player projections.
+
+        Built once for everyone: a computed entry (kind "game_card") keyed by the game's inputs (the odds board it
+        came from, ESPN's state and score of the game) and kept for its freshest input's time to live (seconds
+        while live, a minute before); the slate drops it when the game's status or score changes. "Markets say"
+        is its own entry (``consensus``)."""
+        game, sig, state = self._game_inputs(league, event_id)
+        key = ("game_card", league, event_id, sig)
+        ttl, stale = self._game_policy(state)
+        # Built while ESPN failed ("partial"): kept a few seconds for everyone, then rebuilt (data/cache.py's
+        # get_computed), so a down ESPN costs one rebuild per PARTIAL_KEEP, not one per person
+        payload = self.cache.get_computed(key, ttl, lambda: self._game_payload(league, event_id, game, sig, state),
+                                          _partial, stale=stale, kind="game_card")
+        card = _started_now(copy.deepcopy(payload["card"]))
+        card["consensus"] = self._consensus(league, event_id, game, payload.get("model"), state)
+        return card
+
+    # --- computed entries: one game's inputs, its parts, and dropping them ----------------------------------
+
+    def _game_inputs(self, league: str, event_id: str) -> Tuple[Dict[str, Any], str, str]:
+        """(the game on the league's odds board, its inputs' signature, its state for the policy table). The
+        signature covers when the board was fetched, the game's own prices and ESPN's state and score of it, so a
+        new board or a scoring play is a new entry. Raises NotFound when the board has no such game."""
         game = next((g for g in self.odds.league_games(league) if g["id"] == event_id), None)
         if game is None:
             raise NotFound(f"No game {event_id} in {league}")
-        context = self._league_context(league)
-        card, info = self._card(league, game, context)
+        espn_state = None
+        if league in ESPN_LEAGUES:
+            try:
+                match = self.espn.find_game(league, game["home"], game["away"], game["commence_time"])
+            except Exception:
+                match = None
+            read = getattr(self.espn, "event_state", None)
+            if match and callable(read):
+                espn_state = read(league, match["event_id"])
+        if espn_state and espn_state.get("state"):
+            state = espn_state["state"]
+        else:
+            state = "live" if _parse_time(game["commence_time"]) <= datetime.datetime.now(datetime.timezone.utc) \
+                else "pre"
+        loaded = getattr(self.odds, "odds_loaded_at", None)
+        inputs = {"odds_at": loaded(league) if callable(loaded) else None, "game": game, "espn": espn_state,
+                  "state": state}
+        text = json.dumps(inputs, sort_keys=True, separators=(",", ":"), default=str)
+        return game, hashlib.sha1(text.encode("utf-8")).hexdigest()[:20], state
+
+    @staticmethod
+    def _game_policy(state: str) -> Tuple[float, float]:
+        """A game's computed entries: the freshest of the game's own policy and ESPN's summary for its state."""
+        policy = freshest(ttl_for("game_card", state), ttl_for("summary", state))
+        return policy.ttl, policy.stale
+
+    def _parts(self, league: str, event_id: str, game: Dict[str, Any], sig: str, state: str) -> Dict[str, Any]:
+        """The game's card with its prediction, the prediction itself (info) and its players' projections: built
+        once per signature for game() and detail(). In this process's memory only (the prediction is an object)."""
+        def load() -> Dict[str, Any]:
+            context = self._league_context(league)
+            card, info = self._card(league, game, context)
+            self._explain(card, info)
+            players = None
+            if league in AI_LEAGUES and info.get("prediction") and info.get("match") and context:
+                players = self._players(league, info, context)
+            prediction = info.get("prediction")
+            model = (prediction.sources.get("model") or {}).get("home_win_prob") if prediction else None
+            return {"card": card, "info": info, "players": players, "model": model, "partial": bool(info.get("partial"))}
+
+        key = ("game_parts", league, event_id, sig)
+        ttl, stale = self._game_policy(state)
+        return self.cache.get_computed(key, ttl, load, _partial, stale=stale, persist=False, kind="game_parts")
+
+    def _game_payload(self, league: str, event_id: str, game: Dict[str, Any], sig: str, state: str
+                      ) -> Dict[str, Any]:
+        """game()'s cached value: the card with every book, the players and the analysts (plain JSON, so the bot
+        and the dashboard share it), the team model's chance for "Markets say", and whether ESPN failed meanwhile."""
+        parts = self._parts(league, event_id, game, sig, state)
+        card = copy.deepcopy(parts["card"])
         card["books"] = [self._book_view(book) for book in game["books"]]
-        if league in AI_LEAGUES and info.get("prediction") and info.get("match"):
-            card["players"] = self._players(league, info, context)
+        if parts["players"] is not None:
+            card["players"] = copy.deepcopy(parts["players"])
         if self.analysts and league in AI_LEAGUES:
             card["analysts"] = self.analysts.game_view(league, event_id)
-        self._explain(card, info)
-        card["consensus"] = self.markets_detail(league, event_id, game=game, prediction=info.get("prediction"))
-        return card
+        return {"card": card, "model": parts["model"], "partial": parts["partial"]}
+
+    def invalidate_game(self, league: str, odds_id: Optional[str] = None, espn_id: Optional[str] = None,
+                        board: bool = False) -> int:
+        """Drop a game's computed entries (its card, parts and "Markets say") here and in the shared table, and with
+        ``board`` the league's game cards too: the slate calls this when it sees the game's status or score change,
+        so the next view rebuilds once for everyone. Returns how many entries this process dropped."""
+        if not odds_id:
+            return 0  # a game the odds feed doesn't list has no card here (game() needs its board)
+        dropped = 0
+        prefixes = [(kind, league, str(odds_id)) for kind in GAME_KINDS]
+        drop_prefix = getattr(self.cache, "invalidate_prefix", None)
+        if callable(drop_prefix):
+            dropped += int(drop_prefix(*prefixes) or 0)
+        if board:
+            self.cache.invalidate(("games", league))
+        return dropped
 
     def _explain(self, card: Dict[str, Any], info: Dict[str, Any]) -> None:
         """The game route's typed factors (engine/factors.py): each of the prediction's numbers as a labelled
@@ -194,11 +305,17 @@ class DashboardService:
             card["prediction"]["projections"] = self._projections(info["prediction"])
 
     def forget(self, league: str) -> None:
-        """Rebuild the league's game cards on the next request (new analyst forecasts)."""
+        """Rebuild the league's game cards, and each game's computed entries, on the next request (new analyst
+        forecasts)."""
         self.cache.invalidate(("games", league))
+        drop_prefix = getattr(self.cache, "invalidate_prefix", None)
+        if callable(drop_prefix):
+            drop_prefix(*[(kind, league) for kind in GAME_KINDS])
 
     def _league_context(self, league: str) -> Optional[Dict[str, Any]]:
-        """Standings this season and last, for the team model (NBA only)."""
+        """Standings this season and last, for the team model (NBA only): the team context, a computed entry
+        (kind "team_context") keyed by the league and when its odds board was fetched (the scoring level reads the
+        board's totals), shared by the bot and the dashboard."""
         if league not in AI_LEAGUES:
             return None
 
@@ -214,13 +331,17 @@ class DashboardService:
             )
             context = {"current": current, "previous": previous, "avg": league_avg,
                        "label": nba_model.season_label(today),
-                       # Each season's own average, so last season's strengths can be regressed to the mean
-                       "averages": (nba_model.league_average(current), nba_model.league_average(previous), league_avg)}
+                       # Each season's own average, so last season's strengths can be regressed to the mean (a list:
+                       # plain JSON for the shared table)
+                       "averages": [nba_model.league_average(current), nba_model.league_average(previous), league_avg]}
             context["level"] = self._scoring_level(league, context)
             return context
 
+        loaded = getattr(self.odds, "odds_loaded_at", None)
+        board_at = loaded(league) if callable(loaded) else None
+        ttl, stale = freshest(ttl_for("team_context"), ttl_for("standings"))
         try:
-            return self.cache.get(("context", league), 1800, load)
+            return self.cache.get(("team_context", league, board_at), ttl, load, stale=stale, kind="team_context")
         except Exception as exc:
             logging.warning("No ESPN standings for %s: %s", league, exc)
             return None
@@ -301,6 +422,7 @@ class DashboardService:
             except Exception as exc:
                 logging.warning("No ESPN summary for %s: %s", match["event_id"], exc)
                 espn_summary = {}
+                info["partial"] = True  # a computed entry built now is kept only seconds (get_computed)
             predictor = espn_summary.get("predictor") or {}
             home_projection = (predictor.get("homeTeam") or {})
             if home_projection.get("id") == match["home_id"] and home_projection.get("gameProjection"):
@@ -435,6 +557,7 @@ class DashboardService:
                 roster = self.espn.roster(league, team_id)
             except Exception as exc:
                 logging.warning("No roster for team %s: %s", team_id, exc)
+                info["partial"] = True
                 out[side] = []
                 continue
             statuses = {p["id"]: p["status"] for p in info["injuries"].get(team_id, [])}
@@ -476,21 +599,18 @@ class DashboardService:
     # --- people's predictions ("calls") and the AI's track record ------------------
 
     def detail(self, league: str, event_id: str) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Dict[str, Any]]]:
-        """A game's card, the prediction behind it, and its players' projections by player id."""
-        game = next((g for g in self.odds.league_games(league) if g["id"] == event_id), None)
-        if game is None:
-            raise NotFound(f"No game {event_id} in {league}")
-        context = self._league_context(league)
-        card, info = self._card(league, game, context)
-        self._explain(card, info)
-        card["consensus"] = self.markets_detail(league, event_id, game=game, prediction=info.get("prediction"))
+        """A game's card, the prediction behind it, and its players' projections by player id (from the game's
+        computed parts, shared with game(); copies, so a caller can't change the cached ones)."""
+        game, sig, state = self._game_inputs(league, event_id)
+        parts = self._parts(league, event_id, game, sig, state)
+        card = _started_now(copy.deepcopy(parts["card"]))  # "calls close at tip-off" reads it: never a cached flag
+        card["consensus"] = self._consensus(league, event_id, game, parts["model"], state)
         players: Dict[str, Dict[str, Any]] = {}
-        if league in AI_LEAGUES and info.get("prediction") and info.get("match") and context:
-            for side, rows in self._players(league, info, context).items():
-                for row in rows:
-                    if not row.get("out"):
-                        players[str(row["id"])] = {**row, "side": side}
-        return card, info, players
+        for side, rows in (parts["players"] or {}).items():
+            for row in rows:
+                if not row.get("out"):
+                    players[str(row["id"])] = {**row, "side": side}
+        return card, copy.deepcopy(parts["info"]), players
 
     def judge(self, league: str, event_id: str, call: Dict[str, Any]) -> Dict[str, Any]:
         """What the AI thinks of a call, part by part (shown live while someone makes it)."""
@@ -651,6 +771,31 @@ class DashboardService:
 
     # --- the markets brain ("Markets say") -------------------------------------------------------------
 
+    def _consensus(self, league: str, event_id: str, game: Optional[Dict[str, Any]], model: Optional[float],
+                   state: str) -> Optional[Dict[str, Any]]:
+        """The game's "Markets say": the slate's own detail when this process runs the slate (worked out once per
+        round for everyone), else a computed entry (kind "consensus") keyed by the game, the board's time, the team
+        model's chance and whether the game has started, kept for its state's time to live."""
+        if self.slate is not None:
+            found = self._slate_detail(league, event_id)
+            if found:
+                return found
+        loaded = getattr(self.odds, "odds_loaded_at", None)
+        board_at = loaded(league) if callable(loaded) and game is not None else None
+        start = slate_mod._parse_time((game or {}).get("commence_time"))
+        started = start is not None and start <= time.time()
+        key = ("consensus", league, event_id, board_at, None if model is None else round(float(model), 6), started)
+        policy = ttl_for("consensus", state)
+        return self.cache.get(key, policy.ttl, lambda: self._markets_detail(league, event_id, game, model, None),
+                              stale=policy.stale, kind="consensus")
+
+    def _slate_detail(self, league: str, event_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            return self.slate.markets_for(league, odds_id=event_id)
+        except Exception:
+            logging.exception("Couldn't read the slate's markets for %s", event_id)
+            return None
+
     def markets_detail(self, league: str, event_id: str, game: Optional[Dict[str, Any]] = None,
                        prediction: Optional[nba_model.GamePrediction] = None, now: Optional[float] = None
                        ) -> Optional[Dict[str, Any]]:
@@ -660,15 +805,24 @@ class DashboardService:
         The slate's own detail when the dashboard's slate has one; else (the bot's process, or before the slate's
         first round) the dashboard's last logged opinions from consensus_log (prediction markets, ESPN, ratings),
         with the books' consensus from the board in hand (or the saved one) and the team model's own chance. Once
-        a game has started its logged detail is frozen and shown as it was."""
+        a game has started its logged detail is frozen and shown as it was.
+
+        Without a slate it is the shared cache's "consensus" entry for the game (see _consensus); with ``now`` (a
+        test's clock) it is worked out afresh."""
         if self.slate is not None:
-            try:
-                found = self.slate.markets_for(league, odds_id=event_id)
-            except Exception:
-                logging.exception("Couldn't read the slate's markets for %s", event_id)
-                found = None
+            found = self._slate_detail(league, event_id)
             if found:
                 return found
+        model = (prediction.sources.get("model") or {}).get("home_win_prob") if prediction else None
+        if now is not None:
+            return self._markets_detail(league, event_id, game, model, now)
+        start = slate_mod._parse_time((game or {}).get("commence_time"))
+        state = "pre" if start is None or start > time.time() else "live"
+        return self._consensus(league, event_id, game, model, state)
+
+    def _markets_detail(self, league: str, event_id: str, game: Optional[Dict[str, Any]], model: Optional[float],
+                        now: Optional[float]) -> Optional[Dict[str, Any]]:
+        """markets_detail worked out from the store's logged opinions and the board (no slate, no cache)."""
         now = time.time() if now is None else now
         row = None
         if self.store is not None:
@@ -693,7 +847,6 @@ class DashboardService:
         if row:
             sources += [_restale(source, now) for source in row.get("sources") or []
                         if source.get("kind") in ("prediction_market", "model_rating")]
-        model = (prediction.sources.get("model") or {}).get("home_win_prob") if prediction else None
         if model is not None:
             sources.append(slate_mod.model_source(model, now, now))
         elif row:

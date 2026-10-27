@@ -43,6 +43,7 @@ import requests
 from ..engine.odds_math import remove_vig
 from .cache import TTLCache
 from .store import Store
+from .utils import policy
 
 log = logging.getLogger(__name__)
 
@@ -198,7 +199,7 @@ class OddsService:
         bookmakers: Optional[Sequence[str]] = None,
     ) -> None:
         self.api_key = api_key
-        self.cache = cache or TTLCache()
+        self.cache = cache if cache is not None else TTLCache()  # an empty TTLCache is falsy (len 0)
         self.odds_ttl = odds_ttl_minutes * 60
         # Used only without a bookmaker list (ODDS_BOOKMAKERS=none), or if The Odds API refuses the list
         self.regions = regions
@@ -283,8 +284,11 @@ class OddsService:
             return self._get(path, self.board_params())
 
     def sports(self) -> List[Dict[str, Any]]:
-        """All sports and leagues (free: costs no quota). Cached for 6 hours."""
-        return self.cache.get(("odds", "sports"), 6 * 3600, lambda: self._get("/sports", {}))
+        """All sports and leagues (free: costs no quota), through the shared cache (kind "odds_sports", hours):
+        the bot and the dashboard share one copy. The key is never part of the cache key or the value."""
+        ttl, stale = policy("odds_sports")
+        return self.cache.get(("odds", "sports"), ttl, lambda: self._get("/sports", {}), stale=stale,
+                              kind="odds_sports")
 
     def odds_loaded_at(self, sport_key: str) -> Optional[float]:
         """When the league's odds were fetched from the API (epoch seconds), or None."""
@@ -336,7 +340,9 @@ class OddsService:
         # With a shared store the in-memory copy is short-lived, so a refresh made by the
         # other process shows up here within a minute
         memory_ttl = min(60.0, self.odds_ttl) if self.store else self.odds_ttl
-        return self.cache.get(key, memory_ttl, load)
+        # The snapshot is its own persistence (the store's odds_snapshots): the board stays out of the shared
+        # cache's table, and its rules (TTL, reserve, lease) are the snapshot's
+        return self.cache.get(key, memory_ttl, load, kind="odds_board", persist=False)
 
     def saved_games(self, sport_key: str) -> Optional[Tuple[float, List[Dict[str, Any]]]]:
         """(fetched_at, games) of the league's last board, from the shared store (or this process's memory),
