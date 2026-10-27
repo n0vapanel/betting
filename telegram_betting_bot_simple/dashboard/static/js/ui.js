@@ -179,19 +179,24 @@ export function notice(text, kind = "info", { html = false } = {}) {
 
 // --- loading, empty and error states -------------------------------------------------------------------
 
-/** Placeholders while something loads: skeleton("cards", 3) | skeleton("lines", 4) | skeleton("chart") | skeleton("header"). */
+/**
+ * Placeholders while something loads: skeleton("cards", 3) | skeleton("lines", 4) | skeleton("chart") | skeleton("header").
+ * They stay invisible for their first 300 ms (styles.css .skel-wrap), so a quick answer never flashes them;
+ * on a repeat visit Today paints from the cache and shows none at all.
+ */
 export function skeleton(kind = "lines", count = 3) {
   const line = (w) => `<div class="skel skel-line" style="width:${w}%"></div>`;
+  const wrap = (html, cls = "", label = "Loading") => `<div class="skel-wrap${cls ? ` ${cls}` : ""}" aria-busy="true" aria-label="${label}">${html}</div>`;
   if (kind === "cards") {
-    return `<div class="stack" aria-busy="true" aria-label="Loading">${Array.from({ length: count }, () => `
+    return wrap(Array.from({ length: count }, () => `
       <div class="card skel-card">${line(38)}<div class="skel skel-bar"></div>
-        <div class="skel-grid">${Array.from({ length: 6 }, () => '<div class="skel skel-odds"></div>').join("")}</div></div>`).join("")}</div>`;
+        <div class="skel-grid">${Array.from({ length: 6 }, () => '<div class="skel skel-odds"></div>').join("")}</div></div>`).join(""), "stack");
   }
-  if (kind === "chart") return '<div class="skel skel-chart" aria-busy="true" aria-label="Loading chart"></div>';
+  if (kind === "chart") return wrap('<div class="skel skel-chart"></div>', "", "Loading chart");
   if (kind === "header") {
-    return `<div class="skel-header" aria-busy="true"><div class="skel skel-avatar"></div><div class="grow">${line(60)}${line(40)}</div></div>`;
+    return wrap(`<div class="skel-header"><div class="skel skel-avatar"></div><div class="grow">${line(60)}${line(40)}</div></div>`);
   }
-  return `<div class="stack-sm" aria-busy="true" aria-label="Loading">${Array.from({ length: count }, (_, i) => line([92, 76, 84, 60, 70][i % 5])).join("")}</div>`;
+  return wrap(Array.from({ length: count }, (_, i) => line([92, 76, 84, 60, 70][i % 5])).join(""), "stack-sm");
 }
 
 /**
@@ -318,7 +323,7 @@ function fillSheet(state, { title = "", body = "", footer = "", label = "" }) {
 // the dialog (aria-modal alone doesn't keep keyboard focus in). Each dialog holds the page under its own
 // name, so closing a sheet while the gate is up keeps it inert.
 
-const BEHIND = ".app-header, .shell, #slipbar, .tabbar";
+const BEHIND = "#skip, .app-header, .desk, #slipbar, .tabbar"; // .desk holds the panes: tree, board (.shell), inspector, slip rail
 const holders = new Map(); // who holds the page inert -> extra selector for that holder (the gate also covers sheets)
 
 /** Make the page behind a dialog inert (on) or let it go (off). ``also`` adds a selector for this holder. */
@@ -874,6 +879,19 @@ export const MARK_WORDS = {
 };
 
 /**
+ * Register a slip leg for a price button drawn by a screen itself (Today's board from the slate); returns
+ * the key to put on the button as data-leg-key="<key>" (with aria-pressed). The delegated click handler
+ * then toggles that leg in the slip like any oddsButton(), and keeps every copy of the button lit.
+ *   leg = {ref: {league, id (the odds event id), market: "h2h"|"spreads"|"totals", side, point}, label, game,
+ *          start, league, price, american?, ai?, fair?}
+ */
+export function registerLeg(leg) {
+  const key = legKey(leg.ref);
+  legRegistry.set(key, leg);
+  return key;
+}
+
+/**
  * A price button that toggles a pick in the slip:
  *   oddsButton(card, "spreads", "home")  (card from /api/today or /api/game)
  * Shows the line, the price in the person's format and the AI's chance (or the market's, marked "Mkt",
@@ -1079,6 +1097,106 @@ export function formatStat(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "–";
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+// --- grouped checkboxes (the sports sheet and onboarding) --------------------------------------------------
+
+/**
+ * Grouped checkboxes: an "All" box, a box per group that is checked, unchecked or mixed (some of its items
+ * checked), and a box per item, with "Select all" and "Clear". Groups fold behind a button (closed unless
+ * listed in ``open``). Native checkboxes, so the keyboard and screen readers get "mixed" for free.
+ *   html = checkTree({ name: "sports", groups: [{key, label, items: [{key, label, tag}]}], checked: Set,
+ *                      allLabel: "All sports", open: ["Soccer"] })
+ *   const tree = bindCheckTree(container, { checked: Set, onChange(set) })   // after inserting html
+ *   tree.checked -> Set of item keys; tree.set(keys) replaces it
+ */
+export function checkTree({ name, groups = [], checked = new Set(), allLabel = "All", open = [], unit = "leagues" } = {}) {
+  const total = groups.reduce((n, g) => n + g.items.length, 0);
+  const id = (i) => `ct-${String(name).replace(/[^a-z0-9_-]/gi, "")}-${i}`;
+  return `<div class="ctree" data-ctree="${esc(name)}" data-unit="${esc(unit)}">
+    <div class="ctree-tools">
+      <button type="button" class="btn btn-secondary small" data-ctree-act="all">${icon("check", { size: 16 })}Select all</button>
+      <button type="button" class="btn btn-secondary small" data-ctree-act="none">Clear</button>
+      <span class="ctree-count muted small" aria-live="polite">${checked.size} of ${total} ${esc(unit)}</span>
+    </div>
+    <label class="ctree-row ctree-all"><input type="checkbox" data-ctree-box="all"> <span class="grow"><b>${esc(allLabel)}</b></span><span class="ctree-n">${total}</span></label>
+    <ul class="ctree-groups">${groups.map((g, i) => {
+      const isOpen = open.includes(g.key);
+      return `<li class="ctree-group">
+        <div class="ctree-grow">
+          <label class="ctree-row"><input type="checkbox" data-ctree-box="group" data-group="${esc(g.key)}"> <span class="grow">${esc(g.label)}</span><span class="ctree-n">${g.items.length}</span></label>
+          <button type="button" class="icon-btn ctree-fold" aria-expanded="${isOpen}" aria-controls="${id(i)}" aria-label="${esc(`${isOpen ? "Hide" : "Show"} ${g.label} ${unit}`)}" data-ctree-fold>${icon("down", { size: 18 })}</button>
+        </div>
+        <ul class="ctree-items" id="${id(i)}"${isOpen ? "" : " hidden"}>${g.items.map((it) => `<li><label class="ctree-row ctree-item">
+          <input type="checkbox" data-ctree-box="item" data-group="${esc(g.key)}" value="${esc(it.key)}"${checked.has(it.key) ? " checked" : ""}>
+          <span class="grow">${esc(it.label)}${it.tag ? ` <span class="tag">${esc(it.tag)}</span>` : ""}</span></label></li>`).join("")}</ul>
+      </li>`;
+    }).join("")}</ul>
+  </div>`;
+}
+
+/** Wire a checkTree() up (see there). Every change ends in onChange(set) with the checked item keys. */
+export function bindCheckTree(container, { checked = new Set(), onChange = () => {} } = {}) {
+  const root = container.matches?.("[data-ctree]") ? container : container.querySelector("[data-ctree]");
+  const state = { checked: new Set(checked) };
+  const items = () => [...root.querySelectorAll('[data-ctree-box="item"]')];
+  const sync = () => {
+    const all = items();
+    for (const box of all) box.checked = state.checked.has(box.value);
+    const mark = (box, list) => {
+      const on = list.filter((b) => b.checked).length;
+      box.checked = list.length > 0 && on === list.length;
+      box.indeterminate = on > 0 && on < list.length;
+    };
+    for (const box of root.querySelectorAll('[data-ctree-box="group"]')) {
+      mark(box, all.filter((b) => b.dataset.group === box.dataset.group));
+    }
+    mark(root.querySelector('[data-ctree-box="all"]'), all);
+    const count = root.querySelector(".ctree-count");
+    if (count) count.textContent = `${all.filter((b) => b.checked).length} of ${all.length} ${root.dataset.unit || "leagues"}`;
+  };
+  const changed = () => {
+    sync();
+    onChange(new Set(state.checked));
+  };
+  root.addEventListener("change", (event) => {
+    const box = event.target.closest("[data-ctree-box]");
+    if (!box) return;
+    const kind = box.dataset.ctreeBox;
+    const keys = kind === "all" ? items().map((b) => b.value)
+      : kind === "group" ? items().filter((b) => b.dataset.group === box.dataset.group).map((b) => b.value) : [box.value];
+    for (const key of keys) {
+      if (box.checked) state.checked.add(key);
+      else state.checked.delete(key);
+    }
+    changed();
+  });
+  root.addEventListener("click", (event) => {
+    const act = event.target.closest("[data-ctree-act]")?.dataset.ctreeAct;
+    if (act) {
+      state.checked = new Set(act === "all" ? items().map((b) => b.value) : []);
+      changed();
+      return;
+    }
+    const fold = event.target.closest("[data-ctree-fold]");
+    if (fold) {
+      const list = root.querySelector(`#${CSS.escape(fold.getAttribute("aria-controls"))}`);
+      const open = fold.getAttribute("aria-expanded") !== "true";
+      fold.setAttribute("aria-expanded", String(open));
+      fold.setAttribute("aria-label", fold.getAttribute("aria-label").replace(/^(Show|Hide)/, open ? "Hide" : "Show"));
+      if (list) list.hidden = !open;
+    }
+  });
+  sync();
+  return {
+    get checked() {
+      return new Set(state.checked);
+    },
+    set(keys) {
+      state.checked = new Set(keys);
+      sync();
+    },
+  };
 }
 
 // --- delegated clicks ---------------------------------------------------------------------------------

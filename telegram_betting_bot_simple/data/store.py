@@ -1,7 +1,8 @@
 """A SQLite file shared by the bot and the dashboard on the same server.
 
 Holds each league's latest odds snapshot (so the two processes never pay
-twice for the same fetch and nothing is lost on restart), a log of The
+twice for the same fetch and nothing is lost on restart), the last
+all-sports slate Today is drawn from (served at once after a restart), a log of The
 Odds API's quota headers, short leases so only one process refreshes a
 league at a time, the predictions people make (and how they scored), and
 the AI's own pre-game predictions for its track record, and the AI
@@ -114,6 +115,12 @@ CREATE TABLE IF NOT EXISTS analyses (
     result TEXT,
     graded_at REAL,
     PRIMARY KEY (analyst, league, event_id)
+);
+CREATE TABLE IF NOT EXISTS slates (
+    name TEXT PRIMARY KEY,         -- "today": the all-sports slate data/slate.py builds
+    generated_at REAL NOT NULL,
+    etag TEXT NOT NULL,
+    body BLOB NOT NULL             -- the slate's JSON, exactly as served, so a restart serves it at once
 );
 CREATE TABLE IF NOT EXISTS analyst_calls (
     ts REAL NOT NULL,
@@ -609,6 +616,21 @@ class Store:
                 "ON CONFLICT(sport_key) DO UPDATE SET fetched_at = excluded.fetched_at, payload = excluded.payload",
                 (sport_key, fetched_at, json.dumps(games)),
             )
+
+    def save_slate(self, name: str, body: bytes, etag: str, generated_at: float) -> None:
+        """Keep the latest slate's bytes (data/slate.py), replacing the one before."""
+        with closing(self._connect()) as db:
+            db.execute(
+                "INSERT INTO slates (name, generated_at, etag, body) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE "
+                "SET generated_at = excluded.generated_at, etag = excluded.etag, body = excluded.body",
+                (name, generated_at, etag, sqlite3.Binary(body)),
+            )
+
+    def slate(self, name: str) -> Optional[Tuple[float, str, bytes]]:
+        """(generated_at, etag, body) of the saved slate, or None."""
+        with closing(self._connect()) as db:
+            row = db.execute("SELECT generated_at, etag, body FROM slates WHERE name = ?", (name,)).fetchone()
+        return (float(row[0]), str(row[1]), bytes(row[2])) if row else None
 
     def record_usage(self, endpoint: str, cost: Optional[int], remaining: Optional[int], used: Optional[int]) -> None:
         with closing(self._connect()) as db:

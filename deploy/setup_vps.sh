@@ -430,7 +430,9 @@ setup_caddy() {
   cat > "$CADDY_SITE" <<CADDY
 # Written by setup_vps.sh: the betting dashboard over HTTPS. Caddy gets and renews the certificate.
 $DOMAIN {
-	encode gzip
+	# Compress responses here, off the app's event loop (the app compresses only requests that reach it
+	# directly; the slate's ready-made gzip passes through as it is)
+	encode zstd gzip
 	# A pasted bet slip's screenshot (POST /api/chat/slip) may be up to 2.5 MB; every other request is a few
 	# kilobytes. The app refuses bigger ones too, path by path.
 	@slip path /api/chat/slip

@@ -10,7 +10,7 @@ import time
 import uvicorn
 
 from ..config import load_config
-from ..services import build_service
+from ..services import build_service, build_slate
 from .app import create_app
 from .service import DashboardService
 
@@ -46,17 +46,24 @@ def main() -> None:
     if not config.dashboard_password:
         sys.exit("Set DASHBOARD_PASSWORD in the .env file to start the dashboard.")
     service = build_service(config)
+    slate = None
     if service is not None:
         threading.Thread(target=grade_forever, args=(service,), name="grader", daemon=True).start()
         if service.analysts is not None:
             threading.Thread(target=analyze_forever, args=(service,), name="analysts", daemon=True).start()
+        # Today's all-sports slate: the last one saved is served at once, then ESPN's scoreboards keep it
+        # current (it never spends Odds API credits; see data/slate.py)
+        slate = build_slate(config, service)
+        if slate.load():
+            logging.info("Serving the saved slate until the first refresh finishes")
+        slate.start()
     # The bot token checks Telegram Mini App sign-ins, and only the listed Telegram users get in.
     # Behind Caddy, DASHBOARD_HOST=127.0.0.1 keeps the plain-HTTP port off the internet; uvicorn
     # trusts Caddy's X-Forwarded-Proto from 127.0.0.1, so cookies are still marked Secure
     if config.mini_app_url and not config.telegram_user_ids:
         logging.warning("TELEGRAM_ALLOWED_IDS is empty, so nobody can open the app from Telegram yet")
     app = create_app(service, config.dashboard_password, bot_token=config.telegram_token,
-                     telegram_ids=config.telegram_user_ids)
+                     telegram_ids=config.telegram_user_ids, slate=slate)
     uvicorn.run(app, host=config.dashboard_host, port=config.dashboard_port, access_log=False)
 
 

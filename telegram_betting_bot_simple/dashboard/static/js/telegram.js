@@ -61,17 +61,41 @@ function applySafeAreas() {
   root.setProperty("--tg-bottom", `${(safe.bottom || 0) + (content.bottom || 0)}px`);
 }
 
-/** Tell Telegram the app is ready, open it full height and take Telegram's colours. Safe to call outside Telegram. */
+/** The Telegram user's id as Telegram's page data says (unverified: only for keeping one person's cached copy apart). */
+export function userId() {
+  const id = inTelegram ? webApp.initDataUnsafe?.user?.id : null;
+  return id === undefined || id === null ? "" : String(id);
+}
+
+/**
+ * Open the app full height and take Telegram's colours. Safe to call outside Telegram. It does not call
+ * ready(): Telegram keeps its own loading screen up until ready(), so app.js calls ready() once the first
+ * screen is drawn (from the cache when there is one), not before and not after the network refresh.
+ */
 export function initTelegram() {
   if (!inTelegram) return;
   document.documentElement.classList.add("tg");
   applyTheme();
   applySafeAreas();
-  safely(() => webApp.ready());
   safely(() => webApp.expand());
   safely(() => webApp.onEvent("themeChanged", applyTheme));
   safely(() => webApp.onEvent("safeAreaChanged", applySafeAreas));
   safely(() => webApp.onEvent("contentSafeAreaChanged", applySafeAreas));
+}
+
+let readyAt = null;
+
+/**
+ * Tell Telegram the first screen is drawn, so it swaps its loading screen for the app. Once per visit;
+ * returns the performance.now() time it was first called (null outside Telegram).
+ */
+export function ready() {
+  if (!inTelegram) return null;
+  if (readyAt === null) {
+    readyAt = performance.now();
+    safely(() => webApp.ready());
+  }
+  return readyAt;
 }
 
 /** Swipe-down-to-close off (on screens with charts or sideways scrolling) or back on. */

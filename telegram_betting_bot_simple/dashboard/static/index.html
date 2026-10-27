@@ -14,23 +14,35 @@
   <script type="module" src="/static/app.js?v=6"></script>
 </head>
 <body>
+  <!-- The first Tab stop: straight to the games (or the screen's content), past the header and the league tree -->
+  <button id="skip" class="skip-link" type="button">Skip to content</button>
   <header class="app-header">
     <div class="header-inner">
       <button id="back" class="icon-btn" type="button" aria-label="Back" hidden></button>
       <a id="title" class="title" href="#/today" aria-label="SportsBet AI: Today"></a>
+      <!-- 840 px and up: the tab bar's tabs live here (the bottom bar is for phones) -->
+      <nav id="toptabs" class="toptabs" aria-label="Main"></nav>
       <span class="grow"></span>
+      <button id="tree-btn" class="icon-btn tree-btn" type="button" aria-label="Sports and leagues" hidden></button>
       <button id="quota" class="pill" type="button" hidden></button>
+      <button id="slip-btn" class="slip-btn" type="button" aria-label="Bet slip" hidden></button>
       <a class="avatar" href="#/settings" aria-label="Settings and limits"></a>
     </div>
   </header>
-  <div class="shell">
-    <div id="banner" class="banner" hidden></div>
-    <main id="view" class="main" tabindex="-1"></main>
-    <footer class="helpline">
-      <p><b>Gambling can be addictive</b> · Help 24/7: <a href="tel:18004262537">1-800-GAMBLER</a> / <a href="tel:08088020133">0808 8020 133</a></p>
-      <p>For information and entertainment only: nothing is bet here. The AI's numbers are estimates, not guarantees,
-        and no model has been shown to beat the betting market reliably. 21+ (18+ where permitted). Data: The Odds API, ESPN.</p>
-    </footer>
+  <!-- The desk (js/layout.js): league tree · board · inspector · slip rail, by window width -->
+  <div id="desk" class="desk">
+    <aside id="tree-pane" class="pane tree-pane" aria-label="Sports and leagues" hidden></aside>
+    <div class="shell">
+      <div id="banner" class="banner" hidden></div>
+      <main id="view" class="main" tabindex="-1"></main>
+      <footer class="helpline">
+        <p><b>Gambling can be addictive</b> · Help 24/7: <a href="tel:18004262537">1-800-GAMBLER</a> / <a href="tel:08088020133">0808 8020 133</a></p>
+        <p>For information and entertainment only: nothing is bet here. The AI's numbers are estimates, not guarantees,
+          and no model has been shown to beat the betting market reliably. 21+ (18+ where permitted). Data: The Odds API, ESPN.</p>
+      </footer>
+    </div>
+    <aside id="inspector" class="pane inspector" aria-label="Details" hidden></aside>
+    <aside id="sliprail" class="pane sliprail" aria-label="Bet slip" hidden></aside>
   </div>
   <div id="slipbar" class="slipbar" hidden>
     <div class="slipbar-inner">

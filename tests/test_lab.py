@@ -519,6 +519,15 @@ def test_the_first_dashboards_routes_have_the_same_gates(lab, client, clock) -> 
     assert client.get("/api/leaderboard").status_code == 200  # the record stays readable
 
 
+def test_choosing_only_the_nba_is_remembered_on_every_device(client) -> None:
+    # The old default was the NBA alone, so the app needs to know when the person chose it themselves
+    assert client.get("/api/me").json()["sports_chosen"] is False
+    saved = client.put("/api/me", json={"favourite_sports": ["basketball_nba"], "timezone": "Europe/London"}).json()
+    assert saved["favourite_sports"] == ["basketball_nba"] and saved["sports_chosen"] is True
+    assert saved["timezone"] == "Europe/London"  # saved alongside it, not replaced
+    assert client.get("/api/me").json()["sports_chosen"] is True
+
+
 def test_the_leaderboard_never_shows_another_persons_id(lab, client) -> None:
     # On the shared password a browser's id is the whole identity, so it must never be shown to anyone else
     for player, name in (("web:victim-browser-1", "Vic"), (UID, "Me")):

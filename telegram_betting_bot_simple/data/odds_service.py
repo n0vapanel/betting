@@ -58,9 +58,14 @@ class OddsService:
         return dict(self._quota)
 
     def _get(self, path: str, params: Dict[str, Any]) -> Any:
-        response = requests.get(
-            f"{BASE_URL}{path}", params={"apiKey": self.api_key, **params}, timeout=15
-        )
+        try:
+            response = requests.get(
+                f"{BASE_URL}{path}", params={"apiKey": self.api_key, **params}, timeout=15
+            )
+        except requests.RequestException as exc:
+            # A connection error's text quotes the request URL, which carries the API key: name only its type
+            # (and drop it as the cause, so a logged traceback doesn't print it either)
+            raise RuntimeError(f"Couldn't reach The Odds API for {path} ({type(exc).__name__})") from None
         headers = {
             field: int(float(response.headers[f"x-requests-{field}"]))
             for field in ("remaining", "used", "last")
@@ -72,7 +77,10 @@ class OddsService:
         if not response.ok:
             # Report the status only: the request URL carries the API key
             raise RuntimeError(f"The Odds API returned HTTP {response.status_code} for {path}")
-        return response.json()
+        try:
+            return response.json()
+        except ValueError:
+            raise RuntimeError(f"The Odds API sent an unreadable answer for {path}") from None
 
     def sports(self) -> List[Dict[str, Any]]:
         """All sports and leagues (free: costs no quota). Cached for 6 hours."""

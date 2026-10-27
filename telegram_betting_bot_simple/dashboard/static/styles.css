@@ -200,6 +200,13 @@ code { font-size: 0.9em; background: var(--card-2); border-radius: 4px; padding:
 :focus-visible { outline: 2px solid var(--info); outline-offset: 2px; border-radius: 6px; }
 .icon { flex: none; display: inline-block; vertical-align: middle; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* "Skip to games": out of sight until it has keyboard focus */
+.skip-link {
+  position: fixed; top: 8px; left: 8px; z-index: 95; min-height: 44px; padding: 0 16px; border-radius: 12px;
+  background: var(--accent); color: var(--accent-ink); font-weight: 700; box-shadow: var(--shadow); transform: translateY(-160%);
+}
+.skip-link:focus { transform: none; }
+.skip-link:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .offscreen { position: fixed; left: -9999px; top: 0; opacity: 0; }
 .noscript { padding: 24px; text-align: center; }
 
@@ -297,6 +304,9 @@ body.has-slip .shell { padding-bottom: calc(var(--tabbar-h) + var(--slipbar-h) +
 .tabbar a[aria-current="page"]::before {
   content: ""; position: absolute; top: 0; left: 30%; right: 30%; height: 3px; border-radius: 0 0 3px 3px; background: var(--accent);
 }
+
+.toptabs { display: none; } /* 840 px and up: the tabs move into the header (the desk section below) */
+.tree-btn { display: none; }
 
 .slipbar {
   position: fixed; left: 0; right: 0; z-index: 29;
@@ -423,7 +433,7 @@ select.input { appearance: auto; }
 .badge.info { color: var(--info-ink); border-color: color-mix(in srgb, var(--info) 45%, transparent); background: var(--info-soft); }
 .badge.warn { color: var(--warn-ink); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: var(--warn-soft); }
 .badge.danger { color: var(--danger-ink); border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: var(--danger-soft); }
-.live { color: var(--danger); letter-spacing: 0.04em; }
+.live { color: var(--danger-ink); letter-spacing: 0.04em; } /* -ink: 4.5:1 on the page background too (desk boards), not only on cards */
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); display: inline-block; animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
@@ -516,6 +526,10 @@ select.input { appearance: auto; }
 
 /* --- skeletons, empty states, toasts ---------------------------------------------------------------- */
 
+/* A placeholder never flashes: it stays invisible for its first 300 ms, so an answer that comes quicker
+   (a cached screen, a loaded module) replaces it unseen; only a slow first visit ever shows one */
+.skel-wrap { animation: skel-reveal 1ms linear 300ms both; }
+@keyframes skel-reveal { from { opacity: 0; } to { opacity: 1; } }
 .skel {
   background: linear-gradient(90deg, var(--card-2) 25%, var(--card-3) 37%, var(--card-2) 63%);
   background-size: 400% 100%; animation: shimmer 1.4s ease infinite; border-radius: 8px;
@@ -793,7 +807,7 @@ button.prop-line:hover { background: var(--card-2); }
 
 /* --- larger screens ----------------------------------------------------------------------------------- */
 
-@media (min-width: 900px) {
+@media (min-width: 840px) {
   :root { --gutter: 20px; }
   .main { padding-top: 20px; }
   .tiers { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
@@ -812,6 +826,181 @@ button.prop-line:hover { background: var(--card-2); }
 }
 @media (max-width: 420px) {
   .pill-word { display: none; }
+}
+
+/* --- the desk: tablet (840–1199), desk (1200–1599) and wide (1600+) layouts ------------------------------
+   js/layout.js shows and hides the panes; these rules size them. Below 840 px nothing here applies: the
+   phone keeps its bottom tabs, slip bar and sheets. */
+
+.pane[hidden] { display: none !important; }
+.slip-btn { display: none; }
+
+/* grouped checkboxes (the sports sheet and onboarding: ui.js checkTree) */
+.ctree { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.ctree-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; min-width: 0; }
+.ctree-count { margin-left: auto; white-space: nowrap; }
+.ctree-groups, .ctree-items { list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.ctree-group, .ctree-items > li { min-width: 0; }
+.ctree-row { display: flex; align-items: center; gap: 12px; min-height: var(--tap); padding: 0 10px; border-radius: 10px; cursor: pointer; min-width: 0; }
+.ctree-row:hover { background: var(--card-2); }
+.ctree-row input { width: 20px; height: 20px; margin: 0; flex: none; accent-color: var(--accent); }
+.ctree-row .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctree-all { background: var(--card-2); border: 1px solid var(--line); }
+.ctree-grow { display: flex; align-items: center; gap: 2px; }
+.ctree-grow .ctree-row { flex: 1 1 auto; font-weight: 650; }
+.ctree-items { padding: 0 0 6px 30px; }
+.ctree-n { flex: none; color: var(--text-3); font-size: 12.5px; }
+.ctree-fold .icon { transition: transform var(--speed); }
+.ctree-fold[aria-expanded="true"] .icon { transform: rotate(180deg); }
+[data-sports-hint].warn { color: var(--warn-ink); }
+
+/* the slip's Save / Share row and the share code */
+.slip-save { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.slip-save:empty { display: none; }
+.share-code { margin: 14px 0 6px; padding: 14px; border-radius: 12px; background: var(--card-2); border: 1px dashed var(--line-strong);
+  text-align: center; font: 800 26px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.18em; }
+
+@media (min-width: 840px) {
+  /* No bottom bars: everything that sat above them (toasts, the Ask dock, the page's own padding) drops down */
+  :root { --tabbar-h: 0px; --slipbar-h: 0px; --pane-top: calc(var(--header-h) + var(--safe-top) + 1px); }
+  .tabbar, .slipbar { display: none !important; }
+  .header-inner { max-width: none; gap: 8px; }
+  .toptabs { display: flex; align-items: stretch; align-self: stretch; gap: 2px; margin-left: 8px; flex: none; }
+  .toptabs a {
+    position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; min-height: var(--tap);
+    color: var(--text-2); font-size: 14px; font-weight: 650; white-space: nowrap; border-radius: 10px;
+  }
+  .toptabs a:hover { text-decoration: none; color: var(--text); background: var(--card-2); }
+  .toptabs a[aria-current="page"] { color: var(--text); }
+  .toptabs a[aria-current="page"]::after {
+    content: ""; position: absolute; left: 12px; right: 12px; bottom: -6px; height: 3px; border-radius: 3px 3px 0 0; background: var(--accent);
+  }
+  .toptabs a[aria-current="page"] .icon { color: var(--good-ink); }
+  .title { flex: 0 1 auto; }
+  .tree-btn:not([hidden]) { display: inline-grid; }
+  .slip-btn:not([hidden]) {
+    display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 40px; padding: 0 12px 0 10px; position: relative;
+    border-radius: 999px; border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--text);
+    font-weight: 650; font-size: 14px; white-space: nowrap;
+  }
+  .slip-btn::after { content: ""; position: absolute; inset: -2px 0; }
+  .slip-btn:hover { border-color: var(--accent); }
+  .slip-btn .slip-count { width: 22px; height: 22px; font-size: 12px; }
+  .slip-btn-odds { color: var(--text-2); font-size: 13px; }
+
+  /* The board takes the width; other screens keep a readable column inside it */
+  .shell { max-width: none; padding-bottom: 32px; }
+  body:not([data-route="today"]) .shell > * { max-width: 920px; margin-left: auto; margin-right: auto; }
+  body:not([data-route="today"]) .shell > .helpline { margin-top: 32px; }
+
+  /* Drawers: the sheet machinery (focus, Back, Escape) with the panel at the side, full height */
+  .sheet.drawer {
+    top: 0; bottom: 0; height: 100%; max-height: none; width: min(420px, 92vw); max-width: none; margin: 0;
+    border-radius: 0; border: 0; padding-bottom: var(--safe-bottom); padding-top: var(--safe-top);
+  }
+  .sheet.drawer-right { left: auto; right: 0; border-left: 1px solid var(--line-strong); transform: translateX(100%); }
+  .sheet.drawer-left { left: 0; right: auto; width: min(340px, 88vw); border-right: 1px solid var(--line-strong); transform: translateX(-100%); }
+  .sheet-layer.open .sheet.drawer { transform: none; }
+  .sheet.drawer .sheet-grip { display: none; }
+  .sheet.drawer .sheet-head { min-height: var(--header-h); }
+}
+@media (min-width: 840px) and (max-width: 1199px) {
+  .brand { display: none; } /* the logo alone: the tabs need the room */
+  .pill-word { display: none; }
+  .toptabs a { padding: 0 10px; }
+}
+@media (min-width: 840px) and (max-width: 979px) {
+  .toptabs a { padding: 0 8px; gap: 4px; font-size: 13.5px; }
+  .slip-btn-text { display: none; }
+}
+
+@media (min-width: 1200px) {
+  :root { --tree-w: 232px; --rail-w: clamp(320px, 24vw, 360px); --insp-w: 0px; --tab-w: 44px; --icon-rail-w: 56px; }
+  .desk { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: start; }
+  .shell { grid-column: 2; min-width: 0; margin: 0; padding: 0 24px 32px; }
+  .tree-pane { grid-column: 1; width: var(--tree-w); border-right: 1px solid var(--line); }
+  .inspector { grid-column: 3; width: var(--insp-w); border-left: 1px solid var(--line); background: var(--bg); }
+  .sliprail { grid-column: 4; width: var(--rail-w); border-left: 1px solid var(--line); }
+  .pane {
+    position: sticky; top: var(--pane-top); z-index: 5; min-width: 0;
+    height: calc(100vh - var(--pane-top)); height: calc(100dvh - var(--pane-top));
+    display: flex; flex-direction: column; background: var(--bg);
+  }
+  .pane-head {
+    flex: none; display: flex; align-items: center; gap: 2px; min-height: 52px; padding: 4px 6px 4px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .pane-title { flex: 1 1 auto; min-width: 0; font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pane-title:focus { outline: none; }
+  .pane-title:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+  .pane-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 16px 20px; }
+
+  /* league tree: open, or a 56 px rail of sport icons */
+  .tree-slot { padding: 8px 10px 20px; }
+  .tree-rail { display: none; }
+  body.tree-collapsed .tree-pane { width: var(--icon-rail-w); }
+  body.tree-collapsed .tree-pane > .pane-head, body.tree-collapsed .tree-slot { display: none; }
+  body.tree-collapsed .tree-rail {
+    display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 0 16px; height: 100%; overflow-y: auto; scrollbar-width: none;
+  }
+  .tree-rail .rail-items { display: grid; gap: 4px; justify-items: center; }
+  .rail-item { position: relative; width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--text); }
+  .rail-item:hover { background: var(--card-2); }
+  .rail-item[aria-pressed="true"] { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-line); }
+  .rail-icon { font-size: 20px; line-height: 1; }
+  .rail-count {
+    position: absolute; right: -3px; bottom: 0; min-width: 18px; height: 16px; padding: 0 4px; border-radius: 8px; display: grid; place-items: center;
+    background: var(--card-3); color: var(--text); font-size: 10.5px; font-weight: 750; border: 1px solid var(--bg);
+  }
+  .rail-item .live-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; }
+
+  /* the inspector (wide only): its column opens with a game or a player (body.inspecting); empty, the board
+     keeps the room */
+  body:not(.inspecting) .inspector { display: none; }
+  .inspector-body { padding: 12px 14px 24px; }
+  .inspector .view { min-width: 0; }
+  .inspector .page-head h1, .inspector .player-hero h1 { font-size: 20px; }
+  .insp-empty { text-align: center; padding: 48px 20px; color: var(--text-2); }
+  .insp-empty h3 { color: var(--text); font-size: 17px; margin-bottom: 4px; }
+  .insp-empty p { max-width: 280px; margin: 0 auto; font-size: 14px; }
+
+  /* the slip rail: pinned (a full pane), collapsed (a 44 px tab: legs and combined odds), or peeking */
+  .rail-tab { display: none; }
+  .rail-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .rail-body { padding: 12px 16px 16px; }
+  .rail-foot { flex: none; display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px calc(12px + var(--safe-bottom)); border-top: 1px solid var(--line); background: var(--bg); }
+  .rail-foot:empty, .rail-foot[hidden] { display: none; }
+  .rail-foot .btn { flex: 1 1 auto; }
+  .rail-foot .btn-primary { order: -1; flex-basis: 100%; }
+  .sliprail .slip-leg { padding-right: 2px; }
+  .sliprail .empty { padding: 22px 12px; }
+  body.rail-collapsed .sliprail, body.rail-peek .sliprail { width: var(--tab-w); }
+  body.rail-collapsed .rail-panel { display: none; }
+  body.rail-collapsed .rail-tab, body.rail-peek .rail-tab {
+    display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; height: 100%; padding: 12px 0;
+    color: var(--text); background: var(--bg);
+  }
+  .rail-tab:hover { background: var(--card-2); }
+  body.rail-peek .rail-tab { background: var(--card-2); }
+  .rail-tab .slip-count { width: 28px; height: 28px; font-size: 13px; }
+  .rail-tab-text { writing-mode: vertical-rl; transform: rotate(180deg); font-weight: 700; font-size: 13.5px; white-space: nowrap; letter-spacing: 0.02em; }
+  .rail-tab > .icon { margin-top: auto; color: var(--text-2); }
+  body.rail-peek .rail-panel {
+    position: fixed; z-index: 28; top: var(--pane-top); bottom: 0; right: var(--tab-w); width: var(--rail-w); height: auto;
+    background: var(--bg); border-left: 1px solid var(--line-strong); box-shadow: var(--shadow); animation: rail-in var(--speed) ease-out;
+  }
+  @keyframes rail-in { from { transform: translateX(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  /* toasts sit over the board, not under the rail */
+  body.has-rail.rail-pinned #toasts { right: var(--rail-w); }
+  body.has-rail.rail-collapsed #toasts, body.has-rail.rail-peek #toasts { right: var(--tab-w); }
+}
+@media (min-width: 1600px) {
+  /* Four panes while a game or player is open (the board keeps about 630 px at 1600, 700 at 1680); three,
+     with the board as wide as at 1599 or wider, while the inspector has nothing to show */
+  :root { --tree-w: 232px; --rail-w: clamp(320px, 19vw, 380px); }
+  body.inspecting { --insp-w: clamp(380px, 22vw, 480px); }
+  .shell { padding-inline: 20px; }
 }
 
 /* --- motion ------------------------------------------------------------------------------------------- */

@@ -5,6 +5,10 @@
 // signed initData (Telegram Web shows the app in an iframe, where the session cookie can be dropped).
 // A 401 hands over to the sign-in form; any other failure becomes an ApiError with the server's own
 // words, so screens can show them as they are.
+//
+// api(path, options) returns the JSON; request(path, options) is the same call returning {status, data,
+// headers}, with a 304 passed through (cache.js's stale-while-revalidate sends its own If-None-Match).
+// A GET may be answered from cache.js's prefetch store (setGetHook), so screens never need to know.
 
 const PREFS_KEY = "sportsbet-ai"; // the first dashboard's key: {league, format, me: {id, name}, betsSource}
 const PLAYER_ID = /^[A-Za-z0-9-]{8,64}$/;
@@ -92,7 +96,8 @@ export function onUnauthorized(handler) {
 
 // --- requests -----------------------------------------------------------------------------------
 
-function headers(hasBody) {
+/** The headers every call carries (X-Player, and inside Telegram the Mini App's initData). */
+export function requestHeaders(hasBody = false) {
   const out = { "X-Player": playerId, Accept: "application/json" };
   if (hasBody) out["Content-Type"] = "application/json";
   if (initData) out["X-Telegram-Init-Data"] = initData;
@@ -113,19 +118,26 @@ function reason(body, status) {
   return `Request failed (${status}).`;
 }
 
+// cache.js answers GETs it already holds (a prefetched game or player) through this hook, so screens keep
+// calling api() and still get the prefetched copy at once. (api.js can't import cache.js: it imports this.)
+let getHook = null;
+
+/** For cache.js: ``hook(path)`` returns the data, a promise of it, or undefined to go to the network. */
+export function setGetHook(hook) {
+  getHook = hook;
+}
+
 /**
- * Call the API and return its JSON.
- *   api("/api/today?leagues=basketball_nba")
- *   api("/api/tickets/price", { method: "POST", body: {...}, signal })
- * Options: method, body (an object, sent as JSON), signal (AbortSignal), auth (false: no sign-in form on 401).
- * Throws ApiError (status 0 = network) or the AbortError of a cancelled request.
+ * The lower-level call: {status, data, headers}. A 304 comes back as {status: 304, data: null} (send your
+ * own If-None-Match in ``headers``); everything else is as api() does it: a 401 hands over to the sign-in
+ * form (unless auth is false), other failures throw ApiError with the server's words.
  */
-export async function api(path, { method = "GET", body, signal, auth = true } = {}) {
+export async function request(path, { method = "GET", body, signal, auth = true, headers: extra = null } = {}) {
   let response;
   try {
     response = await fetch(path, {
       method,
-      headers: headers(body !== undefined),
+      headers: { ...requestHeaders(body !== undefined), ...(extra || {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal,
       credentials: "same-origin",
@@ -134,6 +146,7 @@ export async function api(path, { method = "GET", body, signal, auth = true } = 
     if (error?.name === "AbortError") throw error;
     throw new ApiError("Couldn't reach the server. Check your connection and try again.");
   }
+  if (response.status === 304) return { status: 304, data: null, headers: response.headers };
   const data = await response.json().catch(() => null);
   if (response.status === 401) {
     if (auth) unauthorized();
@@ -141,7 +154,29 @@ export async function api(path, { method = "GET", body, signal, auth = true } = 
       { status: 401, signIn: auth, detail: data?.detail });
   }
   if (!response.ok) throw new ApiError(reason(data, response.status), { status: response.status, detail: data?.detail });
-  return data;
+  return { status: response.status, data, headers: response.headers };
+}
+
+/**
+ * Call the API and return its JSON.
+ *   api("/api/today?leagues=basketball_nba")
+ *   api("/api/tickets/price", { method: "POST", body: {...}, signal })
+ * Options: method, body (an object, sent as JSON), signal (AbortSignal), auth (false: no sign-in form on 401).
+ * Throws ApiError (status 0 = network) or the AbortError of a cancelled request. A plain GET may be answered
+ * from the prefetch cache (cache.js prefetch()) when the same path was prefetched moments ago.
+ */
+export async function api(path, { method = "GET", body, signal, auth = true } = {}) {
+  if (getHook && method === "GET" && body === undefined) {
+    const held = getHook(path);
+    if (held !== undefined) {
+      const data = await held;
+      if (data !== undefined && data !== null) {
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        return data;
+      }
+    }
+  }
+  return (await request(path, { method, body, signal, auth })).data;
 }
 
 export const get = (path, options = {}) => api(path, options);

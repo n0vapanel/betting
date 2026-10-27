@@ -4,6 +4,10 @@
 // because ui.js needs it too (an odds button shows whether its pick is in the slip, in the person's
 // odds format) and ui.js must not import app.js.
 //
+// The profile is also kept on the device (readCachedMe / setMeIdentity), so a repeat visit draws its
+// first screen before GET /api/me answers; canPaintCached() is the age and break gate for that.
+// "All sports" is the default: pinnedSports() are someone's leagues shown first, never "only these".
+//
 // The slip only ever holds which picks were tapped ({league, id, market, side, point}) plus what the
 // button showed, for drawing it before the server answers. Prices, chances and payouts always come
 // back from POST /api/tickets/price: the server looks every pick up again in its cached odds.
@@ -24,7 +28,9 @@ const emit = (kind, value) => listeners[kind].forEach((fn) => { try { fn(value);
 export const session = {
   me: null, // GET /api/me, or DEFAULT_ME while it's unknown
   sports: null, // GET /api/sports: [{key, title, group, label, ai}]
+  slateLeagues: null, // the all-sports slate's leagues, when Today has them (setSlateLeagues)
   quota: null, // the odds feed's {remaining, used}, from the last /api/today
+  meCached: false, // session.me is this device's saved copy, not yet confirmed by GET /api/me
 };
 
 /** The person's settings and limits (never null: defaults until /api/me answers). */
@@ -43,15 +49,80 @@ export async function loadMe() {
   return session.me;
 }
 
-export function setMe(value) {
+/**
+ * The profile changed. ``cached: true`` marks one read back from this device's copy (readCachedMe), which
+ * is drawn with at once and checked against GET /api/me straight after; every other profile is kept as
+ * that copy, so the next visit can draw Today before the network answers.
+ */
+export function setMe(value, { cached = false } = {}) {
   session.me = { ...DEFAULT_ME, ...value };
+  session.meCached = cached;
   prefs.set("format", session.me.odds_format);
+  if (!cached) writeCachedMe(session.me);
   emit("me", session.me);
+}
+
+// --- this device's copy of the profile ---------------------------------------------------------------
+//
+// Only what the first screen needs (age, break, odds format, sports, name), under the person's own id
+// (app.js sets it: the Telegram user's id, or this browser's X-Player id), so a shared phone never draws
+// one Telegram account's profile for another. Budget and credits stay on the server.
+
+const ME_KEY = "sportsbet-me-v1";
+const ME_FIELDS = ["uid", "name", "is_telegram", "age_confirmed", "odds_format", "currency", "favourite_sports",
+  "sports_chosen", "risk_tier", "reality_check_minutes", "cooloff_until", "on_break", "public_url", "ai_enabled", "timezone"];
+let meIdentity = null;
+
+/** Whose copy to read and write ("tg:<id>" or "web:<player id>"); null switches the copy off. */
+export function setMeIdentity(identity) {
+  meIdentity = identity || null;
+}
+
+function writeCachedMe(profile) {
+  if (!meIdentity || !profile?.uid) return;
+  const kept = {};
+  for (const field of ME_FIELDS) if (field in profile) kept[field] = profile[field];
+  try {
+    localStorage.setItem(ME_KEY, JSON.stringify({ id: meIdentity, at: Date.now(), me: kept }));
+  } catch {
+    /* private browsing: no copy, the first screen waits for the network */
+  }
+}
+
+/** This person's saved profile from an earlier visit, or null. */
+export function readCachedMe() {
+  if (!meIdentity) return null;
+  try {
+    const saved = JSON.parse(localStorage.getItem(ME_KEY) || "null");
+    if (saved && saved.id === meIdentity && saved.me && typeof saved.me === "object" && saved.me.uid) return saved.me;
+  } catch {
+    /* a broken copy is no copy */
+  }
+  return null;
+}
+
+/** Forget the saved profile (signing out, or the server said this session is over). */
+export function clearCachedMe() {
+  try {
+    localStorage.removeItem(ME_KEY);
+  } catch {
+    /* nothing kept */
+  }
+}
+
+/**
+ * May a saved copy of the games be drawn before the server answers? Only for someone who has confirmed
+ * their age and isn't on a break (the server refuses the games otherwise, and they must never flash up).
+ */
+export function canPaintCached(profile = me()) {
+  return Boolean(profile.uid && profile.age_confirmed && !onBreak(profile));
 }
 
 /** PUT /api/me with only the fields that change; returns the new profile. */
 export async function updateMe(changes) {
-  setMe(await api("/api/me", { method: "PUT", body: changes }));
+  const profile = await api("/api/me", { method: "PUT", body: changes });
+  if (Array.isArray(changes?.favourite_sports)) rememberSportsChosen(profile?.uid);
+  setMe(profile);
   return session.me;
 }
 
@@ -71,13 +142,59 @@ export function onBreak(profile = me()) {
   return Number.isFinite(until) && until > Date.now();
 }
 
-/** The leagues shown before anyone has picked any (Today, Settings, the sports sheet, Build and Ask AI). */
+/** The leagues Build and Ask AI start from before anyone has picked any. */
 export const DEFAULT_SPORTS = ["basketball_nba"];
 
-/** The person's favourite leagues, or the default ones until they save some. */
+/**
+ * The most leagues the server keeps as someone's sports (dashboard/app.py MeUpdate.favourite_sports and
+ * lab.py MAX_LEAGUES): more than this is saved as "All sports" only.
+ */
+export const MAX_PINNED = 8;
+
+/**
+ * The person's favourite leagues, or the default ones until they save some. Build and Ask AI use this as
+ * the leagues to start from; Today and the sports sheet use pinnedSports() ("All sports" when empty).
+ */
 export function favouriteSports(profile = me()) {
   const list = profile.favourite_sports || [];
   return list.length ? [...list] : [...DEFAULT_SPORTS];
+}
+
+// The people (uids) who saved their sports on this device: their NBA alone is their choice, not the old default
+const CHOSEN_KEY = "sportsChosen";
+
+function rememberSportsChosen(uid) {
+  if (!uid) return;
+  const list = prefs.get(CHOSEN_KEY, []);
+  const kept = Array.isArray(list) ? list.filter((id) => typeof id === "string" && id !== uid) : [];
+  prefs.set(CHOSEN_KEY, [...kept, uid].slice(-8));
+}
+
+/**
+ * The person picked their sports themselves: the server's ``sports_chosen`` (set whenever favourite_sports
+ * is saved), or a save made on this device (for a server that doesn't send the flag yet).
+ */
+export function sportsChosen(profile = me()) {
+  if (profile.sports_chosen === true) return true;
+  const list = prefs.get(CHOSEN_KEY, []);
+  return Boolean(profile.uid) && Array.isArray(list) && list.includes(profile.uid);
+}
+
+/**
+ * "Your sports" as Today sees them: the leagues pinned first, or [] for "All sports" (the default). The
+ * old default of the NBA alone counts as "All sports" too (most people kept it without choosing it), unless
+ * the person chose it (sportsChosen): then the NBA is pinned like any other choice.
+ * Pins never hide anything: Today lists every sport, with these first.
+ */
+export function pinnedSports(profile = me()) {
+  const list = [...new Set((profile.favourite_sports || []).filter((key) => typeof key === "string"))];
+  if (list.length === 1 && list[0] === DEFAULT_SPORTS[0] && !sportsChosen(profile)) return [];
+  return list;
+}
+
+/** True while the person has no pinned sports: Today shows "All sports". */
+export function isAllSports(profile = me()) {
+  return pinnedSports(profile).length === 0;
 }
 
 /** "decimal" or "american". */
@@ -85,14 +202,32 @@ export function oddsFormat() {
   return me().odds_format === "american" ? "american" : "decimal";
 }
 
-/** The leagues in season (cached for the visit). */
+/**
+ * The leagues in season (cached for the visit): GET /api/sports, plus any league the all-sports slate
+ * lists that it doesn't (Today calls setSlateLeagues with the slate's leagues).
+ */
 export async function loadSports() {
   if (!session.sports) session.sports = await api("/api/sports");
-  return session.sports;
+  return mergeSlateLeagues(session.sports);
+}
+
+/** Today: the slate's leagues [{key, title, group, label, count, ...}], so every sheet lists the same ones. */
+export function setSlateLeagues(leagues) {
+  session.slateLeagues = Array.isArray(leagues) ? leagues.filter((l) => l && typeof l.key === "string") : null;
+}
+
+function mergeSlateLeagues(list) {
+  const extra = session.slateLeagues || [];
+  if (!extra.length) return list;
+  const known = new Set(list.map((s) => s.key));
+  const added = extra.filter((l) => !known.has(l.key)).map((l) => ({
+    key: l.key, title: l.title || l.key, group: l.group || "Other", label: l.label || l.group || "Other", ai: Boolean(l.ai),
+  }));
+  return added.length ? [...list, ...added] : list;
 }
 
 export function leagueInfo(key) {
-  return (session.sports || []).find((s) => s.key === key) || null;
+  return (session.sports || []).find((s) => s.key === key) || (session.slateLeagues || []).find((s) => s.key === key) || null;
 }
 
 const SPORT_EMOJI = {

@@ -1,7 +1,8 @@
 // Settings: who you are, how numbers look, your sports, and your limits.
 //   Profile      name (shown on the leaderboard), how you're signed in, age confirmation
 //   Display      odds format (decimal or American), theme (browser only: Telegram uses its own)
-//   Your sports  the favourites Today shows first (only these are fetched from the odds feed)
+//   Your sports  "All sports" (the default) or the leagues pinned first on Today: pins never hide a sport;
+//                Change opens the sports sheet (Select all / Clear, a tri-state box per sport)
 //   Limits       weekly budget (lowering applies now, raising waits 24 hours), reality check, and a break
 //                of 24 hours, 3 days, 1 week, 1 month or 3 months, confirmed first and never cut short
 //   AI           the disclosure and today's AI allowance
@@ -13,7 +14,7 @@
 import { api, isQuiet, prefs } from "../api.js";
 import {
   me, loadMe, updateMe, setMe, onMeChange, openSportsSheet, openOnboarding, signOut, leagueTitle, sportEmoji, loadSports,
-  inTelegram, applyTheme, favouriteSports,
+  inTelegram, applyTheme, pinnedSports, MAX_PINNED,
 } from "../app.js";
 import { esc, money, notice, segmented, toast, confirmSheet, explain, section } from "../ui.js";
 import { icon } from "../icons.js";
@@ -83,10 +84,16 @@ function displayHtml(p) {
 }
 
 function sportsHtml(p) {
-  const list = favouriteSports(p);
-  return section("Your sports", `<p class="small muted">Shown first on Today. Only these are fetched, because each one uses some of the odds feed's monthly requests.</p>
-    <div class="chip-row wrap" style="margin-top:10px">${list.map((key) => `<span class="chip">${esc(sportEmoji(key))} ${esc(leagueTitle(key))}</span>`).join("")}
-      <button type="button" class="chip add" data-sports>${icon("edit", { size: 14 })}Change</button></div>`, { info: "quota" });
+  const pinned = pinnedSports(p);
+  const chips = pinned.length
+    ? pinned.map((key) => `<span class="chip">${icon("star", { size: 14 })}${esc(sportEmoji(key))} ${esc(leagueTitle(key))}</span>`).join("")
+    : `<span class="chip on">${icon("check", { size: 14 })}All sports</span>`;
+  const words = pinned.length
+    ? `Today lists every sport, with ${pinned.length === 1 ? "this one" : `these ${pinned.length}`} first. Odds for your pinned sports load when you open Today; other leagues' odds load when you open them.`
+    : `Today lists every sport, soonest games first. Pin up to ${MAX_PINNED} leagues to put them at the top; nothing is ever hidden.`;
+  return section("Your sports", `<p class="small muted">${esc(words)}</p>
+    <div class="chip-row wrap" style="margin-top:10px">${chips}
+      <button type="button" class="chip add" data-sports>${icon("edit", { size: 14 })}${pinned.length ? "Change" : "Pin sports"}</button></div>`, { info: "quota" });
 }
 
 function budgetHtml(p) {

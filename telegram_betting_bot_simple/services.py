@@ -15,11 +15,12 @@ from zoneinfo import ZoneInfo
 from .ai.desk import AnalystDesk
 from .config import Config
 from .dashboard.lab import DAILY_AI_CENTS, Lab
-from .dashboard.service import DashboardService
+from .dashboard.service import AI_LEAGUES, DashboardService
 from .data.cache import TTLCache
 from .data.espn_client import EspnClient
 from .data.espn_players import PlayerData
 from .data.odds_service import OddsService
+from .data.slate import SlateBuilder
 from .data.store import Store
 
 
@@ -44,6 +45,16 @@ def build_service(config: Config) -> Optional[DashboardService]:
               daily_cents=getattr(config, "ai_chat_daily_cents", DAILY_AI_CENTS))
     lab.assistant = build_chat_assistant(config, lab, store)
     return service
+
+
+def build_slate(config: Config, service: DashboardService) -> SlateBuilder:
+    """Today's all-sports slate over the service's odds, ESPN and store (the dashboard starts its thread)."""
+    return SlateBuilder(
+        service.odds, service.espn, service.store, service=service, tz=service.tz,
+        live_seconds=config.slate_live_seconds, today_seconds=config.slate_today_seconds,
+        idle_seconds=config.slate_idle_seconds, future_seconds=config.slate_future_seconds,
+        odds_per_day=config.slate_odds_per_day, ai_leagues=AI_LEAGUES,
+    )
 
 
 def build_chat_assistant(config: Config, lab: Lab, store: Store) -> Optional[Any]:

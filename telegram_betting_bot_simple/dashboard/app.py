@@ -34,13 +34,15 @@ import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any, Callable, Collection, Dict, FrozenSet, List, Literal, Mapping, Optional
+from urllib.parse import parse_qs
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
+from starlette.middleware.gzip import GZipMiddleware
 
 from .auth import (
     INIT_DATA_EXPIRED,
@@ -57,7 +59,9 @@ from .auth import (
     valid_session,
     verify_init_data,
 )
+from ..data.slate import SlateBuilder, SlateBytes
 from ..engine.pasted import MAX_IMAGE_BYTES, MAX_LEGS as MAX_PASTED_LEGS, MAX_PASTE_CHARS
+from .assets import StaticAssets
 from .lab import COOLOFF_CHOICES, Lab
 from .service import CallRejected, DashboardService, NotFound
 
@@ -311,16 +315,92 @@ class PastedAnalyseBody(BaseModel):
     system: Optional[str] = Field(None, pattern=r"^[A-Za-z0-9_ ]{2,20}$")
 
 
-# The browser re-checks the page and its files on every load (a quick 304 when unchanged),
-# so after an update it never keeps running old code against the new API
+class SlateOddsBody(BaseModel):
+    league: LeagueKey
+
+
+# The browser re-checks the page on every load (a quick 304 when unchanged), so after an update it never
+# keeps running old code against the new API. The page names its files by content hash (assets.py), so a
+# file asked for by its current hash is cached for good; any other request for a file is re-checked too.
 NO_CACHE = {"Cache-Control": "no-cache"}
+SLATE_WAIT = 8.0  # seconds a request waits for the very first slate (only before one was ever built)
+GZIP_MIN_BYTES = 1024
 
 
 class Static(StaticFiles):
-    def file_response(self, *args: Any, **kwargs: Any) -> Response:
-        response = super().file_response(*args, **kwargs)
-        response.headers.update(NO_CACHE)
+    def __init__(self, *args: Any, assets: Optional[StaticAssets] = None, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.assets = assets
+
+    def file_response(self, full_path: Any, stat_result: Any, scope: Dict[str, Any], status_code: int = 200) -> Response:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        cache = NO_CACHE["Cache-Control"]
+        if self.assets is not None and status_code == 200:
+            try:
+                rel = Path(full_path).resolve().relative_to(self.assets.root).as_posix()
+            except ValueError:
+                rel = None
+            version = (parse_qs((scope.get("query_string") or b"").decode("latin-1")).get("v") or [None])[0]
+            if rel is not None:
+                cache = self.assets.cache_control(rel, version)
+        response.headers["Cache-Control"] = cache
         return response
+
+
+class GZipUnlessProxied:
+    """Starlette's GZipMiddleware (JSON and static files of 1 KB or more) for requests that reach the app
+    directly. Behind Caddy (a request with X-Forwarded-For) responses go out as they are: Caddy compresses
+    them itself (deploy/setup_vps.sh's "encode zstd gzip"), off the Python event loop. A response already
+    compressed (the slate's ready-made gzip) is passed through either way."""
+
+    def __init__(self, app: Any, minimum_size: int = GZIP_MIN_BYTES, compresslevel: int = 6) -> None:
+        self.app = app
+        self.gzip = GZipMiddleware(app, minimum_size=minimum_size, compresslevel=compresslevel)
+
+    async def __call__(self, scope: Dict[str, Any], receive: Callable[[], Any], send: Callable[[Any], Any]) -> None:
+        if scope["type"] == "http" and not any(name == b"x-forwarded-for" for name, _ in scope.get("headers") or ()):
+            await self.gzip(scope, receive, send)
+        else:
+            await self.app(scope, receive, send)
+
+
+def etag_matches(header: Optional[str], etag: str) -> bool:
+    """Whether If-None-Match names this ETag ("*", a list, W/ and a proxy's "-gzip"/"-zstd" suffix allowed)."""
+    if not header:
+        return False
+    wanted = etag.strip('"')
+    for tag in header.split(","):
+        tag = tag.strip()
+        if tag == "*":
+            return True
+        if tag.startswith("W/"):
+            tag = tag[2:]
+        tag = tag.strip('"')
+        for suffix in ("-gzip", "-zstd", "-br"):
+            if tag.endswith(suffix):
+                tag = tag[: -len(suffix)]
+        if tag == wanted:
+            return True
+    return False
+
+
+def accepts_gzip(header: Optional[str]) -> bool:
+    for part in (header or "").lower().split(","):
+        name, _, params = part.strip().partition(";")
+        if name.strip() in ("gzip", "*"):
+            quality = params.strip()
+            return not (quality.startswith("q=") and quality[2:].strip() in ("0", "0.0", "0.00", "0.000"))
+    return False
+
+
+def ready_bytes(request: Request, body: bytes, gzipped: bytes, etag: str, media_type: str) -> Response:
+    """Pre-built bytes with their ETag: a 304 when the browser has them, else gzip when it takes it."""
+    headers = {"ETag": etag, "Cache-Control": "no-cache", "Vary": "Accept-Encoding"}
+    if etag_matches(request.headers.get("if-none-match"), etag):
+        return Response(status_code=304, headers=headers)
+    if accepts_gzip(request.headers.get("accept-encoding")):
+        return Response(gzipped, media_type=media_type, headers={**headers, "Content-Encoding": "gzip"})
+    return Response(body, media_type=media_type, headers=headers)
 
 
 class AsciiJSONResponse(JSONResponse):
@@ -561,16 +641,24 @@ def set_session(response: Response, request: Request, key: bytes, uid: str, seco
 
 def create_app(service: Optional[DashboardService], password: str, login_delay: float = 1.0,
                bot_token: Optional[str] = None, telegram_ids: Collection[int] = (),
-               lab: Optional[Lab] = None) -> FastAPI:
+               lab: Optional[Lab] = None, slate: Optional[SlateBuilder] = None,
+               static_dir: Optional[Path] = None) -> FastAPI:
     """The dashboard app.
 
     Without bot_token, Telegram sign-in is off and only the password works. With it, only the
     Telegram users in telegram_ids may sign in (none when it's empty). The per-person routes use
     ``lab``, else the service's own (services.build_service sets one up, with the AI assistant).
+    ``slate`` is the all-sports slate behind GET /api/slate (data/slate.py; the caller starts its thread),
+    else the service's ``slate`` if it has one. ``static_dir`` serves another copy of the page's files.
     """
     app = FastAPI(title="SportsBet AI", docs_url=None, redoc_url=None, openapi_url=None)
     app.add_exception_handler(RequestValidationError, invalid_request)  # type: ignore[arg-type]
     app.add_middleware(LimitBody, paths=BODY_LIMITS)  # before routing, so before any body is read or parsed
+    app.add_middleware(GZipUnlessProxied)
+    assets = app.state.assets = StaticAssets(Path(static_dir) if static_dir else STATIC)
+    if slate is None and service is not None:
+        slate = getattr(service, "slate", None)
+    app.state.slate = slate
     key = session_key(password, bot_token)
     allowed = frozenset(telegram_ids)
     # Read by current_uid, so routes defined in other modules can depend on it too
@@ -595,8 +683,14 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     signed_in = [Depends(current_uid)]
 
     @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(STATIC / "index.html", headers=NO_CACHE)
+    def index(request: Request) -> Response:
+        """The page, with its import map, module preloads and hashed file names (assets.py); never cached
+        without a check (a 304 when it hasn't changed)."""
+        body, etag = assets.index()
+        headers = {"ETag": etag, **NO_CACHE}
+        if etag_matches(request.headers.get("if-none-match"), etag):
+            return Response(status_code=304, headers=headers)
+        return Response(body, media_type="text/html; charset=utf-8", headers=headers)
 
     @app.post("/api/login")
     async def login(body: Login, request: Request, response: Response) -> Dict[str, bool]:
@@ -782,6 +876,43 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         """Games across the leagues asked for (default: the person's favourites, else the NBA)."""
         return lab_call(lambda: lab.today(uid, leagues.split(",") if leagues else None, day))
 
+    def get_slate() -> SlateBuilder:
+        if slate is None:
+            raise HTTPException(503, NO_ODDS_KEY if service is None else "Today's all-sports slate isn't running here.")
+        return slate
+
+    @app.get("/api/slate")
+    def slate_view(
+        request: Request,
+        leagues: Optional[str] = Query(None, max_length=8000, pattern=r"^[a-z0-9_]{2,64}(,[a-z0-9_]{2,64}){0,199}$"),
+        day: Optional[str] = Query(None, pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
+        uid: str = Depends(person), lab: Lab = Depends(get_lab),
+    ) -> Response:
+        """Every game in every league the app can see, today and the next six days (data/slate.py), as the
+        ready-made bytes: an ETag (a 304 when unchanged) and gzip when the browser takes it. The app filters
+        in the browser; ``leagues`` (a,b) and ``day`` (YYYY-MM-DD) filter here for other callers. No odds are
+        fetched for it. Behind the same gates as Today (age confirmed, not on a break)."""
+        lab_call(lambda: lab.ready(uid))
+        builder = get_slate()
+        current: Optional[SlateBytes] = builder.current(wait=SLATE_WAIT)
+        if current is None:
+            raise HTTPException(503, "Today's games are still loading: try again in a few seconds.",
+                                headers={"Retry-After": "3"})
+        if leagues or day:
+            try:
+                current = builder.filtered(leagues.split(",") if leagues else None, day) or current
+            except ValueError:
+                raise HTTPException(400, "day must look like 2026-10-26") from None
+        return ready_bytes(request, current.raw, current.gzip, current.etag, "application/json")
+
+    @app.post("/api/slate/odds")
+    def slate_odds(body: SlateOddsBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """Ask for a fresh odds board for one league, loaded in the background (each costs 3 of the month's
+        Odds API credits): only when its saved odds are over 2 hours old, at most once per league in 2 hours,
+        never below the reserve. {queued, reason}; the slate updates when the board arrives."""
+        lab_call(lambda: lab.ready(uid))
+        return get_slate().request_odds(body.league)
+
     @app.get("/api/players/search")
     def player_search(q: str = Query(min_length=2, max_length=60),
                       league: Optional[str] = Query(None, pattern=LEAGUE_KEY),
@@ -901,5 +1032,5 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         return lab_call(lambda: lab.messages(uid, thread_id))
 
     # Page, stylesheet and script only; no data is served from here
-    app.mount("/static", Static(directory=STATIC), name="static")
+    app.mount("/static", Static(directory=str(assets.root), assets=assets), name="static")
     return app

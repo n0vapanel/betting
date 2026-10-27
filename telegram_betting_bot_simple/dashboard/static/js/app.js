@@ -28,9 +28,10 @@
 // ── Shared helpers screens use ────────────────────────────────────────────────────────────────────
 // From this file:   navigate(hash), goBack(), replaceAddress(hash), setTitle(text), refreshMainButton(), rerender(),
 //                   analyseSlip(), openSlipSheet(), openOnboarding(), openSportsSheet(), setQuota(quota), signOut(),
-//                   applyTheme(choice), inTelegram, and re-exported from store.js: slip, priceSlip, priced,
-//                   onPriced, me, loadMe, setMe, updateMe, onMeChange, onBreak, oddsFormat, favouriteSports, loadSports, leagueTitle,
-//                   sportEmoji, legKey, legFromOffer, session
+//                   applyTheme(choice), inTelegram, markPainted(source), and re-exported from store.js: slip, priceSlip,
+//                   priced, onPriced, me, loadMe, setMe, updateMe, onMeChange, onBreak, oddsFormat, favouriteSports,
+//                   pinnedSports, isAllSports, MAX_PINNED, setSlateLeagues, canPaintCached, loadSports, leagueTitle,
+//                   sportEmoji, legKey, legFromOffer, session; from layout.js and cache.js: see "The desk" below
 // From ../ui.js:    esc, pct, chanceText, money, signedMoney, priceText, pointText, shortName, timeLabel,
 //                   dayHeading, ago, chip, linkChip, segmented, badge, injuryBadge, section, notice,
 //                   skeleton, emptyState, errorState, toast, sheet, confirmSheet, explain, GLOSSARY,
@@ -43,24 +44,76 @@
 // Rules the shell keeps for every screen: numbers come from the server (never worked out here); errors
 // are shown in the server's own words; every leg is added by the person's own tap; the helpline footer
 // is on every screen.
+//
+// ── The desk and the instant Today (v3 Stage 1) ───────────────────────────────────────────────────
+// Full details at the top of js/layout.js (panes) and js/cache.js (cache and prefetch). In short, all
+// re-exported here, so a screen imports them from "../app.js" (views/today/*.js: "../../app.js"):
+//   layout.mode ("phone" <840 | "tablet" 840–1199 | "desk" 1200–1599 | "wide" ≥1600), onLayoutChange(fn)
+//   mountTree(el, {signal, title}) -> {unmount(), placement}; openTreeDrawer({returnTo}); closeTreeDrawer();
+//     setTreeRail([{key, icon, label, count, live, active}], onPick); treeCollapsed(); setTreeCollapsed(bool)
+//   openInspector(hash, {anchor}) -> bool (false: navigate instead); openDetail(hash, {anchor}); closeInspector();
+//     inspectorRoute(); inspectorAvailable(); onInspectorChange(fn). Links to #/game/… and #/player/… open there
+//     by themselves. The inspector takes its column only while it shows something (body.inspecting).
+//   railState() "pinned" | "collapsed" | "peek"; setRailState(s); onRailChange(fn); railShown() (desk/wide, not on
+//     Build, the slip's own page); openSlip() (= openSlipSheet(): rail, right drawer or bottom sheet)
+//   cache.get/put/del/peek/warm, cache.swr(url, {key, onData, onNotModified, signal, maxAge}) (= swr),
+//     SLATE_URL, SLATE_KEY, prefetch(url, {priority}), prefetched(url), gameUrl(league, id),
+//     playerUrl(league, id), routeUrl(hash), canPrefetchGame(game, league)
+//   markPainted(source)     Today calls it right after its first paint ("cache" or "network"): Telegram's
+//                           ready() goes then, so Telegram drops its loading screen on the cached board
+//   canPaintCached()        the age and break gates, from the profile (swr checks it before a cached paint)
+//   pinnedSports(), isAllSports(), MAX_PINNED, setSlateLeagues(leagues)   "All sports" is the default;
+//                           someone's sports are pinned first, never "only these" (store.js)
+//   registerLeg(leg) -> key (ui.js)  a price button drawn from the slate: data-leg-key="<key>" toggles it
+//   checkTree(...), bindCheckTree(...) (ui.js)  grouped tri-state checkboxes with Select all / Clear
+// Hover (170 ms, mouse) or pointer-down (touch) on an element with data-prefetch="#/game/…" (or an
+// /api/… path) prefetches it, and loads the page's code (warmView(name, {idle}): Today also loads the game
+// page's code once it has painted); player links (#/player/…) prefetch by themselves. Game links need the
+// attribute because a game's detail can cost odds credits when its league's odds are old (canPrefetchGame).
+// Skeletons stay invisible for 300 ms (styles.css), so only a slow first visit ever shows one.
 
-import { api, setInitData, onUnauthorized, passwordLogin, telegramLogin, logout, isQuiet, prefs } from "./api.js";
+import { api, setInitData, onUnauthorized, passwordLogin, telegramLogin, logout, isQuiet, prefs, getPlayerId } from "./api.js";
 import * as tg from "./telegram.js";
 import {
   slip, priceSlip, priced, onPriced, me, loadMe, setMe, updateMe, onMeChange, onBreak, oddsFormat, favouriteSports, loadSports,
-  leagueTitle, sportEmoji, legKey, legFromOffer, session,
+  leagueTitle, sportEmoji, legKey, legFromOffer, session, pinnedSports, isAllSports, MAX_PINNED, setSlateLeagues,
+  canPaintCached, readCachedMe, clearCachedMe, setMeIdentity,
 } from "./store.js";
 import {
   esc, pct, chanceText, money, signedMoney, priceText, toast, sheet, explain, skeleton, errorState, installUi,
-  setExplainContext, notice, segmented, timeLabel, openExplainer, holdPage,
+  setExplainContext, notice, segmented, timeLabel, openExplainer, holdPage, checkTree, bindCheckTree, confirmSheet,
 } from "./ui.js";
 import { icon, logo } from "./icons.js";
+import * as desk from "./layout.js";
+import { cache, setPaintCheck, prefetch, routeUrl, SLATE_KEY } from "./cache.js";
 
 export {
   slip, priceSlip, priced, onPriced, me, loadMe, setMe, updateMe, onMeChange, onBreak, oddsFormat, favouriteSports, loadSports,
-  leagueTitle, sportEmoji, legKey, legFromOffer, session,
+  leagueTitle, sportEmoji, legKey, legFromOffer, session, pinnedSports, isAllSports, MAX_PINNED, setSlateLeagues, canPaintCached,
 };
+export {
+  layout, onLayoutChange, mountTree, openTreeDrawer, closeTreeDrawer, setTreeRail, treeCollapsed, setTreeCollapsed,
+  openInspector, openDetail, closeInspector, inspectorRoute, inspectorAvailable, onInspectorChange,
+  railState, setRailState, onRailChange, openSlip, railShown,
+} from "./layout.js";
+export {
+  cache, swr, prefetch, prefetched, gameUrl, playerUrl, routeUrl, canPrefetchGame, SLATE_URL, SLATE_KEY,
+} from "./cache.js";
 export const inTelegram = tg.inTelegram;
+
+/**
+ * Today: call right after the first paint of the board ("cache" when drawn from this device's copy,
+ * "network" otherwise). Telegram's ready() goes now (once), so its loading screen gives way to the board.
+ * Leaves a performance mark "sportsbet:painted" (its detail says which) for the timing checks.
+ */
+export function markPainted(source = "network") {
+  try {
+    if (!performance.getEntriesByName("sportsbet:painted").length) performance.mark("sportsbet:painted", { detail: { source } });
+  } catch {
+    /* old browsers without mark details */
+  }
+  tg.ready();
+}
 
 /** "system" | "dark" | "light" (kept in this browser; inside Telegram, Telegram's theme wins). */
 export function applyTheme(choice = prefs.get("theme", "system")) {
@@ -81,6 +134,22 @@ const ROUTES = [
   { name: "help", pattern: /^help(?:\/([a-z0-9_-]{1,40}))?$/, keys: ["topic"], tab: "help", title: "Help", load: () => import("./views/help.js") },
   { name: "settings", pattern: /^settings$/, tab: null, sub: "#/today", title: "Settings", load: () => import("./views/settings.js") },
 ];
+
+const warmed = new Set();
+
+/**
+ * Load a screen's code before it is opened ("game", "player"): with its data on hover or pointer-down, and
+ * once Today has painted (``idle``), so the first game opened after a deploy doesn't wait for its modules.
+ */
+export function warmView(name, { idle = false } = {}) {
+  const route = ROUTES.find((r) => r.name === name);
+  if (!route || warmed.has(name)) return;
+  warmed.add(name);
+  const go = () => route.load().catch(() => warmed.delete(name)); // offline: the tap loads it as before
+  if (!idle) go();
+  else if (typeof requestIdleCallback === "function") requestIdleCallback(go, { timeout: 3000 });
+  else setTimeout(go, 300);
+}
 
 // The first dashboard's and the bot's links (#games, #ask, ...) still land somewhere sensible
 const OLD_HASHES = {
@@ -255,9 +324,10 @@ export async function rerender() {
   const controller = new AbortController();
   const root = document.createElement("div");
   root.className = `view view-${route.name}`;
-  root.innerHTML = skeleton("cards", 2);
+  root.innerHTML = skeleton("cards", 2); // invisible for 300 ms: a module already loaded never shows it
   $("#view").replaceChildren(root);
   active = { route, params: { ...params, query, signal: controller.signal, path }, module: null, root, controller, hash: location.hash };
+  desk.routeChanged(); // the inspector belongs to Today; the tree pane to whichever screen mounts one
   updateChrome();
   let module;
   try {
@@ -285,19 +355,21 @@ export async function rerender() {
   if (seq !== renderSeq) return;
   if (back && restore) window.scrollTo(0, restore);
   refreshMainButton();
+  tg.ready(); // the first screen is drawn (Today calls markPainted() sooner, from its cached copy)
 }
 
 /** Header, tab bar and Telegram's Back button for the current screen. */
 function updateChrome() {
   const { route, params } = active;
   const sub = isSubPage(route, params);
-  for (const tab of document.querySelectorAll(".tabbar a")) {
+  for (const tab of document.querySelectorAll(".tabbar a, .toptabs a")) {
     if (tab.dataset.tab === route.tab) tab.setAttribute("aria-current", "page");
     else tab.removeAttribute("aria-current");
   }
   document.body.dataset.route = route.name;
+  $("#skip").textContent = route.name === "today" ? "Skip to games" : "Skip to content";
   $("#back").hidden = !sub || tg.inTelegram;
-  setTitle(sub ? route.title || "" : null); // a screen may set a better one once its data is in
+  drawTitle(sub ? route.title || "" : null); // a screen may set a better one once its data is in
   if (route.name === "settings") $(".avatar").setAttribute("aria-current", "page");
   else $(".avatar").removeAttribute("aria-current");
   updateBackButton();
@@ -308,8 +380,19 @@ function updateBackButton() {
   tg.setBackButton(sheet.isOpen || sub ? goBack : null);
 }
 
+// While the inspector draws a game or player, that screen's setTitle() names the inspector, not the page
+let titleSink = null;
+
 /** The header title on sub-pages (null shows the app's name). */
 export function setTitle(text) {
+  if (titleSink) {
+    titleSink(text);
+    return;
+  }
+  drawTitle(text);
+}
+
+function drawTitle(text) {
   const title = $("#title");
   if (text === null || text === undefined) {
     title.innerHTML = `${logo(26)}<span class="brand">SportsBet <b>AI</b></span>`;
@@ -416,12 +499,23 @@ function renderSlipBar() {
   analyse.disabled = onBreak();
   if (analyse.disabled) analyse.setAttribute("aria-describedby", "banner");
   else analyse.removeAttribute("aria-describedby");
+  desk.refreshSlipChrome(); // the rail's tab and the header's slip button (desk and tablet)
   if (!n) return;
   const s = slipSummary();
   bar.querySelector(".slip-open").innerHTML = `<span class="slip-count" aria-hidden="true">${n}</span>
     <span class="slip-text"><b>${esc(s.main)}</b>${s.detail ? `<span class="${s.warn ? "warn" : ""}">${s.warn ? icon("alert", { size: 14 }) : ""}${esc(s.detail)}</span>` : ""}</span>
     ${icon("up", { size: 18 })}`;
   bar.querySelector(".slip-open").setAttribute("aria-label", `Bet slip: ${s.main}${s.detail ? `, ${s.detail}` : ""}. Open the slip`);
+}
+
+/** The rail tab's and the header button's words: {count, odds (the multi's price, or ""), label}. */
+function railSummary() {
+  const n = slip.count;
+  const { result } = priced();
+  const odds = n && result?.valid && result.odds && (result.type === "multi" || result.legs?.length === 1) && !onBreak()
+    ? priceText(result.odds) : "";
+  const label = n ? `Bet slip: ${legsWord(n)}${odds ? `, odds ${odds}` : ""}` : "Bet slip: empty";
+  return { count: n, odds, label };
 }
 
 function legLine(leg, view, removed) {
@@ -468,10 +562,10 @@ function slipTypeHtml() {
 }
 
 /** The server's numbers for the slip: chances, payout, what the bookmaker keeps, expected result, warnings. */
-function slipNumbersHtml() {
+function slipNumbersHtml(view) {
   const { busy, result, error } = priced();
   // On a break the server prices nothing: no numbers from before it, and the line Analyse points to
-  if (onBreak()) return `<div id="slip-break-note">${notice("You're on a break: pricing, analysing and saving a slip are off until it ends.", "info")}</div>`;
+  if (onBreak()) return `<div id="${view.uid}-break-note">${notice("You're on a break: pricing, analysing and saving a slip are off until it ends.", "info")}</div>`;
   let summary = "";
   if (result && result.bets) {
     const c = result.chance || {};
@@ -497,7 +591,7 @@ function slipNumbersHtml() {
     ${warnings.length ? `<ul class="warnings">${warnings.map((w) => `<li>${icon("alert", { size: 14 })}<span>${esc(w)}</span></li>`).join("")}</ul>` : ""}`;
 }
 
-function slipSheetBody() {
+function slipSheetBody(view) {
   if (!slip.count) {
     return `<div class="empty"><div class="empty-icon">${icon("bets", { size: 28 })}</div><h3>Your slip is empty</h3>
       <p>Tap any price on Today to add a pick, or let the AI build one.</p>
@@ -507,41 +601,222 @@ function slipSheetBody() {
     <ul class="slip-legs" data-part="legs">${slipLegsHtml(priced().result)}</ul>
     <div class="field" data-part="type">${slipTypeHtml()}</div>
     <div class="field">
-      <label class="label" for="slip-stake" data-part="stake-label">${stakeLabel()}</label>
+      <label class="label" for="${view.uid}-stake" data-part="stake-label">${stakeLabel()}</label>
       <div class="stake-row">
         ${STAKES.map((v) => `<button type="button" class="chip${slip.stake === v ? " on" : ""}" aria-pressed="${slip.stake === v}" data-stake="${v}">$${v}</button>`).join("")}
-        <span class="money-input"><span aria-hidden="true">$</span><input id="slip-stake" class="input" type="text" inputmode="decimal" autocomplete="off" value="${esc(customStake())}" placeholder="Other" aria-label="Other stake"></span>
+        <span class="money-input"><span aria-hidden="true">$</span><input id="${view.uid}-stake" data-slip-stake class="input" type="text" inputmode="decimal" autocomplete="off" value="${esc(customStake())}" placeholder="Other" aria-label="Other stake"></span>
       </div>
     </div>
-    <div data-part="numbers">${slipNumbersHtml()}</div>
+    <div data-part="numbers">${slipNumbersHtml(view)}</div>
+    <div class="slip-save" data-part="save">${slipSaveHtml()}</div>
     <p class="muted small">Nothing is bet here: the app prices picks so you can see the chances. Prices are rechecked on the server.</p>`;
 }
 
-function slipSheetFooter() {
+function slipSheetFooter(view) {
   if (!slip.count) return "";
   return `<button type="button" class="btn btn-secondary" data-slip="clear">${icon("trash", { size: 18 })}Clear</button>
     <button type="button" class="btn btn-secondary" data-slip="build">Open in Build</button>
-    <button type="button" class="btn btn-primary grow" data-slip="analyse"${analyseOff()}>${icon("ask", { size: 18 })}Analyse with AI</button>`;
+    <button type="button" class="btn btn-primary grow" data-slip="analyse"${analyseOff(view)}>${icon("ask", { size: 18 })}Analyse with AI</button>`;
 }
 
 /** The slip sheet's Analyse is off on a break, described by the line in place of the numbers. */
-function analyseOff() {
-  return onBreak() ? ' disabled aria-describedby="slip-break-note"' : "";
+function analyseOff(view) {
+  return onBreak() ? ` disabled aria-describedby="${view.uid}-break-note"` : "";
 }
 
-let slipSheet = null;
+// --- Save and Share (POST /api/slips; a share code belongs to a saved slip) ----------------------------------
 
-/** The full slip in a bottom sheet: legs, bet type, stake chips and the server's numbers. */
-export function openSlipSheet() {
-  const s = sheet.open({ title: `Your slip${slip.count ? ` (${slip.count})` : ""}`, body: slipSheetBody(), footer: slipSheetFooter(), size: "tall", onClose: () => { slipSheet = null; } });
-  slipSheet = s;
-  priceSlip();
-  s.panel.addEventListener("click", async (event) => {
+let savedSlip = null; // {text, view}: the slip as last saved here, and the server's view of it
+let saving = false;
+// Each slip view has its own element ids: "slip-…" in the sheet (as before the rail), "rail-…" in the rail
+
+const isSaved = () => Boolean(savedSlip && savedSlip.text === JSON.stringify(slip.body()));
+
+function slipSaveHtml() {
+  if (!slip.count) return "";
+  const { result } = priced();
+  const off = onBreak();
+  const canSave = !off && !saving && Boolean(result?.valid && result.bets > 0);
+  const saved = isSaved();
+  return `<button type="button" class="btn btn-secondary small" data-slip="save"${saved || !canSave ? " disabled" : ""}>${icon(saved ? "check" : "bets", { size: 16 })}${saved ? "Saved" : saving ? "Saving…" : "Save"}</button>
+    <button type="button" class="btn btn-secondary small" data-slip="share"${saved || canSave ? "" : " disabled"}>${icon("share", { size: 16 })}Share</button>
+    ${saved ? `<span class="small muted">In <a href="#/bets?tab=slips">My bets</a>${savedSlip.view?.share_code ? ` · code <b>${esc(savedSlip.view.share_code)}</b>` : ""}</span>` : ""}`;
+}
+
+async function saveSlip() {
+  if (saving) return null;
+  const body = slip.body();
+  const text = JSON.stringify(body);
+  saving = true;
+  refreshSlipViews();
+  try {
+    const view = await api("/api/slips", { method: "POST", body });
+    savedSlip = { text, view };
+    tg.haptic.notify("success");
+    toast("Saved to My bets", { kind: "good" });
+    if (me().budget) loadMe().catch(() => null); // the weekly budget left has changed
+    return view;
+  } catch (error) {
+    if (!isQuiet(error)) {
+      tg.haptic.notify("error");
+      toast(error.message, { kind: "warn", ms: 4200 });
+    }
+    return null;
+  } finally {
+    saving = false;
+    refreshSlipViews();
+  }
+}
+
+function shareLink(code) {
+  const base = String(me().public_url || location.origin).replace(/\/+$/, "");
+  return `${base}/#/build?code=${encodeURIComponent(code)}`;
+}
+
+async function shareSlip() {
+  let view = isSaved() ? savedSlip.view : null;
+  if (!view) {
+    const total = priced().result?.total_stake;
+    const ok = await confirmSheet({
+      title: "Save and share?",
+      body: `Sharing saves this slip to My bets first: a share code belongs to a saved slip. It's graded when its games end and counts in your profit and loss${me().budget && total ? `, and its ${money(total, { cents: true })} counts toward your weekly budget` : ""}.`,
+      confirm: "Save & share",
+    });
+    if (!ok) return;
+    view = await saveSlip();
+    if (!view) return;
+  }
+  const code = view.share_code;
+  if (!code) {
+    toast("This slip has no share code", { kind: "warn" });
+    return;
+  }
+  const link = shareLink(code);
+  const s = sheet.open({
+    title: "Share this slip",
+    body: `<p class="lead">Anyone using this app can load your picks with this code. Prices are checked again when they open it.</p>
+      <div class="share-code" aria-label="Share code ${esc(code.split("").join(" "))}">${esc(code)}</div>
+      <p class="hint">${esc(link)}</p>`,
+    footer: `<button type="button" class="btn btn-secondary grow" data-share="code">${icon("copy", { size: 18 })}Copy code</button>
+      <button type="button" class="btn btn-secondary grow" data-share="link">${icon("copy", { size: 18 })}Copy link</button>
+      ${navigator.share ? `<button type="button" class="btn btn-primary grow" data-share="native">${icon("share", { size: 18 })}Share…</button>` : ""}`,
+  });
+  s.foot.addEventListener("click", async (event) => {
+    const how = event.target.closest("[data-share]")?.dataset.share;
+    if (!how) return;
+    if (how === "native") {
+      try {
+        await navigator.share({ title: "My SportsBet AI slip", text: `My slip on SportsBet AI: code ${code}`, url: link });
+      } catch {
+        /* the person closed the share sheet */
+      }
+      return;
+    }
+    const { copyText } = await import("./legacy.js"); // only when copying: legacy.js isn't on the start path
+    copyText(how === "code" ? code : link, how === "code" ? "Code" : "Link");
+  });
+}
+
+// --- the slip, drawn in three places ---------------------------------------------------------------------
+//
+// One slip view, drawn in the phone's bottom sheet, the tablet's right drawer (the same sheet, styled) and
+// the desk's rail. Each is drawn once, then refreshed part by part (data-part="..."), so a tap on a stake,
+// the bet type or a leg's bin doesn't scroll it back to the top, and a stake being typed isn't replaced.
+
+const slipViews = new Set(); // {body, foot, setTitle(text), home() -> its heading, focusHome(), kind: "sheet" | "rail"}
+
+function drawSlipView(view) {
+  view.body.innerHTML = slipSheetBody(view);
+  view.foot.innerHTML = slipSheetFooter(view);
+  view.foot.hidden = !slip.count;
+  view.setTitle(`Your slip${slip.count ? ` (${slip.count})` : ""}`);
+}
+
+/** A selector for the same slip control after its part is drawn again (bet type, Save, a stake, a leg's bin). */
+function slipControlKey(node) {
+  const el = node?.closest?.("[data-seg][data-value], [data-slip], [data-stake], [data-remove-leg]");
+  if (!el) return null;
+  if (el.dataset.seg != null) return `[data-seg="${CSS.escape(el.dataset.seg)}"][data-value="${CSS.escape(el.dataset.value)}"]`;
+  for (const attr of ["data-slip", "data-stake", "data-remove-leg"]) {
+    if (el.hasAttribute(attr)) return `[${attr}="${CSS.escape(el.getAttribute(attr))}"]`;
+  }
+  return null;
+}
+
+const SAVE_KEY = '[data-slip="save"]';
+
+/**
+ * Focus in a slip view whose control was just drawn again: its new copy; for Save, Share once the slip is
+ * saved (Save becomes a disabled "Saved"; while "Saving…" focus waits on the heading); else the view's
+ * heading. Never <body>: the rail is a pane, and Tab would start over at the top of the page.
+ */
+function keepSlipFocus(view, key) {
+  const active = document.activeElement;
+  const waiting = Boolean(view.pending) && active === view.home();
+  if (!waiting && active && active !== document.body && active.isConnected) { // still there, or moved on by the person
+    view.pending = null;
+    return;
+  }
+  const want = key || view.pending;
+  view.pending = null;
+  const usable = (el) => Boolean(el && !el.disabled && el.isConnected);
+  const inView = (selector) => view.body.querySelector(selector) || view.foot?.querySelector(selector);
+  let target = want ? inView(want) : null;
+  if (!usable(target) && want === SAVE_KEY) {
+    target = inView('[data-slip="share"]');
+    if (!usable(target) && saving) view.pending = SAVE_KEY;
+  }
+  if (usable(target)) target.focus({ preventScroll: true });
+  else if (active !== view.home()) view.focusHome();
+}
+
+/** Bring a slip view up to date in place: same scroll position, the stake being typed left alone. */
+function refreshSlipView(view) {
+  const body = view.body;
+  const part = (name) => body.querySelector(`[data-part="${name}"]`);
+  const focused = document.activeElement;
+  const hadFocus = Boolean(focused && (body.contains(focused) || view.foot?.contains(focused)));
+  const key = hadFocus ? slipControlKey(focused) : null;
+  view.setTitle(`Your slip${slip.count ? ` (${slip.count})` : ""}`);
+  if (!slip.count || !part("legs")) { // emptied, or the empty slip got its first pick: draw it all
+    const top = body.scrollTop;
+    drawSlipView(view);
+    body.scrollTop = top;
+    if (hadFocus || view.pending) keepSlipFocus(view, key);
+    return;
+  }
+  part("legs").innerHTML = slipLegsHtml(priced().result);
+  part("type").innerHTML = slipTypeHtml();
+  part("stake-label").textContent = stakeLabel();
+  for (const chip of body.querySelectorAll("[data-stake]")) {
+    chip.classList.toggle("on", slip.stake === chip.dataset.stake);
+    chip.setAttribute("aria-pressed", String(slip.stake === chip.dataset.stake));
+  }
+  const input = body.querySelector("[data-slip-stake]");
+  if (input && document.activeElement !== input) input.value = customStake();
+  part("numbers").innerHTML = slipNumbersHtml(view);
+  part("save").innerHTML = slipSaveHtml();
+  const analyse = view.foot?.querySelector('[data-slip="analyse"]');
+  if (analyse && analyse.disabled !== onBreak()) { // a break started or ended with the slip open
+    analyse.disabled = onBreak();
+    if (analyse.disabled) analyse.setAttribute("aria-describedby", `${view.uid}-break-note`);
+    else analyse.removeAttribute("aria-describedby");
+  }
+  if (hadFocus || view.pending) keepSlipFocus(view, key);
+}
+
+function refreshSlipViews() {
+  for (const view of slipViews) refreshSlipView(view);
+}
+
+/** The slip's taps and the custom stake, on the element holding a slip view (``onClear`` after Clear). */
+function bindSlipView(container, view, { onClear = () => {} } = {}) {
+  container.addEventListener("click", async (event) => {
     const remove = event.target.closest("[data-remove-leg]");
     if (remove) {
       slip.remove(remove.dataset.removeLeg);
       tg.haptic.select();
-      if (!s.panel.contains(document.activeElement)) s.panel.focus({ preventScroll: true }); // its button is gone
+      if (!container.contains(document.activeElement)) view.focusHome(); // its button is gone
       return;
     }
     const stake = event.target.closest("[data-stake]");
@@ -558,15 +833,19 @@ export function openSlipSheet() {
     if (action === "clear") {
       slip.clear();
       toast("Slip cleared");
-      s.close();
+      onClear();
     } else if (action === "build") {
       navigate("#/build");
     } else if (action === "analyse") {
       analyseSlip();
+    } else if (action === "save") {
+      saveSlip();
+    } else if (action === "share") {
+      shareSlip();
     }
   });
-  s.panel.addEventListener("change", (event) => {
-    if (event.target.id !== "slip-stake") return;
+  container.addEventListener("change", (event) => {
+    if (!event.target.matches("[data-slip-stake]")) return;
     const value = event.target.value.trim().replace(/^\$/, "");
     if (!value) return;
     if (!/^\d{1,6}(\.\d{1,2})?$/.test(value) || Number(value) < 0.01 || Number(value) > 100000) {
@@ -577,31 +856,68 @@ export function openSlipSheet() {
   });
 }
 
-/** Bring the open slip sheet up to date in place: same scroll position, the stake being typed left alone. */
-function refreshSlipSheet() {
-  if (!slipSheet?.open) return;
-  const body = slipSheet.body;
-  const part = (name) => body.querySelector(`[data-part="${name}"]`);
-  sheet.update({ title: `Your slip${slip.count ? ` (${slip.count})` : ""}` });
-  if (!slip.count || !part("legs")) { // emptied, or the empty sheet got its first pick: draw it all
-    sheet.update({ body: slipSheetBody(), footer: slipSheetFooter() });
+let slipSheet = null; // the slip's view while it is open as a sheet
+
+/**
+ * Open the slip: in the desk's rail (1200 px and up: focused, or peeking when collapsed), else as the
+ * right-hand drawer (tablet) or the bottom sheet (phone): legs, bet type, stake chips and the server's numbers.
+ */
+export function openSlipSheet() {
+  if (desk.railShown()) {
+    desk.openSlip();
+    priceSlip();
     return;
   }
-  part("legs").innerHTML = slipLegsHtml(priced().result);
-  part("type").innerHTML = slipTypeHtml();
-  part("stake-label").textContent = stakeLabel();
-  for (const chip of body.querySelectorAll("[data-stake]")) {
-    chip.classList.toggle("on", slip.stake === chip.dataset.stake);
-    chip.setAttribute("aria-pressed", String(slip.stake === chip.dataset.stake));
-  }
-  const input = body.querySelector("#slip-stake");
-  if (input && document.activeElement !== input) input.value = customStake();
-  part("numbers").innerHTML = slipNumbersHtml();
-  const analyse = slipSheet.foot?.querySelector('[data-slip="analyse"]');
-  if (analyse && analyse.disabled !== onBreak()) { // a break started or ended with the sheet open
-    analyse.disabled = onBreak();
-    if (analyse.disabled) analyse.setAttribute("aria-describedby", "slip-break-note");
-    else analyse.removeAttribute("aria-describedby");
+  const drawer = desk.layout.mode !== "phone";
+  const s = sheet.open({
+    title: `Your slip${slip.count ? ` (${slip.count})` : ""}`, body: "", footer: "", size: drawer ? "auto" : "tall",
+    className: drawer ? "drawer drawer-right slip-sheet" : "slip-sheet",
+    onClose: () => {
+      if (slipSheet) slipViews.delete(slipSheet);
+      slipSheet = null;
+    },
+  });
+  const view = {
+    kind: "sheet", uid: "slip", body: s.body, foot: s.foot, // one sheet at a time: #slip-stake, #slip-break-note
+    setTitle: (text) => { if (s.open) sheet.update({ title: text }); },
+    home: () => s.panel,
+    focusHome: () => s.panel.focus({ preventScroll: true }),
+  };
+  if (slipSheet) slipViews.delete(slipSheet);
+  slipSheet = view;
+  slipViews.add(view);
+  drawSlipView(view);
+  priceSlip();
+  bindSlipView(s.panel, view, { onClear: () => s.close() });
+}
+
+// The desk's rail: its slip is drawn only while the rail is on screen (1200 px and up), so phones and
+// tablets carry no hidden second copy of the slip
+let railView = null;
+
+/** layout.js hands over the rail's body and foot at start; the slip goes in whenever the rail shows. */
+function drawRail(body, foot) {
+  railView = {
+    kind: "rail", uid: "rail", body, foot,
+    setTitle: (text) => { document.getElementById("rail-title").textContent = text; },
+    home: () => document.getElementById("rail-title"),
+    focusHome: () => document.getElementById("rail-title").focus({ preventScroll: true }),
+  };
+  // Clear empties the rail in place (the sheet closes instead): focus goes to its heading, not to <body>
+  bindSlipView(desk.railParts().panel, railView, { onClear: () => { if (!railView.body.contains(document.activeElement)) railView.focusHome(); } });
+  syncRail();
+}
+
+function syncRail() {
+  if (!railView) return;
+  const shown = desk.railShown();
+  if (shown && !slipViews.has(railView)) {
+    slipViews.add(railView);
+    drawSlipView(railView);
+  } else if (!shown && slipViews.has(railView)) {
+    slipViews.delete(railView);
+    railView.body.replaceChildren();
+    railView.foot.replaceChildren();
   }
 }
 
@@ -615,6 +931,7 @@ function showGate(html) {
     <div class="gate-brand">${logo(36)}<span class="brand">SportsBet <b>AI</b></span></div>${html}</div>`;
   gate.hidden = false;
   document.body.classList.add("gated");
+  tg.ready(); // inside Telegram the gate must show, not Telegram's loading screen
   holdPage("gate", true, ".sheet-layer"); // Tab stays in the gate: the page (and any sheet) behind it is inert
   gate.querySelector(".gate-card").focus({ preventScroll: true });
   gateOpen = true;
@@ -656,6 +973,7 @@ function showSignIn(note = "") {
     error.textContent = "";
     try {
       await passwordLogin(form.elements.password.value);
+      signedInAgain = true; // whatever drew behind the form was refused: draw it again
       hideGate();
       start();
     } catch (err) {
@@ -722,30 +1040,90 @@ async function telegramUnauthorized() {
 /** Sign out (password sessions) and show the sign-in form again. */
 export async function signOut() {
   await logout();
-  location.hash = "#/today";
+  clearCachedMe();
+  await cache.clear().catch(() => null); // nothing from this session is drawn before the next sign-in
+  // The address changes without a hashchange: drawing Today here would only ask for the slate signed out (a 401)
+  replaceAddress("#/today");
   location.reload();
 }
 
 // --- onboarding (first launch) ----------------------------------------------------------------------------
 
-const POPULAR = ["basketball_nba", "americanfootball_nfl", "baseball_mlb", "icehockey_nhl", "basketball_ncaab",
-  "americanfootball_ncaaf", "basketball_wnba", "soccer_epl", "soccer_uefa_champs_league", "soccer_usa_mls"];
+/** The leagues as check-tree groups, by sport ("⚽ Soccer"), in the order the server lists them. */
+function sportGroups(sports) {
+  const groups = [];
+  for (const s of sports) {
+    const label = s.label || s.group || "Other";
+    let group = groups.find((g) => g.key === label);
+    if (!group) groups.push(group = { key: label, label, items: [] });
+    group.items.push({ key: s.key, label: s.title || s.key, tag: s.ai ? "AI" : "" });
+  }
+  return groups;
+}
 
-/** Age, favourite sports, optional weekly budget, odds format and the AI disclosure, in one sheet. */
+/**
+ * "Your sports" as a check tree: every league ticked means "All sports" (the default, saved as no pins);
+ * some ticked means those come first on Today (the rest still follow). Returns {html, bind(panel, onChange)}.
+ */
+function sportsPicker(sports, name) {
+  const all = sports.map((s) => s.key);
+  const pinned = pinnedSports().filter((key) => all.includes(key));
+  const checked = new Set(pinned.length ? pinned : all);
+  const html = sports.length
+    ? `${checkTree({ name, groups: sportGroups(sports), checked, allLabel: "All sports", unit: "leagues" })}
+      <p class="hint" data-sports-hint></p>`
+    : '<p class="muted small">Sports load once you\'re signed in.</p>';
+  const hint = (set) => {
+    if (!set.size || set.size === all.length) return { text: "All sports: Today lists every league, soonest games first.", ok: true };
+    if (set.size > MAX_PINNED) return { text: `Pick up to ${MAX_PINNED} leagues to put first, or tick All sports. Today lists every league either way.`, ok: false };
+    return { text: set.size === 1 ? "This one comes first on Today; every other league follows it." : `These ${set.size} come first on Today; every other league follows them.`, ok: true };
+  };
+  return {
+    html,
+    /** Wire it in ``panel``; onChange(ok) after every change. Returns {favourites() -> [] | [keys], ok()}. */
+    bind(panel, onChange = () => {}) {
+      if (!sports.length) return { favourites: () => null, ok: () => true };
+      let current = new Set(checked);
+      const note = panel.querySelector("[data-sports-hint]");
+      const show = () => {
+        const h = hint(current);
+        note.textContent = h.text;
+        note.classList.toggle("warn", !h.ok);
+        onChange(h.ok);
+      };
+      bindCheckTree(panel, { checked, onChange: (set) => { current = set; show(); } });
+      show();
+      return {
+        favourites: () => (!current.size || current.size === all.length ? [] : all.filter((key) => current.has(key))),
+        ok: () => hint(current).ok,
+      };
+    },
+  };
+}
+
+/**
+ * Every league the sheets can offer: GET /api/sports plus the all-sports slate's (from Today, or this
+ * device's saved slate when Today hasn't loaded it yet). Before the age is confirmed the slate is gated,
+ * so onboarding may only have /api/sports.
+ */
+async function sheetSports() {
+  if (!session.slateLeagues) {
+    const saved = await cache.get(SLATE_KEY).catch(() => null);
+    if (Array.isArray(saved?.value?.leagues)) setSlateLeagues(saved.value.leagues);
+  }
+  return loadSports();
+}
+
+/** Age, your sports, optional weekly budget, odds format and the AI disclosure, in one sheet. */
 export async function openOnboarding() {
   let sports = [];
   try {
-    sports = await loadSports();
+    sports = await sheetSports();
   } catch (error) {
     if (error.signIn) return;
   }
-  const chosen = new Set(favouriteSports());
   let format = oddsFormat();
-  let showAll = false;
-  // The big leagues first; the rest behind "More sports" so the form stays short
-  const popular = sports.filter((s) => POPULAR.includes(s.key) || chosen.has(s.key));
-  const sportChips = () => (showAll || popular.length < 3 ? sports : popular).map((s) => `<button type="button" class="chip${chosen.has(s.key) ? " on" : ""}" aria-pressed="${chosen.has(s.key)}" data-fav="${esc(s.key)}">${esc(sportEmoji(s.key))} ${esc(s.title)}${s.ai ? ' <span class="tag">AI</span>' : ""}</button>`).join("")
-    + (!showAll && popular.length >= 3 && sports.length > popular.length ? `<button type="button" class="chip add" data-more-sports>${icon("plus", { size: 14 })}More sports (${sports.length - popular.length})</button>` : "");
+  const picker = sportsPicker(sports, "onb-sports");
   const s = sheet.open({
     title: "Welcome to SportsBet AI",
     size: "tall",
@@ -753,8 +1131,8 @@ export async function openOnboarding() {
       <div class="field">
         <label class="check"><input type="checkbox" data-age> <span>I'm 18 or older (21+ in the US) and betting is legal where I live.</span></label>
       </div>
-      <div class="field"><span class="label">Your sports <span class="muted">(shown first on Today)</span></span>
-        <div class="chip-row wrap" data-sports>${sports.length ? sportChips() : '<span class="muted small">Sports load once you\'re signed in.</span>'}</div></div>
+      <div class="field"><span class="label">Your sports <span class="muted">(all of them unless you choose)</span></span>
+        ${picker.html}</div>
       <div class="field"><label class="label" for="onb-budget">Weekly budget <span class="muted">(optional)</span> ${explain("bankroll")}</label>
         <span class="money-input"><span aria-hidden="true">$</span><input id="onb-budget" class="input" type="text" inputmode="decimal" placeholder="e.g. 50" autocomplete="off"></span>
         <p class="hint">Stakes you save count against it. Lowering it applies at once; raising it waits 24 hours.</p></div>
@@ -766,19 +1144,14 @@ export async function openOnboarding() {
       <button type="button" class="btn btn-primary grow" data-onb="start" disabled>Get started</button>`,
   });
   const startButton = s.panel.querySelector('[data-onb="start"]');
+  const ageBox = s.panel.querySelector("[data-age]");
+  let sportsOk = true;
+  const ready = () => { startButton.disabled = !(ageBox.checked && sportsOk); };
+  const chosen = picker.bind(s.panel, (ok) => { sportsOk = ok; ready(); });
   s.panel.addEventListener("change", (event) => {
-    if (event.target.matches("[data-age]")) startButton.disabled = !event.target.checked;
+    if (event.target.matches("[data-age]")) ready();
   });
   s.panel.addEventListener("click", async (event) => {
-    const fav = event.target.closest("[data-fav]");
-    if (fav || event.target.closest("[data-more-sports]")) {
-      if (!fav) showAll = true;
-      else if (chosen.has(fav.dataset.fav)) chosen.delete(fav.dataset.fav);
-      else if (chosen.size < 8) chosen.add(fav.dataset.fav);
-      else toast("Pick up to 8 sports", { kind: "warn" });
-      s.panel.querySelector("[data-sports]").innerHTML = sportChips();
-      return;
-    }
     const seg = event.target.closest('[data-seg="onb-format"]');
     if (seg) {
       format = seg.dataset.value;
@@ -795,7 +1168,9 @@ export async function openOnboarding() {
         error.textContent = "The budget should be an amount like 50 or 25.50.";
         return;
       }
-      const changes = { confirm_age: true, odds_format: format, favourite_sports: [...chosen] };
+      const changes = { confirm_age: true, odds_format: format };
+      const favourites = chosen.favourites();
+      if (favourites) changes.favourite_sports = favourites;
       if (budget) changes.weekly_budget = budget;
       startButton.disabled = true;
       try {
@@ -805,52 +1180,43 @@ export async function openOnboarding() {
         rerender();
       } catch (err) {
         if (!isQuiet(err)) error.textContent = err.message;
-        startButton.disabled = false;
+        ready();
       }
     }
   });
 }
 
-/** Pick favourite sports (Today's "+" chip and Settings). */
+/**
+ * Choose your sports (Today's sports button, Settings > Your sports): every league ticked is "All sports"
+ * (saved as no pins); a few ticked come first on Today. onDone() after saving.
+ */
 export async function openSportsSheet({ onDone } = {}) {
   let sports;
   try {
-    sports = await loadSports();
+    sports = await sheetSports();
   } catch (error) {
     if (!isQuiet(error)) toast(error.message, { kind: "error" });
     return;
   }
-  const chosen = new Set(favouriteSports()); // what Today and Settings show, NBA until some are saved
-  const groups = [];
-  for (const s of sports) {
-    let group = groups.find((g) => g.label === s.label);
-    if (!group) groups.push(group = { label: s.label, leagues: [] });
-    group.leagues.push(s);
-  }
-  const body = () => groups.map((g) => `<div class="field"><span class="label">${esc(g.label)}</span><div class="chip-row wrap">${g.leagues.map((s) =>
-    `<button type="button" class="chip${chosen.has(s.key) ? " on" : ""}" aria-pressed="${chosen.has(s.key)}" data-fav="${esc(s.key)}">${chosen.has(s.key) ? icon("check", { size: 14 }) : icon("plus", { size: 14 })}${esc(s.title)}${s.ai ? ' <span class="tag">AI</span>' : ""}</button>`).join("")}</div></div>`).join("")
-    + '<p class="hint">Only the sports you pick are fetched: each one uses some of the odds feed\'s monthly requests.</p>';
+  const picker = sportsPicker(sports, "sheet-sports");
   const s = sheet.open({
-    title: "Your sports", size: "tall", body: body(),
+    title: "Your sports", size: "tall",
+    body: `${picker.html}<div class="form-error" role="alert" data-sports-error></div>`,
     footer: '<button type="button" class="btn btn-primary block" data-save-sports>Done</button>',
   });
+  const done = s.panel.querySelector("[data-save-sports]");
+  const chosen = picker.bind(s.panel, (ok) => { done.disabled = !ok; });
   s.panel.addEventListener("click", async (event) => {
-    const fav = event.target.closest("[data-fav]");
-    if (fav) {
-      if (chosen.has(fav.dataset.fav)) chosen.delete(fav.dataset.fav);
-      else if (chosen.size < 8) chosen.add(fav.dataset.fav);
-      else toast("Pick up to 8 sports", { kind: "warn" });
-      s.body.innerHTML = body();
-      return;
-    }
-    if (event.target.closest("[data-save-sports]")) {
-      try {
-        await updateMe({ favourite_sports: [...chosen] });
-        await s.close();
-        onDone?.();
-      } catch (error) {
-        if (!isQuiet(error)) toast(error.message, { kind: "error" });
-      }
+    if (!event.target.closest("[data-save-sports]")) return;
+    const favourites = chosen.favourites();
+    done.disabled = true;
+    try {
+      if (favourites) await updateMe({ favourite_sports: favourites });
+      await s.close();
+      onDone?.();
+    } catch (error) {
+      if (!isQuiet(error)) s.panel.querySelector("[data-sports-error]").textContent = error.message;
+      done.disabled = !chosen.ok();
     }
   });
 }
@@ -889,11 +1255,18 @@ function scheduleRealityCheck() {
 // --- start -----------------------------------------------------------------------------------------------
 
 function drawShell() {
-  $("#tabbar-inner").innerHTML = TABS.map((t) => `<a href="${t.href}" data-tab="${t.key}">${icon(t.iconName, { size: 22 })}<span>${t.label}</span></a>`).join("");
-  setTitle(null);
+  const tabs = (size) => TABS.map((t) => `<a href="${t.href}" data-tab="${t.key}">${icon(t.iconName, { size })}<span>${t.label}</span></a>`).join("");
+  $("#tabbar-inner").innerHTML = tabs(22); // phone: the bottom tab bar
+  $("#toptabs").innerHTML = tabs(18); // 840 px and up: the same tabs in the header
+  drawTitle(null);
   updateAvatar();
   $("#back").innerHTML = icon("back", { size: 22 });
   $("#back").addEventListener("click", goBack);
+  // The first Tab stop: past the header and the league tree, to Today's first game (or the screen's content)
+  $("#skip").addEventListener("click", () => {
+    const game = active?.route?.name === "today" ? $("#view [data-td-board] :is(.td-open, .gc-link)") : null;
+    (game || $("#view")).focus();
+  });
   $("#quota").addEventListener("click", () => openExplainer("quota"));
   $("#slipbar .slip-open").addEventListener("click", openSlipSheet);
   $("#slipbar .slip-analyse").addEventListener("click", analyseSlip);
@@ -921,45 +1294,126 @@ function deviceTimezone() {
  */
 async function syncTimezone() {
   const profile = session.me;
-  if (timezoneChecked || !profile || !("timezone" in profile)) return;
+  if (timezoneChecked || !profile || session.meCached || !("timezone" in profile)) return false;
   timezoneChecked = true;
   const zone = deviceTimezone();
-  if (!zone || zone === profile.timezone) return;
+  if (!zone || zone === profile.timezone) return false;
   try {
     const updated = await api("/api/me", { method: "PUT", body: { timezone: zone }, auth: false });
     if (updated && typeof updated === "object" && "uid" in updated) setMe(updated);
+    return true;
   } catch {
-    /* the server keeps the zone it had; nothing to show */
+    return false; /* the server keeps the zone it had; nothing to show */
   }
 }
 
-let started = false;
+let started = false; // the router is listening (the first screen may have drawn from this device's copy)
+
+function beginRouting() {
+  if (started) return;
+  started = true;
+  parseHash(); // tidy the address first (#/today for "/", no Telegram launch parameters) so Back history is clean
+  window.addEventListener("hashchange", () => {
+    trackVisit();
+    rerender();
+  });
+  trackVisit();
+}
+
+/** What the first screen was drawn with differs from the server's profile in a way it shows. */
+function profileShifted(before, after) {
+  if (!before || !after) return Boolean(before) !== Boolean(after);
+  return before.uid !== after.uid || before.odds_format !== after.odds_format || Boolean(before.age_confirmed) !== Boolean(after.age_confirmed)
+    || onBreak(before) !== onBreak(after) || JSON.stringify(pinnedSports(before)) !== JSON.stringify(pinnedSports(after));
+}
+
+/**
+ * The repeat visit's head start: with this person's profile saved on the device (age confirmed, not on a
+ * break), the first screen draws now, while sign-in and GET /api/me run behind it. Today then paints its
+ * saved slate at once (cache.swr) and calls markPainted(), which readies Telegram.
+ */
+function startEarly() {
+  const saved = readCachedMe();
+  if (!saved || !canPaintCached(saved)) return false;
+  setMe(saved, { cached: true });
+  updateAvatar();
+  beginRouting();
+  if (parseHash().path === "today") cache.warm(SLATE_KEY);
+  rerender();
+  return true;
+}
 
 async function start() {
+  const drawnWith = started ? { ...me() } : null; // the profile the screen on show was drawn with
   try {
     await loadMe();
   } catch (error) {
-    if (error.signIn) return; // the sign-in form is up; it calls start() again
+    if (error.signIn) { // the sign-in form is up; it calls start() again
+      clearCachedMe(); // and the next visit waits for sign-in before drawing anything
+      return;
+    }
     toast(error.message, { kind: "error" });
   }
-  // Before the first screen (whose days may follow the zone), but never holding it up for long
-  await Promise.race([syncTimezone(), new Promise((resolve) => { setTimeout(resolve, 1500); })]);
   updateAvatar();
   updateBreakBanner();
   scheduleRealityCheck();
   loadSports().catch(() => null);
   if (slip.count) priceSlip();
   if (!started) {
-    started = true;
-    parseHash(); // tidy the address first (#/today for "/", no Telegram launch parameters) so Back history is clean
-    window.addEventListener("hashchange", () => {
-      trackVisit();
-      rerender();
+    // Before the first screen (whose days may follow the zone), but never holding it up for long
+    await Promise.race([syncTimezone(), new Promise((resolve) => { setTimeout(resolve, 1500); })]);
+    beginRouting();
+    await rerender();
+  } else {
+    // Drawn early (or before a sign-in): draw again only when it would now look different
+    if (signedInAgain || profileShifted(drawnWith, session.me)) rerender();
+    signedInAgain = false;
+    syncTimezone().then((zoneChanged) => {
+      if (zoneChanged && active?.route?.name !== "today") rerender(); // Today's days are the device's own
     });
-    trackVisit();
   }
-  await rerender();
   if (session.me && !session.me.age_confirmed) openOnboarding();
+}
+
+let signedInAgain = false;
+
+// --- prefetch on hover and pointer-down ---------------------------------------------------------------------
+
+/**
+ * Desktop: hovering (or keyboard-focusing) a prefetchable element for 170 ms fetches what it opens; phone:
+ * pointer-down does at once. Prefetchable: [data-prefetch] (a route hash such as "#/game/<league>/<id>",
+ * an /api/... path, or empty to use the element's href) and player links. At most 2 run at a time (cache.js).
+ */
+function installPrefetch() {
+  const HOVER_MS = 170;
+  const target = (el) => (el instanceof Element ? el.closest('[data-prefetch], a[href^="#/player/"]') : null);
+  const urlOf = (el) => {
+    const value = el.dataset.prefetch || el.getAttribute("href") || "";
+    return value.startsWith("/api/") ? value : routeUrl(value);
+  };
+  const go = (el) => {
+    const url = el && urlOf(el);
+    if (!url) return;
+    prefetch(url, { priority: "high" });
+    warmView(url.startsWith("/api/players/") ? "player" : url.startsWith("/api/game") ? "game" : ""); // and its code
+  };
+  let hovered = null;
+  let timer = null;
+  const settle = (el) => {
+    if (el === hovered) return;
+    clearTimeout(timer);
+    hovered = el;
+    if (el) timer = setTimeout(() => go(el), HOVER_MS);
+  };
+  document.addEventListener("pointerover", (event) => {
+    if (event.pointerType && event.pointerType !== "mouse") return;
+    settle(target(event.target));
+  }, { passive: true });
+  document.addEventListener("pointerout", (event) => {
+    if (hovered && !(event.relatedTarget instanceof Node && hovered.contains(event.relatedTarget))) settle(null);
+  }, { passive: true });
+  document.addEventListener("pointerdown", (event) => go(target(event.target)), { passive: true });
+  document.addEventListener("focusin", (event) => settle(target(event.target)));
 }
 
 /** Start the app: Telegram glue, sign-in (Telegram initData or the password), then the first screen. */
@@ -967,18 +1421,46 @@ export async function boot() {
   applyTheme();
   tg.initTelegram();
   installUi();
+  // This device's copy of the profile is kept per person: the Telegram user, or this browser's own id
+  setMeIdentity(tg.inTelegram ? (tg.userId() ? `tg:${tg.userId()}` : null) : `web:${getPlayerId()}`);
+  setPaintCheck(() => canPaintCached());
   drawShell();
+  desk.initLayout({
+    routeName: () => active?.route?.name || null,
+    match: (hash) => {
+      const text = String(hash).replace(/^#\/?/, "");
+      const q = text.indexOf("?");
+      const found = matchRoute(q >= 0 ? text.slice(0, q) : text);
+      if (!found) return null;
+      return { route: found.route, params: { ...found.params, query: new URLSearchParams(q >= 0 ? text.slice(q + 1) : ""), path: q >= 0 ? text.slice(0, q) : text } };
+    },
+    navigate,
+    setTitleSink: (fn) => { titleSink = fn; },
+    drawRail,
+    railSummary,
+    openSlipSheet,
+  });
+  installPrefetch();
+  // The window grew into the rail's layout with the slip open as a drawer: the rail shows it now
+  desk.onLayoutChange((mode) => {
+    syncRail();
+    if (slipSheet && desk.railShown()) sheet.close();
+  });
   setExplainContext(() => ({ priced: priced().result }));
-  onUnauthorized(() => (tg.inTelegram ? telegramUnauthorized() : showSignIn()));
+  onUnauthorized(() => {
+    clearCachedMe(); // signed out: the next visit waits for sign-in before drawing anything
+    if (tg.inTelegram) telegramUnauthorized();
+    else showSignIn();
+  });
   slip.onChange(() => {
     renderSlipBar();
     schedulePricing();
-    refreshSlipSheet();
+    refreshSlipViews();
     refreshMainButton();
   });
   onPriced(() => {
     renderSlipBar();
-    refreshSlipSheet();
+    refreshSlipViews();
   });
   let wasOnBreak = onBreak();
   onMeChange(() => {
@@ -993,7 +1475,7 @@ export async function boot() {
       refreshMainButton();
     }
     renderSlipBar(); // prices in the person's odds format, as the screen behind shows them
-    refreshSlipSheet();
+    refreshSlipViews();
   });
   sheet.onToggle(() => {
     updateBackButton();
@@ -1004,15 +1486,25 @@ export async function boot() {
     const link = event.target.closest('a[href^="#/"]');
     if (link && sheet.isOpen && link.closest(".sheet-layer")) {
       event.preventDefault();
-      navigate(link.getAttribute("href"));
+      const href = link.getAttribute("href");
+      // A game or player picked in a sheet (player search) opens beside the board when the inspector is there
+      if (/^#\/(game|player)\//.test(href) && desk.inspectorAvailable() && !link.hasAttribute("data-no-inspector")) {
+        sheet.close().then(() => desk.openDetail(href));
+      } else {
+        navigate(href);
+      }
     } else if (event.target.closest('[data-action="retry"]')) {
       rerender();
     }
   });
   renderSlipBar();
 
+  if (tg.inTelegram) setInitData(tg.initData()); // every call carries it, so the early screen can load too
+  startEarly();
+  // Telegram's loading screen never outstays a slow start: ready() at the latest after 3 seconds
+  setTimeout(() => tg.ready(), 3000);
+
   if (tg.inTelegram) {
-    setInitData(tg.initData());
     try {
       await telegramLogin(tg.initData());
     } catch (error) {

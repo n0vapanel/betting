@@ -1009,6 +1009,19 @@ def _inputs(schema):
     return names
 
 
+def test_the_assistant_s_leagues_are_its_own_list_not_every_scoreboard() -> None:
+    # Every key is spelled out in the router prompt and in about ten tool schemas (input tokens on every round),
+    # and each league the assistant loads costs Odds API credits: the slate's longer ESPN list mustn't grow it
+    from telegram_betting_bot_simple.ai.tools import LEAGUE_KEYS
+    from telegram_betting_bot_simple.data.espn_client import LEAGUES
+    from telegram_betting_bot_simple.data.leagues import POPULAR_LEAGUES
+
+    assert set(POPULAR_LEAGUES) <= set(LEAGUE_KEYS) and len(LEAGUE_KEYS) == 15
+    assert "soccer_efl_champ" in LEAGUES and "soccer_efl_champ" not in LEAGUE_KEYS
+    assert len(json.dumps(TOOLS)) < 16_000  # about 15 KB, as before the slate's leagues; 27 KB with all of them
+    assert "soccer_efl_champ" not in assistant_module.ROUTER_PROMPT
+
+
 def test_tools_take_refs_never_prices_or_probabilities() -> None:
     for tool in TOOLS:
         names = _inputs(tool["input_schema"]) - {"min_odds"}  # a rollover's daily odds, as the user gave them

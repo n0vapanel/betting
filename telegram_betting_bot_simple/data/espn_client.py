@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime
 import re
 import unicodedata
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import requests
@@ -22,23 +22,91 @@ SITE = "https://site.api.espn.com/apis/site/v2/sports"
 STANDINGS = "https://site.api.espn.com/apis/v2/sports"
 COMMON = "https://site.web.api.espn.com/apis/common/v3/sports"
 
-# The Odds API league key -> ESPN (sport, league) path
+# The Odds API league key -> ESPN (sport, league) path, for team sports: each ESPN event is one game between a
+# home and an away team, so the grader can settle bets from it (find_game, game_result). Every path here was
+# checked against ESPN's scoreboard on 26 October 2026 (a wrong one answers HTTP 400; ESPN has none for
+# Germany's 3. Liga, Poland's Ekstraklasa, the AHL, KBO, the Swedish and Finnish hockey leagues, and no games
+# for the Euroleague).
 LEAGUES = {
     "basketball_nba": ("basketball", "nba"),
     "basketball_wnba": ("basketball", "wnba"),
     "basketball_ncaab": ("basketball", "mens-college-basketball"),
+    "basketball_wncaab": ("basketball", "womens-college-basketball"),
+    "basketball_nbl": ("basketball", "nbl"),
     "americanfootball_nfl": ("football", "nfl"),
     "americanfootball_ncaaf": ("football", "college-football"),
+    "americanfootball_cfl": ("football", "cfl"),
     "icehockey_nhl": ("hockey", "nhl"),
     "baseball_mlb": ("baseball", "mlb"),
     "soccer_epl": ("soccer", "eng.1"),
+    "soccer_efl_champ": ("soccer", "eng.2"),
+    "soccer_england_league1": ("soccer", "eng.3"),
+    "soccer_england_league2": ("soccer", "eng.4"),
+    "soccer_england_efl_cup": ("soccer", "eng.league_cup"),
+    "soccer_spl": ("soccer", "sco.1"),
     "soccer_spain_la_liga": ("soccer", "esp.1"),
+    "soccer_spain_segunda_division": ("soccer", "esp.2"),
     "soccer_italy_serie_a": ("soccer", "ita.1"),
+    "soccer_italy_serie_b": ("soccer", "ita.2"),
     "soccer_germany_bundesliga": ("soccer", "ger.1"),
+    "soccer_germany_bundesliga2": ("soccer", "ger.2"),
+    "soccer_germany_dfb_pokal": ("soccer", "ger.dfb_pokal"),
     "soccer_france_ligue_one": ("soccer", "fra.1"),
+    "soccer_france_ligue_two": ("soccer", "fra.2"),
+    "soccer_netherlands_eredivisie": ("soccer", "ned.1"),
+    "soccer_portugal_primeira_liga": ("soccer", "por.1"),
+    "soccer_belgium_first_div": ("soccer", "bel.1"),
+    "soccer_turkey_super_league": ("soccer", "tur.1"),
+    "soccer_austria_bundesliga": ("soccer", "aut.1"),
+    "soccer_switzerland_superleague": ("soccer", "sui.1"),
+    "soccer_denmark_superliga": ("soccer", "den.1"),
+    "soccer_greece_super_league": ("soccer", "gre.1"),
+    "soccer_norway_eliteserien": ("soccer", "nor.1"),
+    "soccer_sweden_allsvenskan": ("soccer", "swe.1"),
+    "soccer_sweden_superettan": ("soccer", "swe.2"),
+    "soccer_finland_veikkausliiga": ("soccer", "fin.1"),
+    "soccer_league_of_ireland": ("soccer", "irl.1"),
+    "soccer_russia_premier_league": ("soccer", "rus.1"),
+    "soccer_saudi_arabia_pro_league": ("soccer", "ksa.1"),
+    "soccer_japan_j_league": ("soccer", "jpn.1"),
+    "soccer_australia_aleague": ("soccer", "aus.1"),
     "soccer_usa_mls": ("soccer", "usa.1"),
+    "soccer_mexico_ligamx": ("soccer", "mex.1"),
+    "soccer_brazil_campeonato": ("soccer", "bra.1"),
+    "soccer_brazil_serie_b": ("soccer", "bra.2"),
+    "soccer_argentina_primera_division": ("soccer", "arg.1"),
+    "soccer_chile_campeonato": ("soccer", "chi.1"),
+    "soccer_conmebol_copa_libertadores": ("soccer", "conmebol.libertadores"),
+    "soccer_conmebol_copa_sudamericana": ("soccer", "conmebol.sudamericana"),
     "soccer_uefa_champs_league": ("soccer", "uefa.champions"),
+    "soccer_uefa_europa_league": ("soccer", "uefa.europa"),
+    "soccer_uefa_europa_conference_league": ("soccer", "uefa.europa.conf"),
+    "soccer_uefa_champs_league_women": ("soccer", "uefa.wchampions"),
+    "soccer_uefa_nations_league": ("soccer", "uefa.nations"),
 }
+
+# Scoreboards the all-sports slate (data/slate.py) shows but the grader can't settle from: an ESPN tennis event
+# is a tournament of matches and an MMA event a card of fights, not one home/away game. The tennis keys are
+# ESPN's whole tours (The Odds API keys each tournament on its own, e.g. tennis_atp_vienna_open); MMA is The
+# Odds API's key. Checked on ESPN's scoreboard on 26 October 2026.
+SCOREBOARD_ONLY = {
+    "tennis_atp": ("tennis", "atp"),
+    "tennis_wta": ("tennis", "wta"),
+    "mma_mixed_martial_arts": ("mma", "ufc"),
+}
+
+# Extra scoreboard query parameters: college basketball lists only featured games unless asked for all of
+# Division I ("groups": 50)
+SCOREBOARD_PARAMS: Dict[str, Dict[str, str]] = {
+    "basketball_ncaab": {"groups": "50"},
+    "basketball_wncaab": {"groups": "50"},
+}
+SCOREBOARD_LIMIT = 300  # events per scoreboard request (ESPN's default can cut a busy college Saturday short)
+
+
+def espn_path(league: str) -> Optional[Tuple[str, str]]:
+    """ESPN's (sport, league) path for a league key, from LEAGUES or SCOREBOARD_ONLY; None when ESPN has none."""
+    return LEAGUES.get(league) or SCOREBOARD_ONLY.get(league)
 
 # ESPN's scoreboard days follow US Eastern time
 ESPN_DAY_TZ = ZoneInfo("America/New_York")
@@ -83,13 +151,19 @@ class EspnClient:
 
     def scoreboard(self, league: str, day: datetime.date) -> List[Dict[str, Any]]:
         """The league's events on ``day`` (a US Eastern date)."""
-        sport, path = LEAGUES[league]
         ttl = 300 if day >= datetime.date.today() - datetime.timedelta(days=1) else 6 * 3600
-        return self.cache.get(
-            ("espn", "scoreboard", league, day),
-            ttl,
-            lambda: self._get(f"{SITE}/{sport}/{path}/scoreboard", {"dates": day.strftime("%Y%m%d")}).get("events", []),
-        )
+        return self.cache.get(("espn", "scoreboard", league, day), ttl, lambda: self.fetch_scoreboard(league, day))
+
+    def fetch_scoreboard(self, league: str, day: datetime.date) -> List[Dict[str, Any]]:
+        """The league's events on ``day`` straight from ESPN, not cached: the all-sports slate (data/slate.py)
+        keeps its own trimmed copy of every league's boards, which would pile up here as raw JSON. ESPN takes
+        one day at a time (a date range is a 400)."""
+        target = espn_path(league)
+        if target is None:
+            raise KeyError(league)
+        sport, path = target
+        params = {"dates": day.strftime("%Y%m%d"), "limit": SCOREBOARD_LIMIT, **SCOREBOARD_PARAMS.get(league, {})}
+        return self._get(f"{SITE}/{sport}/{path}/scoreboard", params).get("events", [])
 
     def summary(self, league: str, event_id: str) -> Dict[str, Any]:
         """Game summary: injuries, ESPN predictor, leaders, last-five games and more."""

@@ -48,12 +48,15 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field, ValidationError
 
 from ..dashboard.service import CallRejected, NotFound
-from ..data.espn_client import LEAGUES as ESPN_LEAGUES
 from ..data.leagues import POPULAR_LEAGUES
 from ..engine.pasted import system_key
 from ..engine.tickets import ai_given_no_push, chance_label, combinations, one_in
 
-LEAGUE_KEYS: Tuple[str, ...] = tuple(sorted(set(ESPN_LEAGUES) | set(POPULAR_LEAGUES)))
+# The leagues the assistant may name and load odds for, chosen on purpose (not every scoreboard the slate shows):
+# each key is spelled out in the router prompt and in about ten tool schemas, so every key costs input tokens on
+# every round, and each league it loads costs 3 Odds API credits
+ASSISTANT_LEAGUES = ("basketball_wnba",)
+LEAGUE_KEYS: Tuple[str, ...] = tuple(sorted(set(POPULAR_LEAGUES) | set(ASSISTANT_LEAGUES)))
 MARKETS = ("h2h", "spreads", "totals")
 SIDES = ("home", "away", "draw", "over", "under")
 TICKET_TYPES = ("single", "multi", "round_robin", "system")

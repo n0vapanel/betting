@@ -105,6 +105,7 @@ AGE_MESSAGE = "Confirm you're 18+ (21+ in the US) in Settings"
 NO_CHAT = "AI chat isn't set up: add ANTHROPIC_API_KEY on the server"
 NO_STORE = "This needs the server's state folder (STATE_DIRECTORY)."
 PAUSE_SETTING = "picks_paused_until"  # users.settings: picks stay off until then after a warning sign in the chat
+SPORTS_CHOSEN_SETTING = "sports_chosen"  # users.settings: favourite_sports were saved by the person
 PLAN_FAILED_SETTING = "plan_failed_at"  # users.settings: when a plan's run last failed (the break before a new one)
 # Times in the settings of the row holding the gates (see gates_id): each only ever moves later
 GATE_SETTINGS = (PAUSE_SETTING, PLAN_FAILED_SETTING)
@@ -791,6 +792,8 @@ class Lab(Gates):
             "odds_format": user.get("odds_format") or "decimal",
             "currency": user.get("currency") or "USD",
             "favourite_sports": list(user.get("favourite_sports") or []),
+            # The person picked these themselves (so an NBA-only choice isn't read as the old NBA default)
+            "sports_chosen": bool((user.get("settings") or {}).get(SPORTS_CHOSEN_SETTING)),
             "risk_tier": user.get("risk_tier"),
             "budget": self.budget(uid, user),
             "reality_check_minutes": user.get("reality_check_minutes"),
@@ -823,6 +826,7 @@ class Lab(Gates):
             sports = list(changes["favourite_sports"])
             if len(sports) > MAX_LEAGUES or not all(isinstance(s, str) and LEAGUE_KEY.fullmatch(s) for s in sports):
                 raise CallRejected(f"Pick up to {MAX_LEAGUES} sports")
+            changes["settings"] = {**changes.get("settings", {}), SPORTS_CHOSEN_SETTING: True}
         try:
             if changes:
                 store.update_user(uid, changes, now=self._now())
