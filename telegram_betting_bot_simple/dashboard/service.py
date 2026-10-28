@@ -156,6 +156,37 @@ SOCCER_TTL = 2 * 3600.0  # a game's goals model, keyed by its inputs: a new boar
 STALE_PRICE = 2 * 3600  # a board older than the odds service's 2 hours marks its legs "stale_price"
 
 
+def derived_outcome(market: str, side: str, point: Optional[float], home: Any, away: Any) -> Optional[str]:
+    """"won", "lost" or "push" for a goals-model pick (both teams to score, draw no bet, double chance, a team's
+    total) from the 90-minute score (``espn_client.game_result`` already gives the two halves after extra time);
+    None for a market or side it doesn't know, or a team total without its line. Draw no bet gives the stake back
+    on a draw; a team total exactly on its line is a push."""
+    try:
+        h, a = int(home), int(away)
+    except (TypeError, ValueError):
+        return None
+    if market == "btts" and side in ("yes", "no"):
+        both = h >= 1 and a >= 1
+        return "won" if both == (side == "yes") else "lost"
+    if market == "draw_no_bet" and side in ("home", "away"):
+        if h == a:
+            return "push"
+        return "won" if (h > a) == (side == "home") else "lost"
+    if market == "double_chance" and side in ("1X", "12", "X2"):
+        result = "1" if h > a else "2" if a > h else "X"
+        return "won" if result in side else "lost"
+    if market == "team_totals" and side in DERIVED_SIDES["team_totals"]:
+        try:
+            line = float(point)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+        team, direction = side.split("_", 1)
+        goals = h if team == "home" else a
+        value = goals - line if direction == "over" else line - goals
+        return "won" if value > 0 else "push" if value == 0 else "lost"
+    return None
+
+
 def derived_label(home: str, away: str, market: str, side: str, point: Optional[float]) -> str:
     """engine/soccer.py's words for a goals-model pick ("Both teams to score: Yes", "Arsenal (draw no bet)", "Arsenal
     or draw", "Arsenal over 1.5 goals")."""
@@ -299,7 +330,8 @@ class DashboardService:
         self.odds = odds
         self.espn = espn
         self.tz = tz
-        self.params = params
+        # The NBA model's settings; ``params`` adds the learning loop's live market and ESPN weights to them
+        self.base_params = params
         # The process's one shared cache (services.build_service passes it); an empty TTLCache is falsy, hence "is"
         self.cache = cache if cache is not None else TTLCache()
         self.pool = ThreadPoolExecutor(max_workers=workers)
@@ -1077,6 +1109,16 @@ class DashboardService:
 
     # --- the markets brain ("Markets say") -------------------------------------------------------------
 
+    @property
+    def params(self) -> nba_model.Params:
+        """The NBA model's settings with the learning loop's live weights (learn/registry.py): the ones this service
+        was built with, unchanged until a change to the NBA's market or ESPN weight passes the gate."""
+        return slate_mod.brain_params("basketball_nba", self.store).nba_params(self.base_params)
+
+    @params.setter
+    def params(self, value: nba_model.Params) -> None:
+        self.base_params = value
+
     def _consensus(self, league: str, event_id: str, game: Optional[Dict[str, Any]], model: Optional[float],
                    state: str) -> Optional[Dict[str, Any]]:
         """The game's "Markets say": the slate's own detail when this process runs the slate (worked out once per
@@ -1091,6 +1133,9 @@ class DashboardService:
         start = slate_mod._parse_time((game or {}).get("commence_time"))
         started = start is not None and start <= time.time()
         key = ("consensus", league, event_id, board_at, None if model is None else round(float(model), 6), started)
+        version = slate_mod.brain_params(league, self.store).version
+        if version:  # a blend made with a tuned version is its own entry (the defaults keep their key)
+            key += (("v", version),)
         policy = ttl_for("consensus", state)
         return self.cache.get(key, policy.ttl, lambda: self._markets_detail(league, event_id, game, model, None),
                               stale=policy.stale, kind="consensus")
@@ -1158,14 +1203,20 @@ class DashboardService:
         elif row:
             sources += [source for source in row.get("sources") or [] if source.get("kind") == "team_model"]
         start = slate_mod._parse_time((game or {}).get("commence_time") or (row or {}).get("start"))
-        return slate_mod.market_detail(league, sources, start, now)
+        return slate_mod.market_detail(league, sources, start, now, params=slate_mod.brain_params(league, self.store))
 
     def _grade_consensus(self, cutoff: str, give_up: str) -> int:
-        """Score the logged consensus of finished games: each source's and the blend's Brier score and log loss."""
+        """Score the logged consensus of finished games: each source's and the blend's Brier score and log loss.
+        One-day-before snapshots (kind "t24") are scored the same way, and every finished or called-off game's
+        result, box stats and last pre-start lines go into the learning loop's history tables (capture)."""
         if self.store is None or not hasattr(self.store, "consensus_rows"):
             return 0
         graded = 0
-        for row in self.store.consensus_rows(status="pending", started_before=cutoff):
+        try:
+            pending = self.store.consensus_rows(status="pending", started_before=cutoff, snapshots=True)
+        except TypeError:  # a store without the snapshots (an older or stand-in one)
+            pending = self.store.consensus_rows(status="pending", started_before=cutoff)
+        for row in pending:
             try:
                 if row["league"] not in ESPN_LEAGUES:
                     # Tennis tournaments, MMA cards and leagues ESPN doesn't cover: no single-game result to read
@@ -1179,6 +1230,7 @@ class DashboardService:
                     continue
                 if final["state"] != "final":
                     self.store.grade_consensus(row["league"], row["game_key"], "void", None, final)
+                    self._capture(row, final)
                     continue
                 home, away = (final["away"], final["home"]) if row.get("swapped") else (final["home"], final["away"])
                 outcome = "home" if home > away else "away" if away > home else "draw"
@@ -1193,10 +1245,32 @@ class DashboardService:
                         result["scores"][str(source.get("name"))] = {**scored, "kind": source.get("kind"),
                                                                      "status": source.get("status")}
                 self.store.grade_consensus(row["league"], row["game_key"], "graded", outcome, result)
-                graded += 1
+                if row.get("kind") in (None, "last"):  # a snapshot is the same game again: counted once
+                    graded += 1
+                self._capture(row, final)
             except Exception:
                 logging.exception("Couldn't grade the consensus for %s", row.get("game_key"))
         return graded
+
+    def _capture(self, row: Mapping[str, Any], final: Mapping[str, Any]) -> None:
+        """The learning loop's live capture (learn/history.py capture_final): a graded game's result, box stats
+        (soccer corners, cards and shots; team stats elsewhere) and its last pre-start lines into the hist_* tables,
+        from the ESPN summary the grader just read (cached: no extra request). Snapshot rows are skipped; a failure
+        never stops the grading."""
+        if row.get("kind") not in (None, "last") or not hasattr(self.store, "_connect"):
+            return
+        try:
+            from ..learn.history import capture_final
+            summary = None
+            loader = getattr(self.espn, "summary", None)
+            if callable(loader) and final.get("espn_id"):
+                try:
+                    summary = loader(row["league"], final["espn_id"])
+                except Exception:
+                    summary = None
+            capture_final(self.store, row["league"], row, final, summary if isinstance(summary, Mapping) else None)
+        except Exception:
+            logging.exception("Couldn't keep the history of %s", row.get("game_key"))
 
     def markets_record(self) -> Dict[str, Any]:
         """Per league and per source, on graded games: n, mean Brier score and log loss, and the blend's on the
@@ -1397,10 +1471,14 @@ class DashboardService:
                 inputs = {**inputs, "over_2_5": after, "over_2_5_before": inputs["over_2_5"]}
         sig = tuple(round(inputs[key], 6) for key in ("home", "draw", "away", "over_2_5"))
         key = ("soccer_model", league, str(game["id"]), sig)
+        # The learning loop's live rho and both-teams-to-score nudge ({} at today's constants, and the same key)
+        tuned = slate_mod.brain_params(league, self.store).soccer_kwargs()
+        if tuned:
+            key += (tuple(sorted(tuned.items())),)
 
         def fit() -> Dict[str, Any]:
             from ..engine import soccer  # the engine's goals model (Stage 3)
-            return soccer.derive(inputs["home"], inputs["draw"], inputs["away"], inputs["over_2_5"])
+            return soccer.derive(inputs["home"], inputs["draw"], inputs["away"], inputs["over_2_5"], **tuned)
 
         try:
             return inputs, self.cache.get(key, SOCCER_TTL, fit, kind="soccer_model", error_ttl=60)

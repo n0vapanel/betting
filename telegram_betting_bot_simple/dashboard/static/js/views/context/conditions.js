@@ -371,7 +371,7 @@ export function movesSection(block, { units = "metric" } = {}) {
         ? "No adjustment applies, so nothing here moves a number."
         : "";
   return section("What moves it", `${movesHtml(adjustments, { units, note })}
-    <p class="note">Only news the odds couldn't hold moves a number: a forecast or roof that changed after they were fetched. Half the change counts (weight 0.5), up to a cap, a design choice rather than a published value. <a href="#/help/conditions">How it works</a></p>`,
+    <p class="note">Only news the odds couldn't hold moves a number: a forecast or roof that changed after they were fetched. Part of the change counts (weight 0.5 to start; the brain retunes it per sport only through its gate), up to a cap: design choices rather than published values. <a href="#/help/conditions">How it works</a></p>`,
   { id: "context-moves", className: "mv", aside: '<span class="wf-tag moves">moves the number</span>' });
 }
 
@@ -450,6 +450,6 @@ export function contextRecordHtml(data) {
   const parts = [`${games} game${games === 1 ? "" : "s"} with a total line logged, ${graded} graded`];
   if (graded) parts.push(`Brier ${b(data.brier_before)} for the over before any adjustment, ${b(data.brier_after)} after`);
   parts.push(adjusted ? `${adjusted} game${adjusted === 1 ? "" : "s"} adjusted` : "no game adjusted yet");
-  return `<p class="small cx-record" data-ctx-record>${icon("stadium", { size: 14 })} <b>Venue &amp; conditions:</b> ${esc(parts.join(" · "))}. The 0.5 weight rises only after 200 graded games show the adjusted line beating the unadjusted one. <a href="#/help/conditions">How it works</a></p>`;
+  return `<p class="small cx-record" data-ctx-record>${icon("stadium", { size: 14 })} <b>Venue &amp; conditions:</b> ${esc(parts.join(" · "))}. The adjustment's weight (0.5 to start) is retuned only when the brain's weekly check on graded games shows the adjustments were too big or too small, and the change passes the gate. <a href="#/help/conditions">How it works</a> · <a href="#/bets?tab=brain">Brain progress</a></p>`;
 }
 

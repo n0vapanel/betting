@@ -1,5 +1,7 @@
 # BRAIN BLUEPRINT — the forever-learning layer
 
+> **Retired as a design (2026-10-28):** the learning loop lives in `telegram_betting_bot_simple/learn/`; this document's promotion gate and ECE alert are retired. See `brain/README.md`.
+
 Status: spine built (ledger + metrics + collect), research inbound (3 lanes: GitHub recon,
 techniques, pipeline). Sections marked **[PENDING-RESEARCH]** get filled when those land.
 

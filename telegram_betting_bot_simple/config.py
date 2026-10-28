@@ -92,10 +92,25 @@ class Config(BaseSettings):
     ai_chat_daily_total_cents: Optional[int] = Field(None, ge=0, validation_alias="AI_CHAT_DAILY_TOTAL_CENTS")
     ai_chat_model: str = Field("claude-opus-5-5", validation_alias="AI_CHAT_MODEL")
     ai_router_model: str = Field("claude-haiku-5-5", validation_alias="AI_ROUTER_MODEL")
+    # The learning loop (v3, learn/): the dashboard's "learner" thread scores the brain every night, tunes its
+    # settings weekly behind statistical gates (every change has an Undo), backfills old games gently between 01:00
+    # and 06:00 (at most LEARN_BACKFILL_PER_NIGHT requests, one every 2 seconds) and asks whichever AI is linked to
+    # look at its misses. LEARN_ENABLED=0 freezes the current settings (no changes, no backfill, no AI calls; the
+    # scores go on). LEARN_AI picks the AI: auto (Claude if its key is set, else DeepSeek, else none: template
+    # notes), claude, deepseek or off. LEARN_AI_MONTHLY_CENTS is a hard monthly cap on its spend (US cents), apart
+    # from the analysts' AI_DAILY_LIMIT and people's chat allowances
+    learn_enabled: bool = Field(True, validation_alias="LEARN_ENABLED")
+    learn_ai: Literal["auto", "claude", "deepseek", "off"] = Field("auto", validation_alias="LEARN_AI")
+    learn_ai_monthly_cents: int = Field(500, ge=0, validation_alias="LEARN_AI_MONTHLY_CENTS")
+    learn_backfill_per_night: int = Field(1500, ge=0, validation_alias="LEARN_BACKFILL_PER_NIGHT")
+    # The owner's Telegram chat (a private chat's id is the owner's Telegram id): bot notifications and the
+    # learner's weekly summary go there, and that Telegram user may Undo or pause the brain's changes (as may anyone
+    # signed in with the dashboard password)
+    telegram_channel_id: Optional[str] = Field(None, validation_alias="TELEGRAM_CHANNEL_ID")
     # Writable folder for the odds store and bot state shared by the bot and dashboard;
     # systemd sets STATE_DIRECTORY for services with StateDirectory=
     state_dir: Optional[str] = Field(None, validation_alias="STATE_DIRECTORY")
-    # .env also holds settings for other tools (e.g. TELEGRAM_CHANNEL_ID for brain/notify.py)
+    # .env also holds settings for other tools
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @field_validator("public_url")
@@ -105,11 +120,37 @@ class Config(BaseSettings):
         value = (value or "").strip().rstrip("/")
         return value or None
 
-    @field_validator("markets_enabled", "weather_enabled", mode="before")
+    @field_validator("markets_enabled", "weather_enabled", "learn_enabled", mode="before")
     @classmethod
     def _blank_is_on(cls, value: object) -> object:
-        # "MARKETS_ENABLED=" (or "WEATHER_ENABLED=") in .env means the default (on), not a startup error
+        # "MARKETS_ENABLED=" (or "WEATHER_ENABLED=", "LEARN_ENABLED=") in .env means the default (on), not a startup
+        # error
         return True if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("learn_ai", mode="before")
+    @classmethod
+    def _blank_is_auto(cls, value: object) -> object:
+        # "LEARN_AI=" in .env means the default (auto); "Claude" works as well as "claude"
+        if isinstance(value, str):
+            return value.strip().lower() or "auto"
+        return value
+
+    @field_validator("learn_ai_monthly_cents", "learn_backfill_per_night", mode="before")
+    @classmethod
+    def _blank_is_default_learn(cls, value: object, info: Any) -> object:
+        # "LEARN_AI_MONTHLY_CENTS=" (or "LEARN_BACKFILL_PER_NIGHT=") in .env means the default
+        if isinstance(value, str) and not value.strip():
+            return 500 if info.field_name == "learn_ai_monthly_cents" else 1500
+        return value
+
+    @field_validator("telegram_channel_id", mode="before")
+    @classmethod
+    def _tidy_channel(cls, value: object) -> object:
+        # "TELEGRAM_CHANNEL_ID=" in .env means unset
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
     @field_validator("weather_daily_cap", mode="before")
     @classmethod
@@ -164,6 +205,13 @@ class Config(BaseSettings):
     def price_book_keys(self) -> Tuple[str, ...]:
         """ODDS_PRICE_BOOKS as keys; empty means every book in ODDS_BOOKMAKERS that isn't sharp or an exchange."""
         return parse_book_keys(self.odds_price_books, "ODDS_PRICE_BOOKS")
+
+    @property
+    def owner_telegram_id(self) -> Optional[int]:
+        """TELEGRAM_CHANNEL_ID as the owner's Telegram user id, when it is a private chat (a positive number; a
+        group's or channel's id is negative and names no person)."""
+        text = self.telegram_channel_id or ""
+        return int(text) if text.isascii() and text.isdigit() and 0 < len(text) <= 20 and int(text) > 0 else None
 
     @property
     def mini_app_url(self) -> Optional[str]:

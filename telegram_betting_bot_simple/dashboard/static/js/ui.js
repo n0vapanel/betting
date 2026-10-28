@@ -733,8 +733,8 @@ export const GLOSSARY = {
   explains_vs_moves: {
     title: "Explains vs moves the number",
     short: "Venue, weather, rest and travel explain the market's line; only news newer than the odds moves a number.",
-    body: "\"Why the line is here\" splits the market's own margin and total into home field, altitude, rest and travel, the park, the weather as forecast when the odds were fetched, and what's left (team strength and other). It changes no chance. \"What moves it\" is separate: only a forecast or a roof that changed after the odds were fetched moves a number, by half the change (weight 0.5) up to a cap. With no market line to anchor to, the full change applies and the screen says so. The weight and caps are design choices, not published values, and the market usually wins.",
-    example: "An NFL total of 44.5 was priced when the forecast said 8 mph of wind and 28°F (−2°C): the weather explained −1.0 point (the cold). Now it says 19 mph: wind −3.8, cold −1.0 and cold with wind −2.0 make −6.8, a change of −5.8. Half is −2.9, capped at −2.0, so the over's chance moves from 50% to about 44%.",
+    body: "\"Why the line is here\" splits the market's own margin and total into home field, altitude, rest and travel, the park, the weather as forecast when the odds were fetched, and what's left (team strength and other). It changes no chance. \"What moves it\" is separate: only a forecast or a roof that changed after the odds were fetched moves a number, by part of the change (weight 0.5 to start; the brain retunes it per sport only through its gate) up to a cap. With no market line to anchor to, the full change applies and the screen says so. The weight and caps are design choices, not published values, and the market usually wins.",
+    example: "An NFL total of 44.5 was priced when the forecast said 8 mph of wind and 28°F (−2°C): the weather explained −1.0 point (the cold). Now it says 19 mph: wind −3.8, cold −1.0 and cold with wind −2.0 make −6.8, a change of −5.8. At the starting weight half is −2.9, capped at −2.0, so the over's chance moves from 50% to about 44%.",
     see: "#/help/conditions",
   },
   dixon_coles: {
@@ -919,6 +919,20 @@ export const GLOSSARY = {
     body: "Always saying 50% scores 0.250. The closing market scores about 0.20 on the NBA; a sound model lands at 0.20–0.21.",
     example: "Saying 70% for a team that wins misses by 0.3: 0.09 for that game.",
     see: "#/bets",
+  },
+  log_loss: {
+    title: "Log loss",
+    short: "How surprised a forecast was by what happened: lower is better.",
+    body: "Each game scores minus the natural log of the chance given to what happened, so a confident miss costs a lot. It's the score the brain is judged on when it tunes itself; Brain progress shows the brain's log loss minus the sharp market's on the same games, where 0 is level and below 0 is better.",
+    example: "Saying 70% for a team that wins scores −ln(0.70) = 0.357; if it loses, −ln(0.30) = 1.204.",
+    see: "#/bets?tab=brain",
+  },
+  calibration: {
+    title: "Calibration",
+    short: "Whether things said at 60% happen about 60% of the time.",
+    body: "The reliability curve plots what the brain said against how often it happened. Its band shows how far a perfectly calibrated forecaster would wander with the same number of games, so a small sample isn't over-read. The calibration slope sums it up: 1 is ideal, below 1 overconfident, above 1 too timid.",
+    example: "Of 100 games given 70%, 66 were won: a little under, but well inside the noise at 100 games.",
+    see: "#/bets?tab=brain",
   },
   calls: {
     title: "Your calls",

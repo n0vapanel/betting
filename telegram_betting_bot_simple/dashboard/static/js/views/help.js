@@ -1,7 +1,8 @@
 // Help: how the app works, as static pages (nothing here calls the AI or costs anything).
 //   #/help              search, the guides and the whole glossary by group
 //   #/help/glossary     the glossary on its own, with the same search
-//   #/help/<guide>      start (the 60-second tour) · ai (how the AI decides) · builder (the Builder's
+//   #/help/<guide>      start (the 60-second tour) · ai (how the AI decides) · brain (how the brain learns: the
+//                       honest promise, the gates in plain words, the AI's role and cost) · builder (the Builder's
 //                       presets, controls and tickets) · conditions (Venue & conditions: what explains the
 //                       line and what moves it, the effect sizes and caps) · rollover (rollover explained, with the
 //                       blueprint's real numbers) · responsible · faq
@@ -278,8 +279,47 @@ function aiHtml() {
         <li class="list-item"><span class="grow"><b>Lottery ticket</b><span>under 5%</span></span></li>
       </ul>`)}
     ${section("What it can't do", `<p>No model has been shown to beat the betting market reliably. The bookmakers' closing prices pick about 68% of NBA winners; a sound model lands near that, not far above it. The AI's record, misses included, is public in My bets.</p>`)}
-    <div class="hp-actions"><a class="btn btn-secondary" href="#/help/ai_vs_market">${icon("scale", { size: 18 })}AI chance vs market chance</a>
+    <div class="hp-actions"><a class="btn btn-secondary" href="#/help/brain">${icon("trend", { size: 18 })}How the brain learns</a>
+      <a class="btn btn-secondary" href="#/help/ai_vs_market">${icon("scale", { size: 18 })}AI chance vs market chance</a>
       <a class="btn btn-secondary" href="#/help/brier">${icon("chart", { size: 18 })}How forecasts are scored</a></div>`;
+}
+
+function brainHtml() {
+  return `<div class="page-head"><span class="eyebrow">Guide</span><h1>How the brain learns</h1>
+      <p>It tests itself on games it hasn't seen, changes slowly, and shows its working.</p></div>
+    <section class="card">
+      <p class="hp-lead">Every night the brain scores its own chances on the games that just finished, next to the sharp market's price on the same games. Once a week it decides whether to change anything.</p>
+      <p class="small muted" style="margin-top:8px"><b>Most weeks nothing changes.</b> When the brain is already close to the market, that is the honest result, and the progress page says why.</p>
+      <a class="text-link" href="#/bets?tab=brain">See the brain's progress ${icon("chevron", { size: 16 })}</a>
+    </section>
+    ${section("1 · What “getting better” means", points([
+      ["scale", "The brain leans mostly on the market, which is very hard to beat. Getting better means three things, always measured on games it wasn't tuned on:"],
+      ["target", "<b>Calibrated chances</b>: when it says 60%, it happens about 60% of the time. <a href=\"#/help/calibration\">Calibration</a>"],
+      ["chart", "<b>Log loss moving toward or below the sharp market's</b>, on the same games. <a href=\"#/help/log_loss\">Log loss</a>"],
+      ["star", "<b>New targets beating simple baselines</b>: corners and cards against the league's plain average. They show on games, as “model only, low confidence”, only once they beat it; until then only their record shows."],
+      ["alert", "Never profit or “edge”: at these sample sizes those are mostly luck, so they never decide anything."],
+    ], "info"))}
+    ${section("2 · How it tests itself", points([
+      ["clock", "<b>Forward in time only</b>: tuned on the games before a week, judged on that week's games, then the week moves on. Nothing dated at or after a game's start is ever used."],
+      ["shield", "<b>Its own live record</b>: every game's chances are frozen just before the start and graded after the final whistle, so none can be quietly redone."],
+      ["book", "<b>Old games</b>: results and closing prices from free public sources (football-data.co.uk, nflverse, ESPN) are loaded a little each night. They test the parts that can be rebuilt from closing prices: the goals model, weather effects on totals, home edge and the spread of margins."],
+    ]))}
+    ${section("3 · The gates, in plain words", points([
+      ["sliders", "<b>Small nudges</b>, such as a blend weight going from 0.20 to 0.22, keep only the part of the move the evidence is 95% sure of, are capped each week, and go live only if they are no worse on enough held-out games (300 per sport to start). Otherwise they're held, with the number of games still needed."],
+      ["target", "<b>Bigger changes</b>, such as a new kind of adjustment, a bigger move or any AI proposal, must prove they are better: a significance test on daily totals, corrected for how many changes were tried that week, then two weeks scored in the background on new games."],
+      ["refresh", "<b>Rollback</b>: the old version keeps being scored next to the new one. If the new one turns out worse (after 200 games, or sooner when a drift check fires), it is rolled back by itself."],
+      ["alert", "<b>Safe mode</b>: if a night's chances are broken, or the brain sits more than 4 points from the sharp price on clearly more games than its starting values would (5 in every 100 games more, over at least 20 games), every sport goes back to its starting values until the owner clears it, and the owner is told."],
+      ["user", "<b>The owner</b> gets a message for every change, an Undo on each one, and a switch in Settings to pause learning, which freezes the current values."],
+    ]))}
+    ${section("4 · The AI's role and its cost", points([
+      ["bot", "Whichever AI is connected (Claude, else DeepSeek, else none) reads the night's worst misses and proposes changes, as bounded suggestions the code checks. It never sets a number: the refit decides the size."],
+      ["clock", "<b>It never forecasts old games</b>: it may already know how they ended. Its proposals are judged only on games played after they were made, so they take weeks to land."],
+      ["shield", "Its notes go through the same numbers check as chat answers: a figure the evaluator didn't produce gets the note rejected and a template used instead. Words like “improved” or “rolled back” appear only when the gate says so."],
+      ["wallet", "<b>Cost</b>: at most 2 calls a night and 3 more a week, under a hard monthly cap ($5 by default). At the cap the notes come from templates and learning carries on. It never touches anyone's chat allowance."],
+    ]))}
+    ${section("Why most weeks nothing changes", `<p>A real improvement to a brain this close to the market is a few ten-thousandths of log loss per game, and proving one takes thousands of games; an NBA season has about 1,200. So the usual weekly result is “held: needs about N more games”, and the progress page names each candidate and what it still needs. That's what constantly improving looks like when it's done honestly.</p>`)}
+    <div class="hp-actions"><a class="btn btn-primary" href="#/bets?tab=brain">${icon("trend", { size: 18 })}See the brain's progress</a>
+      <a class="btn btn-secondary" href="#/help/log_loss">${icon("chart", { size: 18 })}Log loss</a></div>`;
 }
 
 function builderHtml() {
@@ -361,15 +401,15 @@ function conditionsHtml() {
     ]))}
     ${section("Two layers, kept apart", `${points([
       ["info", "<b>Why the line is here</b> (explains, doesn't move the number): the market's margin and total split into the league baseline, home field, altitude, rest, travel and time zones, the park, the weather as forecast when the odds were fetched, and the rest (\"Team strength and other\"). The rest makes the rows add up exactly to the market's number."],
-      ["sliders", "<b>What moves it</b>: only news the odds couldn't hold, a forecast that changed after they were fetched or a roof announced closed (or open) since. The change counts at half weight up to a cap: applied = clamp(0.5 × change, −cap, +cap). With no market line to anchor to, the full change applies and the screen says so."],
-      ["chart", "<b>Every adjustment is logged</b>: each game with a total line is frozen at the start with the over's chance before and after, then graded. The 0.5 weight rises only after 200 graded games show the adjusted line beating the plain one."],
+      ["sliders", "<b>What moves it</b>: only news the odds couldn't hold, a forecast that changed after they were fetched or a roof announced closed (or open) since. The change counts at half weight to start, up to a cap: applied = clamp(weight × change, −cap, +cap), with the weight 0.5 until the brain retunes it. With no market line to anchor to, the full change applies and the screen says so."],
+      ["chart", "<b>Every adjustment is logged</b>: each game with a total line is frozen at the start with the over's chance before and after, then graded. The adjustment's weight (0.5 to start) is retuned only when the brain's weekly check on graded games shows the adjustments were too big or too small, and the change passes the gate (<a href=\"#/help/brain\">how the brain learns</a>)."],
     ], "info")}
       <div class="table-wrap" style="margin-top:10px"><table>
         <caption class="sr-only">The most an adjustment can move each number</caption>
         <thead><tr><th scope="col">Number</th><th scope="col">Cap</th></tr></thead>
         <tbody>${CONTEXT_CAPS.map(([what, cap]) => `<tr><th scope="row">${esc(what)}</th><td>${esc(cap)}</td></tr>`).join("")}</tbody>
       </table></div>
-      <p class="note" style="margin-top:6px">The 0.5 weight and these caps are design choices, not published values.</p>`, { info: "explains_vs_moves" })}
+      <p class="note" style="margin-top:6px">The starting 0.5 weight and these caps are design choices, not published values.</p>`, { info: "explains_vs_moves" })}
     ${section("The starting effect sizes", `<p class="small muted">What each effect is worth to start with, in plain words, with where it comes from. They're refitted once the log has enough graded games.</p>
       <ul class="hp-effects">${CONTEXT_EFFECTS.map((e) => `<li><b>${esc(e.what)}</b>${e.sure ? ` <span class="hp-sure">${esc(e.sure)}</span>` : ""}<p>${esc(e.size)}</p>${e.source ? `<p class="hp-src">Source: ${esc(e.source)}</p>` : ""}</li>`).join("")}</ul>`)}
     ${section("The market usually wins", points([
@@ -465,6 +505,7 @@ function renderTopic(root, t, params) {
   setTitle(t.title);
   if (t.key === "start") root.innerHTML = startHtml();
   else if (t.key === "ai") root.innerHTML = aiHtml();
+  else if (t.key === "brain") root.innerHTML = brainHtml();
   else if (t.key === "rollover") root.innerHTML = rolloverHtml();
   else if (t.key === "builder") root.innerHTML = builderHtml();
   else if (t.key === "conditions") root.innerHTML = conditionsHtml();

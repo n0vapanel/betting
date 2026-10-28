@@ -51,6 +51,7 @@ from __future__ import annotations
 import datetime
 import math
 import re
+import dataclasses
 from dataclasses import dataclass
 from statistics import NormalDist
 from types import MappingProxyType
@@ -234,7 +235,10 @@ _LEAGUE_SPORT = {
 
 def sport_of(league: Any) -> Optional[str]:
     """The context sport for a league key ("basketball_nba" -> "nba", any "soccer_..." -> "soccer"); a sport key
-    is returned as is; None for leagues with no context parameters (tennis, MMA, the CFL, women's college...)."""
+    is returned as is (a SportParams gives its key); None for leagues with no context parameters (tennis, MMA, the
+    CFL, women's college...)."""
+    if isinstance(league, SportParams):
+        return league.key
     text = str(league or "").strip().lower()
     if text in SPORTS:
         return text
@@ -248,11 +252,41 @@ def sport_of(league: Any) -> Optional[str]:
 
 
 def params(sport: Any) -> SportParams:
-    """The SportParams for a sport or league key; ValueError when there are none."""
+    """The SportParams for a sport or league key; ValueError when there are none. A SportParams (``sport_params``
+    with the learning loop's tuned values) is returned as is, so every function here that takes ``sport`` takes
+    one too."""
+    if isinstance(sport, SportParams):
+        return sport
     key = sport_of(sport)
     if key is None:
         raise ValueError(f"No context parameters for {sport!r}")
     return SPORTS[key]
+
+
+TUNABLE = ("margin_sd", "total_sd", "home_prior", "draw_prior")  # the fields learn/registry.py may override
+
+
+def sport_params(sport: Any, overrides: Optional[Mapping[str, Any]] = None) -> SportParams:
+    """The sport's SportParams with tuned values for ``margin_sd``, ``total_sd``, ``home_prior`` and (soccer)
+    ``draw_prior`` (learn/registry.py); the caps stay as set. With no overrides, or values equal to today's, the
+    SPORTS entry itself. ValueError for another field or a value out of range."""
+    sp = params(sport)
+    changes: Dict[str, float] = {}
+    for name, value in (overrides or {}).items():
+        if name not in TUNABLE:
+            raise ValueError(f"{name!r} is not a tunable context parameter")
+        if value is None:
+            continue
+        number = _finite(value, name)
+        if name in ("margin_sd", "total_sd") and number <= 0:
+            raise ValueError(f"{name} must be positive, got {value!r}")
+        if name in ("home_prior", "draw_prior") and not 0 < number < 1:
+            raise ValueError(f"{name} must be a chance, got {value!r}")
+        if name == "draw_prior" and sp.draw_prior is None:
+            raise ValueError(f"{sp.key} has no draws")
+        if number != getattr(sp, name):
+            changes[name] = number
+    return dataclasses.replace(sp, **changes) if changes else sp
 
 
 # --- small helpers -----------------------------------------------------------------------------------------------
@@ -457,7 +491,7 @@ def home_edge(sport: Any, home_win: Optional[float] = None, draw: Optional[float
     p = sp.home_prior if home_win is None else home_win
     if sp.key == "soccer":
         return soccer_supremacy(p, p_draw=sp.draw_prior if draw is None else draw, total=total)
-    return implied_margin(sp.key, p)
+    return implied_margin(sp, p)
 
 
 # --- conditions --------------------------------------------------------------------------------------------------
@@ -896,7 +930,7 @@ def _home_field_factor(sp: SportParams, edge: Optional[float], rates: Optional[M
     draw = _num(rates.get("draw"))
     given = edge is not None
     if edge is None:
-        edge = home_edge(sp.key, p, draw) if p is not None else home_edge(sp.key)
+        edge = home_edge(sp, p, draw) if p is not None else home_edge(sp)
     edge = _finite(edge, "home_edge")
     digits = sp.digits
     if sp.key == "soccer":

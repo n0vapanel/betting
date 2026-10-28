@@ -18,6 +18,7 @@
 //   #/bets  #/help  #/help/<topic>  #/settings        (?query parts are passed in params.query)
 // Deep links in use: #/ask?game=<league>:<id>  #/ask?player=<league>:<id>&name=..  #/build?analyse=1
 //   #/game/<league>/<id>?section=analysts  #/bets?tab=calls|leaders|record|slips
+//   #/bets?tab=record&view=brain (Brain progress; #/bets?tab=brain and the short #/brain land there too)
 //   #/build/rollover?start=10&days=5&min_odds=2.00&legs_per_day=1 (the planner takes these once, then tidies them)
 // One-shot requests: "analyse the slip" costs AI credits, so it must run once per tap and never again
 // from Back, Forward or a reload. The shell keeps it out of the address: analyseSlip() remembers the
@@ -160,6 +161,9 @@ const OLD_HASHES = {
   record: "bets?tab=record", ask: "ask", help: "help", settings: "settings", "my-bets": "bets",
 };
 
+// Short links that open a screen's part (the learning loop's Telegram message links #/brain): tidied to their real address
+const ALIASES = { brain: "bets?tab=record&view=brain" };
+
 const TABS = [
   { key: "today", label: "Today", href: "#/today", iconName: "today" },
   { key: "build", label: "Build", href: "#/build", iconName: "build" },
@@ -193,6 +197,12 @@ function parseHash() {
     /* keep it as it came */
   }
   if (!path) cleaned = true; // "/" or "#": show #/today in the address bar
+  if (ALIASES[path]) {
+    const [newPath, newQuery = ""] = ALIASES[path].split("?");
+    for (const [k, v] of new URLSearchParams(newQuery)) params.set(k, v);
+    path = newPath;
+    cleaned = true;
+  }
   if (!path.includes("/") && OLD_HASHES[path] && !location.hash.startsWith("#/")) {
     const [newPath, newQuery = ""] = OLD_HASHES[path].split("?");
     for (const [k, v] of new URLSearchParams(newQuery)) params.set(k, v);
@@ -1535,6 +1545,6 @@ export async function boot() {
     const [kind, ...rest] = startParam.split("_");
     if (kind === "player" && rest.length >= 2) navigate(`#/player/${rest.slice(0, -1).join("_")}/${rest[rest.length - 1]}`);
     else if (kind === "game" && rest.length >= 2) navigate(`#/game/${rest.slice(0, -1).join("_")}/${rest[rest.length - 1]}`);
-    else if (["ask", "build", "bets", "help", "settings", "today"].includes(kind)) navigate(`#/${kind}`);
+    else if (["ask", "build", "bets", "help", "settings", "today", "brain"].includes(kind)) navigate(`#/${kind}`);
   }
 }

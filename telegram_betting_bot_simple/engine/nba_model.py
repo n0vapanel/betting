@@ -34,7 +34,7 @@ import datetime
 import math
 from dataclasses import dataclass, field, replace
 from statistics import NormalDist
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from .consensus import Source, make_source
 from .factors import NOISY, Factor, Projection, factor_lines, project, split_by_share
@@ -82,6 +82,33 @@ class Params:
     blowout_cap: float = 0.15
     underdog_margin: float = 9.0
     underdog_cut: float = 0.0025
+
+
+TUNABLE = ("market_weight", "espn_weight", "market_total_weight")  # the fields learn/registry.py may override
+
+
+def params_with(overrides: Optional[Mapping[str, Any]] = None, base: Optional[Params] = None) -> Params:
+    """``base`` (default ``Params()``) with the learning loop's tuned values (learn/registry.py) for the market and
+    ESPN weights; ``base`` itself when nothing differs. ValueError for another field, a weight outside 0-1, or market
+    and ESPN weights summing past 1."""
+    params = base if base is not None else Params()
+    changes: Dict[str, float] = {}
+    for name, value in (overrides or {}).items():
+        if name not in TUNABLE:
+            raise ValueError(f"{name!r} is not a tunable NBA model parameter")
+        if value is None:
+            continue
+        number = float(value)
+        if not math.isfinite(number) or not 0.0 <= number <= 1.0:
+            raise ValueError(f"{name} must be between 0 and 1, got {value!r}")
+        if number != getattr(params, name):
+            changes[name] = number
+    if not changes:
+        return params
+    out = replace(params, **changes)
+    if out.market_weight + out.espn_weight > 1.0 + 1e-12:
+        raise ValueError("market_weight + espn_weight must not exceed 1")
+    return out
 
 
 def season_label(day: datetime.date) -> str:

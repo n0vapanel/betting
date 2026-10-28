@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import html
+import logging
 import math
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -932,12 +933,41 @@ async def confirm_age_for_bets(update: Update, context: ContextTypes.DEFAULT_TYP
     await show_bets(update, context)
 
 
+def brain_text(service: Any) -> str:
+    """The /brain screen: each sport's headline against the sharp market (with its 95% range) and the settings
+    version live, then the brain's last change, all from the learning loop's record in the store."""
+    store = getattr(service, "store", None)
+    if store is None or not hasattr(store, "_connect"):
+        return "The brain's learning record isn't available here."
+    from ..learn.progress import brain_lines
+    lines = brain_lines(store)
+    return ("🧠 How the brain is doing\n\n" + "\n\n".join(lines) + "\n\nIt leans mostly on the market, which is very "
+            "hard to beat: improving means better-calibrated chances and log loss moving toward the sharp market's. "
+            "Most weeks nothing changes. The Brain progress page has the details.")
+
+
+async def brain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/brain: the headline per sport and the last change (read from the store; nothing is fetched)."""
+    service = context.application.bot_data.get("service")
+    if service is None:
+        await _no_service(update)
+        return
+    try:
+        text = await asyncio.to_thread(brain_text, service)
+    except Exception:
+        logging.exception("Couldn't read the brain's record")
+        text = "The brain's record couldn't be read just now. Try again in a minute."
+    if update.message:
+        await update.message.reply_text(text, disable_web_page_preview=True)
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Provide a list of available commands and brief instructions."""
     help_text = (
         "Available commands:\n"
         "/start – browse games, AI bets, your calls and the leaderboard\n"
         "/slip – show your multi bet slip\n"
+        "/brain – how the brain is doing against the market, and its last change\n"
         "/help – display this help message\n\n"
         "Pick a sport and league, then open a game to see the AI's predicted score, win, spread and "
         "total chances, injuries and projected top players. In Multi mode, tap picks to build a parlay. "
@@ -974,6 +1004,7 @@ def setup_handlers(application: Application, config: Config) -> None:
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("slip", show_slip))
+    application.add_handler(CommandHandler("brain", brain))
     application.add_handler(CallbackQueryHandler(mode_selected, pattern=r"^mode:(single|multi)$"))
     application.add_handler(CallbackQueryHandler(go_home, pattern=r"^home$"))
     application.add_handler(CallbackQueryHandler(sports_selected, pattern=r"^sports$"))

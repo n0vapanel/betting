@@ -65,6 +65,10 @@ def build_service(config: Config) -> Optional[DashboardService]:
     state_dir = config.state_dir or os.path.join(tempfile.gettempdir(), "sportsbet-ai")
     os.makedirs(state_dir, exist_ok=True)
     store = Store(os.path.join(state_dir, "betting.db"))
+    # The learning loop's live parameters (learn/registry.py) are read from this file by every blend, adjustment and
+    # goals model in the process (today's constants until a change passes the gate)
+    from .learn import registry
+    registry.bind(store)
     cache = build_cache(config, store)
     bookmakers = tuple(getattr(config, "bookmakers", ()) or ())
     # Which books anchor the consensus and which a person can be offered (best price, slips, tickets): the whole

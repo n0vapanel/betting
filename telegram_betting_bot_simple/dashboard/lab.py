@@ -91,7 +91,7 @@ from ..engine import bets, calls, pasted, rollover, target, tickets
 from ..engine.odds_math import decimal_to_american, format_american, remove_vig
 from ..engine.tickets import TicketLeg, chance_label, one_in
 from .service import (AI_LEAGUES, DERIVED_MARKETS, DERIVED_SIDES, FAIR_PRICE_NOTE, GAMES_TTL, MODEL_BOOK,
-                      CallRejected, DashboardService, NotFound, leg_key)
+                      CallRejected, DashboardService, NotFound, derived_outcome, leg_key)
 
 log = logging.getLogger(__name__)
 
@@ -406,12 +406,16 @@ def _three_way(card: Mapping[str, Any]) -> bool:
 
 
 def _outcome(leg: Mapping[str, Any], final: Mapping[str, Any], event: Mapping[str, Any]) -> str:
-    """bets.leg_outcome, except that a draw loses either team's three-way moneyline.
+    """bets.leg_outcome, except that a draw loses either team's three-way moneyline, and a goals-model pick (both
+    teams to score, draw no bet, double chance, team totals) settles by service.derived_outcome.
 
     A two-way moneyline (NFL, NBA) gives the stake back on a tie, but soccer's has a draw side and is
     priced over three outcomes with no push, so backing a team there loses on a draw. Bets saved before
     the game's market shape was recorded fall back to the league.
     """
+    if leg["market"] in DERIVED_MARKETS:  # a goals-model pick: settled from the 90-minute score
+        settled = derived_outcome(leg["market"], leg["side"], leg.get("point"), final["home"], final["away"])
+        return settled if settled is not None else "void"
     three_way = event.get("three_way")
     if three_way is None:
         three_way = str(leg.get("league") or "").startswith("soccer_")
@@ -1965,7 +1969,10 @@ class Lab(Gates):
             if start is not None and start >= cutoff:
                 results.append(None)  # still being played
                 continue
-            final = self._final(leg, events, finals) if leg["market"] in GAME_MARKETS else {"state": "pending"}
+            # Moneylines, spreads and totals, and the goals model's markets (both teams to score, draw no bet, double
+            # chance, team totals), all settle from the final score
+            final = (self._final(leg, events, finals) if leg["market"] in GAME_MARKETS or leg["market"] in DERIVED_MARKETS
+                     else {"state": "pending"})
             if final["state"] == "final":
                 event = events.get(str(leg["event_id"])) or {}
                 results.append({"result": _outcome(leg, final, event), "home": final["home"], "away": final["away"]})

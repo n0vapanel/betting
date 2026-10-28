@@ -137,6 +137,18 @@ class Login(BaseModel):
     password: str = Field(max_length=256)
 
 
+class BrainUndo(BaseModel):
+    """The owner's Undo of one brain change: the parameter version to take back (learn/brain_store.py)."""
+
+    version: int = Field(ge=1, le=10_000_000)
+
+
+class BrainPause(BaseModel):
+    """The owner's "Learning: On / Paused" switch."""
+
+    paused: bool
+
+
 class TelegramLogin(BaseModel):
     init_data: str = Field(min_length=1, max_length=MAX_INIT_DATA_LENGTH)  # Telegram.WebApp.initData
 
@@ -744,10 +756,27 @@ def set_session(response: Response, request: Request, key: bytes, uid: str, seco
     )
 
 
+def is_owner(request: Request) -> bool:
+    """Whether the signed-in caller is the owner: the dashboard password's holder ("web"), or the Telegram user
+    whose private chat is TELEGRAM_CHANNEL_ID (``app.state.owner_id``). Only the owner may undo the brain's
+    changes or pause its learning."""
+    uid = request_uid(request)
+    owner = getattr(request.app.state, "owner_id", None)
+    return uid == WEB_UID or (owner is not None and uid == f"tg:{owner}")
+
+
+def owner_uid(request: Request) -> str:
+    """Dependency for the owner's routes: the owner's id, a 401 when nobody is signed in, else a 403."""
+    uid = current_uid(request)
+    if not is_owner(request):
+        raise HTTPException(403, "Only the app's owner can change the brain's learning")
+    return uid
+
+
 def create_app(service: Optional[DashboardService], password: str, login_delay: float = 1.0,
                bot_token: Optional[str] = None, telegram_ids: Collection[int] = (),
                lab: Optional[Lab] = None, slate: Optional[SlateBuilder] = None,
-               static_dir: Optional[Path] = None) -> FastAPI:
+               static_dir: Optional[Path] = None, learner: Any = None, owner_id: Optional[int] = None) -> FastAPI:
     """The dashboard app.
 
     Without bot_token, Telegram sign-in is off and only the password works. With it, only the
@@ -755,6 +784,9 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     ``lab``, else the service's own (services.build_service sets one up, with the AI assistant).
     ``slate`` is the all-sports slate behind GET /api/slate (data/slate.py; the caller starts its thread),
     else the service's ``slate`` if it has one. ``static_dir`` serves another copy of the page's files.
+    ``learner`` is the learning loop (learn/loop.py's Learner, whose thread the caller starts) behind the Brain
+    progress routes, else one over the service's store for reads and the owner's switches; ``owner_id`` is the
+    owner's Telegram id (TELEGRAM_CHANNEL_ID), who may undo and pause as the password's holder may.
     """
     app = FastAPI(title="SportsBet AI", docs_url=None, redoc_url=None, openapi_url=None)
     app.add_exception_handler(RequestValidationError, invalid_request)  # type: ignore[arg-type]
@@ -770,6 +802,7 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     app.state.session_key = key
     app.state.bot_token = bot_token
     app.state.telegram_ids = allowed
+    app.state.owner_id = owner_id
     guard = app.state.login_guard = LoginGuard(login_delay)
 
     def get_service() -> DashboardService:
@@ -966,6 +999,52 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         before its start with the chance of the over before and after any adjustment, and graded after the final.
         Read from the store; nothing is fetched."""
         return calls_errors(svc.context_record)
+
+    # --- the brain's learning loop (learn/): its progress, and the owner's Undo and Pause -------------------
+
+    brain: Dict[str, Any] = {"learner": learner}
+
+    def get_learner() -> Any:
+        """The dashboard's learner, else one over the service's store (reads, Undo and Pause; it runs nothing)."""
+        if brain["learner"] is None:
+            store = getattr(service, "store", None)
+            if store is None:
+                raise HTTPException(503, NO_ODDS_KEY)
+            from ..learn.loop import Learner
+            brain["learner"] = Learner(store, use_notify=False)
+        return brain["learner"]
+
+    @app.get("/api/brain/progress", dependencies=signed_in)
+    def brain_progress(request: Request, learner: Any = Depends(get_learner)) -> Dict[str, Any]:
+        """The Brain progress page (method.md section 8): per sport the headline against the sharp market, the
+        weekly gap with its 95% band, calibration, what changed and why, what held steady, experiments in shadow,
+        the adjustment layer, the AI panel and health. Read from the store only; ``owner`` says whether the viewer
+        may Undo or pause."""
+        from ..learn.progress import progress
+        clock = getattr(learner, "clock", None)  # the learner's own clock (the server's time; a test's fake one)
+        return progress(learner.store, learner, owner=is_owner(request), now=clock() if callable(clock) else None)
+
+    @app.post("/api/brain/undo")
+    def brain_undo(body: BrainUndo, uid: str = Depends(owner_uid), learner: Any = Depends(get_learner)
+                   ) -> Dict[str, Any]:
+        """The owner takes one change back (the version before it is live again for games logged from now)."""
+        result = learner.undo(body.version, by="owner")
+        if result.get("error"):
+            raise HTTPException(409 if result["error"] != "no such version" else 404, result["error"])
+        return result
+
+    @app.post("/api/brain/pause")
+    def brain_pause(body: BrainPause, uid: str = Depends(owner_uid), learner: Any = Depends(get_learner)
+                    ) -> Dict[str, Any]:
+        """The owner's "Learning: On / Paused": paused, the brain keeps its current settings (nothing is promoted
+        or rolled back, no AI calls; the scores go on). LEARN_ENABLED=0 keeps it paused whatever this says."""
+        return learner.set_paused(body.paused, by="owner")
+
+    @app.post("/api/brain/clear-safe-mode")
+    def brain_clear_safe_mode(uid: str = Depends(owner_uid), learner: Any = Depends(get_learner)) -> Dict[str, Any]:
+        """The owner clears safe mode (the tripwire's switch back to today's defaults): the live versions serve
+        again for games from now on. {"cleared": false} when it wasn't on."""
+        return learner.clear_safe_mode(by="owner")
 
     @app.get("/api/cache/stats", dependencies=signed_in)
     def cache_stats() -> Dict[str, Any]:

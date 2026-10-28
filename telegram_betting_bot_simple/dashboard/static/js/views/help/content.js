@@ -1,5 +1,5 @@
-// Help's words: the glossary the Help tab shows, and the guides (Start here, How the AI decides, The Builder,
-// Venue & conditions, Rollover explained, Responsible play, FAQ).
+// Help's words: the glossary the Help tab shows, and the guides (Start here, How the AI decides, How the brain learns,
+// The Builder, Venue & conditions, Rollover explained, Responsible play, FAQ).
 //
 // The glossary builds on ui.js's GLOSSARY, which the ⓘ sheets on every screen read, and adds what a
 // help page needs on top: a worked example step by step, the other names people search for ("vig",
@@ -412,6 +412,21 @@ const EXTRAS = {
       "With fewer than 50 left the app shows the last saved odds instead of fetching."],
     related: ["market_chance"], see: "#/today", seeLabel: "See how fresh the odds are on Today",
   },
+  log_loss: {
+    group: "ai", aka: ["log score", "ignorance score"], aliases: ["logloss", "log-loss", "cross entropy", "log score", "ignorance", "surprise"],
+    worked: ["Saying 70% for a team that wins: −ln(0.70) = 0.357.",
+      "Saying 70% for a team that loses: −ln(0.30) = 1.204, more than three times as costly.",
+      "Always saying 50% scores −ln(0.50) = 0.693 every game.",
+      "A gap of +0.0004 against the market is 0.4 more per 1,000 games: well inside the week-to-week noise."],
+    related: ["calibration", "brier"], see: "#/bets?tab=brain", seeLabel: "See the brain's progress", topic: "brain",
+  },
+  calibration: {
+    group: "ai", aka: ["reliability"], aliases: ["reliability diagram", "reliability curve", "calibration slope", "overconfident", "underconfident", "pit", "pit histogram"],
+    worked: ["The brain gave 200 games a 70% chance and 132 of them happened: 66%.",
+      "With 200 games a perfectly calibrated brain lands within about 70% ± 6.5% (two standard errors of 3.2%), so 66% is no sign of a problem.",
+      "A calibration slope of 0.9 says its chances sit a little too far from 50% (overconfident); 1.1 says a little too close (too timid)."],
+    related: ["log_loss", "brier"], see: "#/bets?tab=brain", seeLabel: "See the brain's calibration", topic: "brain",
+  },
   brier: {
     group: "ai", aliases: ["brier score", "accuracy", "calibration", "log loss"],
     worked: ["Saying 70% for a team that wins: (1 − 0.70)² = 0.09.",
@@ -481,6 +496,8 @@ export const TOPICS = [
     words: "start begin overview how it works tour basics new" },
   { key: "ai", title: "How the AI decides", blurb: "The brain counts, Claude explains", iconName: "bot",
     words: "ai brain claude model analysts trust numbers decide explain how" },
+  { key: "brain", title: "How the brain learns", blurb: "It tests itself, changes slowly and shows why", iconName: "trend",
+    words: "brain learn learning learns improve improving better backtest back test tune tuning gate gates promote promoted rollback rolled back undo pause paused experiment shadow calibration log loss market ai proposal proposals claude deepseek cost cap progress held" },
   { key: "builder", title: "The Builder", blurb: "Presets, every control, closest effort and why each leg", iconName: "build",
     words: "builder build presets safe risky crazy custom controls target odds chance you want tolerance legs markets near miss swap why tickets closest effort best effort strict options best balance relaxed" },
   { key: "conditions", title: "Venue & conditions", blurb: "Weather, travel and venues: what explains the line", iconName: "stadium",

@@ -6,8 +6,10 @@
 //              only once the previous day has its result (GET /api/plans, POST /api/plans/<id>/day)
 //   Calls      the person's calls against the AI (legacy.js, unchanged)
 //   Leaders    the calls leaderboard
-//   AI record  the AI's graded predictions, its Safe / Risky / Crazy bets' record and the analysts
+//   AI record  the AI's graded predictions, its Safe / Risky / Crazy bets' record and the analysts ("Track record"),
+//              and "Brain progress": how the brain scores and tunes itself (views/brain/progress.js)
 // Deep links: #/bets?tab=upcoming|settled|plans|calls|leaders|record (tab=slips is Upcoming, as before),
+//   #/bets?tab=record&view=brain (or #/bets?tab=brain) opens Brain progress, &sport=<nba|soccer|...> picks a sport,
 //   #/bets?tab=plans&plan=<id> opens a plan, &play=1 also opens its next day.
 // Inside Telegram the bottom main button is "Play day N" while a plan's next day is ready on Plans.
 //
@@ -31,7 +33,7 @@ const TABS = [
   { value: "leaders", label: "Leaders" },
   { value: "record", label: "AI record" },
 ];
-const OLD_TABS = { slips: "upcoming", open: "upcoming", history: "settled", leaderboard: "leaders" };
+const OLD_TABS = { slips: "upcoming", open: "upcoming", history: "settled", leaderboard: "leaders", brain: "record" };
 
 let screen = null; // {tab, ready: plan whose next day can be played, play()} while My bets is showing
 
@@ -108,7 +110,9 @@ export async function render(root, params) {
     }
     if (tab === "calls") return renderMyCalls(pane);
     if (tab === "leaders") return renderLeaders(pane, { signal });
-    return renderRecord(pane, { signal });
+    // #/bets?tab=brain is AI record's Brain progress view
+    if (query.get("tab") === "brain") query.set("view", "brain");
+    return renderRecord(pane, { signal, query });
   };
 
   const tabs = root.querySelector(".mb-tabs");

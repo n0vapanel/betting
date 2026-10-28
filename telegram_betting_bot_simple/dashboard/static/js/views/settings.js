@@ -7,10 +7,12 @@
 //   Limits       weekly budget (lowering applies now, raising waits 24 hours), reality check, and a break
 //                of 24 hours, 3 days, 1 week, 1 month or 3 months, confirmed first and never cut short
 //   AI           the disclosure and today's AI allowance
+//   Learning     the owner only: the brain's learning On / Paused (views/brain/learning.js; GET /api/brain/progress says
+//                who the owner is, POST /api/brain/pause {paused}); pausing freezes the brain's current values
 //   Account      sign out (password sessions), the welcome screen again, the helplines
 // Everything saves through PUT /api/me (POST /api/me/cooloff for a break). The server applies the
 // rules; this screen says what they are before anyone taps, and shows the server's answer afterwards.
-// Deep links: #/settings?focus=limits | budget | break | units scroll to that part.
+// Deep links: #/settings?focus=limits | budget | break | units | learning scroll to that part.
 
 import { api, isQuiet, prefs } from "../api.js";
 import {
@@ -21,6 +23,7 @@ import { esc, money, notice, segmented, toast, confirmSheet, explain, section } 
 import { icon } from "../icons.js";
 import { haptic } from "../telegram.js";
 import { unitsSetting } from "./context/units.js";
+import { fetchLearning, learningSwitchHtml, setLearningPaused } from "./brain/learning.js";
 
 const BREAKS = [
   { hours: 24, label: "24 hours" }, { hours: 72, label: "3 days" }, { hours: 168, label: "1 week" },
@@ -169,6 +172,14 @@ function aiHtml(p) {
     <a class="text-link" href="#/help/ai">How the AI decides ${icon("chevron", { size: 16 })}</a>`);
 }
 
+/** The owner's Learning switch; nothing for anyone else (or before the server has said who the owner is). */
+function learningHtml(brain) {
+  if (!brain?.owner) return "";
+  return section("The brain's learning", `<p class="small muted" style="margin-bottom:10px">Only the owner sees this. The brain scores itself every night and decides on small, checked changes once a week; each change can be undone on its progress page.</p>
+    ${learningSwitchHtml(brain.learning, { name: "learning" })}
+    <a class="text-link" href="#/bets?tab=brain">Brain progress ${icon("chevron", { size: 16 })}</a>`, { id: "st-learning" });
+}
+
 function accountHtml(p) {
   return section("Help and account", `<div class="st-row">${icon("lifebuoy", { size: 18 })}<span class="grow small">Free, confidential help 24/7: <a href="tel:18004262537">1-800-GAMBLER</a> · <a href="tel:08088020133">0808 8020 133</a></span></div>
     <div class="st-row">${icon("book", { size: 18 })}<a class="grow small" href="#/help/start">How the app works, in 60 seconds</a></div>
@@ -182,10 +193,12 @@ function accountHtml(p) {
 // --- the screen -----------------------------------------------------------------------------------
 
 let stop = null;
+let brain = null; // {owner, learning} from GET /api/brain/progress, while Settings is showing
 
 export function onLeave() {
   stop?.();
   stop = null;
+  brain = null;
 }
 
 export async function render(root, params) {
@@ -193,7 +206,7 @@ export async function render(root, params) {
   const draw = () => {
     const p = me();
     root.innerHTML = `<div class="page-head"><h1>Settings</h1><p>Your profile, how numbers look, and your limits.</p></div>
-      ${ageHtml(p)}${profileHtml(p)}${displayHtml(p)}${sportsHtml(p)}${limitsHtml(p)}${aiHtml(p)}${accountHtml(p)}`;
+      ${ageHtml(p)}${profileHtml(p)}${displayHtml(p)}${sportsHtml(p)}${limitsHtml(p)}${aiHtml(p)}${learningHtml(brain)}${accountHtml(p)}`;
   };
   draw();
   // Changes made elsewhere (the onboarding sheet, a budget refresh) redraw this screen, unless the person is typing
@@ -202,7 +215,7 @@ export async function render(root, params) {
     if (root.isConnected && !root.contains(document.activeElement?.closest?.("input") || null)) draw();
   });
   // Fresh sport names, budget used and AI allowance (they change all the time), then the deep-linked part
-  const target = { limits: "#st-limits", budget: "#st-budget", break: "#st-break", units: "#st-units" }[params.query.get("focus")];
+  const target = { limits: "#st-limits", budget: "#st-budget", break: "#st-break", units: "#st-units", learning: "#st-learning" }[params.query.get("focus")];
   const reveal = () => {
     const el = target && root.isConnected ? root.querySelector(target) : null;
     if (!el) return;
@@ -210,7 +223,10 @@ export async function render(root, params) {
     el.classList.add("st-focus");
   };
   requestAnimationFrame(reveal);
-  Promise.allSettled([loadSports(), loadMe()]).then(() => {
+  // The learning switch is the owner's: the brain's progress says who that is (no row for anyone else, or when the
+  // server has no learning loop)
+  const loadBrain = () => fetchLearning({ signal: params.signal }).then((b) => { brain = b; }, () => { brain = null; });
+  Promise.allSettled([loadSports(), loadMe(), loadBrain()]).then(() => {
     if (!root.isConnected) return;
     draw();
     reveal();
@@ -266,6 +282,26 @@ export async function render(root, params) {
     }
   };
 
+  const setLearning = async (paused) => {
+    if (paused) {
+      const ok = await confirmSheet({
+        title: "Pause learning?",
+        body: "The brain keeps its current values: nothing is tuned, promoted or rolled back, and no AI calls are made, until you switch learning on again. Scores keep being recorded.",
+        confirm: "Pause learning",
+      });
+      if (!ok) return;
+    }
+    try {
+      await setLearningPaused(paused);
+      haptic.notify("success");
+      toast(paused ? "Learning paused" : "Learning is on again", { kind: "good" });
+    } catch (error) {
+      if (!isQuiet(error)) toast(error.message, { kind: "error", ms: 4000 });
+    }
+    await loadBrain();
+    if (root.isConnected) draw();
+  };
+
   root.addEventListener("input", (event) => {
     if (event.target.id === "set-budget") {
       const hint = root.querySelector("[data-budget-hint]");
@@ -297,6 +333,10 @@ export async function render(root, params) {
       else if (seg.dataset.seg === "units") {
         const units = UNITS.find((u) => u.value === seg.dataset.value);
         if (units) save({ units: units.value }, `Units: ${units.label}`);
+      }
+      else if (seg.dataset.seg === "learning") {
+        if (seg.disabled) return;
+        setLearning(seg.dataset.value === "paused");
       }
       else if (seg.dataset.seg === "theme") {
         prefs.set("theme", seg.dataset.value);

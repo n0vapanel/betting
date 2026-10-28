@@ -236,8 +236,8 @@ def test_a_build_runs_the_tool_loop_and_cards_come_from_the_tool_results(store, 
     # Toolbox.run validates every input instead
     assert all("strict" not in tool and tool["input_schema"]["additionalProperties"] is False
                for tool in first["tools"])
-    # the twelve tools, pasted_slip_analyse, markets_consensus, game_context and brain_top_picks
-    assert len(first["tools"]) == 16
+    # the twelve tools, pasted_slip_analyse, markets_consensus, game_context, brain_top_picks and brain_progress
+    assert len(first["tools"]) == 17
     result = second["messages"][-1]["content"][0]
     assert result["type"] == "tool_result" and result["tool_use_id"] == "toolu_1" and not result["is_error"]
     assert "ceiling_one_in" in result["content"]

@@ -62,6 +62,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 from ..engine import context as engine
 from ..engine.factors import NOISY, Factor, Projection, fold
+from ..learn import registry
 from .cache import ttl_for
 
 log = logging.getLogger(__name__)
@@ -250,15 +251,35 @@ def total_adjustment(block: Optional[Mapping[str, Any]]) -> Optional[Dict[str, A
     return None
 
 
+def brain_params(league: Any, store: Any = None) -> "registry.Params":
+    """The learning loop's live values for a league's sport (learn/registry.py): ADJUST_WEIGHT and the sport's
+    priors and SDs as tuned, today's constants (version 0) until a change passes the gate. Read from ``store`` when
+    it is a real Store, else from the registry's bound one."""
+    return registry.current(league, store if hasattr(store, "_connect") and getattr(store, "path", None) else None)
+
+
+def engine_sport(league: Any, store: Any = None) -> Any:
+    """What the engine's functions take as ``sport`` for a league: its context key ("nfl"), or, once the learning
+    loop has tuned the sport's priors or SDs, a SportParams with them (engine.context.sport_params). None for
+    leagues with no context parameters."""
+    sport = engine.sport_of(league)
+    if sport is None:
+        return None
+    tuned = brain_params(league, store)
+    overrides = tuned.context_overrides()
+    return engine.sport_params(sport, overrides) if overrides else sport
+
+
 def adjusted_chance(league: str, adjustment: Optional[Mapping[str, Any]], side: str, point: Any,
                     p: Optional[float]) -> Optional[float]:
     """A totals leg's chance after the adjustment: engine.adjusted_over for the over at its own line (the under is
-    1 minus the over moved from 1 - p); ``p`` unchanged without an adjustment or for any other leg."""
+    1 minus the over moved from 1 - p); ``p`` unchanged without an adjustment or for any other leg. The sport's
+    total SD is the learning loop's live one (engine_sport)."""
     applied = _num((adjustment or {}).get("applied"))
     line = _num(point)
     if not applied or line is None or p is None or side not in ("over", "under") or not 0 < p < 1:
         return p
-    sport = engine.sport_of(league)
+    sport = engine_sport(league)
     if sport is None:
         return p
     if side == "over":
@@ -931,6 +952,12 @@ class ContextService:
         league = str(game["league"])
         sport = engine.sport_of(league)
         sp = engine.SPORTS[sport]
+        # The learning loop's live values (learn/registry.py): the engine gets a SportParams with the tuned priors
+        # and SDs, and the tuned ADJUST_WEIGHT, only once a change has passed the gate (until then exactly today's)
+        brain = brain_params(league, self.store)
+        overrides = brain.context_overrides()
+        eng = engine.sport_params(sport, overrides) if overrides else sport
+        weight = brain.adjust_weight
         game_id = game_id_of(game)
         start = _ts(game.get("_ts") if game.get("_ts") is not None else game.get("start"))
         status = str(game.get("status") or "pre")
@@ -971,7 +998,7 @@ class ContextService:
         # Log the conditions as they are now, then find them as they stood when the odds were fetched
         effect_now = None
         if conditions is not None and venue is not None:
-            effect_now = engine.weather_effects(sport, venue, conditions, None, market_total=total_line)[0]
+            effect_now = engine.weather_effects(eng, venue, conditions, None, market_total=total_line)[0]
         if conditions is not None and fetched_at is not None and venue is not None and self.store is not None \
                 and hasattr(self.store, "log_weather") and start is not None:
             row = {"league": league, "game_key": game_id, "fetched_at": fetched_at, "start": _iso(start),
@@ -994,19 +1021,19 @@ class ContextService:
                 at_odds.setdefault("fetched_at", _iso(_num(found.get("fetched_at"))))
 
         # Attribution: the market's margin (its spread, else the blend's chance) and its total line
-        margin, margin_note = self._market_margin(sport, game, lines, total_line)
+        margin, margin_note = self._market_margin(sport, game, lines, total_line, eng)
         as_of = game.get("odds_as_of") or _iso(now)
         neutral = bool(game.get("_neutral"))
         attribution: Dict[str, Any] = {"margin": None, "total": None}
         if margin is not None:
-            made = {name: engine.attribute_margin(sport, market_margin=margin, venue=venue, trips=trips,
+            made = {name: engine.attribute_margin(eng, market_margin=margin, venue=venue, trips=trips,
                                                   neutral=neutral, as_of=as_of, home_rates=rates, units=name)
                     for name in (None,) + SHOWN_UNITS}
             shown = _with_evidence_units(made, sp.digits)
             shown["source"] = margin_note
             attribution["margin"] = shown
         if total_line is not None:
-            made = {name: engine.attribute_total(sport, market_total=total_line, league_total=league_total,
+            made = {name: engine.attribute_total(eng, market_total=total_line, league_total=league_total,
                                                  venue=venue, conditions_at_odds=at_odds, as_of=as_of, units=name)
                     for name in (None,) + SHOWN_UNITS}
             attribution["total"] = _with_evidence_units(made, sp.digits)
@@ -1016,18 +1043,19 @@ class ContextService:
         tz = (venue or {}).get("tz")
         units = units_for(league)
         if status == "pre" and venue is not None and conditions is not None and at_odds is not None:
-            moved = engine.weather_adjustment(sport, venue, conditions, at_odds, market_total=total_line,
-                                              has_market=total_line is not None, odds_at=odds_at, tz=tz, units=units)
+            moved = engine.weather_adjustment(eng, venue, conditions, at_odds, market_total=total_line,
+                                              has_market=total_line is not None, odds_at=odds_at, tz=tz, units=units,
+                                              weight=weight)
             if moved is not None:
                 entry = moved.to_dict()
                 other = "metric" if units == "imperial" else "imperial"
-                again = engine.weather_adjustment(sport, venue, conditions, at_odds, market_total=total_line,
+                again = engine.weather_adjustment(eng, venue, conditions, at_odds, market_total=total_line,
                                                   has_market=total_line is not None, odds_at=odds_at, tz=tz,
-                                                  units=other)
+                                                  units=other, weight=weight)
                 entry["reasons"] = {units: moved.reason, other: again.reason if again is not None else moved.reason}
                 entry["p_over"] = None
                 if total_line is not None and p_over is not None and moved.applied:
-                    after = engine.adjusted_over(sport, total_line, p_over, moved.applied)
+                    after = engine.adjusted_over(eng, total_line, p_over, moved.applied)
                     entry["p_over"] = {"line": total_line, "before": round(p_over, 4), "after": round(after, 4)}
                 adjustments.append(entry)
 
@@ -1075,14 +1103,16 @@ class ContextService:
             "venue": venue_block, "teams": teams, "weather": weather_block,
             "attribution": attribution, "adjustments": adjustments, "badges": badges, "line": lines_text,
         }
-        extra = {"total_line": total_line, "p_over": p_over, "adjustments": adjustments}
+        extra = {"total_line": total_line, "p_over": p_over, "adjustments": adjustments,
+                 "params_version": brain.version}
         return block, extra
 
     @staticmethod
-    def _market_margin(sport: str, game: Mapping[str, Any], lines: Mapping[str, Any], total_line: Optional[float]
-                       ) -> Tuple[Optional[float], str]:
+    def _market_margin(sport: str, game: Mapping[str, Any], lines: Mapping[str, Any], total_line: Optional[float],
+                       eng: Any = None) -> Tuple[Optional[float], str]:
         """The market's home margin: the point spread (sports where it is one) or the margin the blend's chance
-        implies; with what it came from."""
+        implies; with what it came from. ``eng``: the engine's sport (a tuned SportParams; default ``sport``)."""
+        eng = sport if eng is None else eng
         spread = _num(lines.get("spread"))
         if spread is not None and sport in POINT_SPREAD_SPORTS:
             return -spread, "The board's point spread"
@@ -1095,11 +1125,11 @@ class ContextService:
                 if draw is None:
                     return None, ""
                 total = home + away + draw
-                return engine.implied_margin(sport, home / total, p_draw=draw / total,
+                return engine.implied_margin(eng, home / total, p_draw=draw / total,
                                              total=total_line if total_line and total_line > 0.5 else None), \
                     "The margin the markets brain's chance implies"
             share = home / (home + away)
-            return engine.implied_margin(sport, share), "The margin the markets brain's chance implies"
+            return engine.implied_margin(eng, share), "The margin the markets brain's chance implies"
         except (ValueError, ZeroDivisionError):
             return None, ""
 
@@ -1123,7 +1153,8 @@ class ContextService:
                "event_id": odds_id, "espn_id": espn_id, "home": name(game.get("home")), "away": name(game.get("away")),
                "start": block.get("start"), "line": line, "p_before": round(float(p_over), 4),
                "p_after": round(float(p_after if p_after is not None else p_over), 4), "applied": round(applied, 4),
-               "reason": (moved or {}).get("reason"), "adjustment": moved}
+               "reason": (moved or {}).get("reason"), "adjustment": moved,
+               "params_version": int(extra.get("params_version") or 0)}
         signature = _sig(row)
         if self._logged_context.get(key) == signature:
             return

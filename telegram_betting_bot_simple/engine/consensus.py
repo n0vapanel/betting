@@ -305,24 +305,49 @@ def log_pool(chances: Sequence[Mapping[str, float]], weights: Sequence[float]) -
     return {o: v / total for o, v in raw.items()}
 
 
-def _near_start(now: Any, start: Any) -> bool:
+def _near_start(now: Any, start: Any, seconds: Optional[float] = None) -> bool:
     begins = _ts(start)
     if begins is None:
         return False
     current = _ts(now)
     if current is None:
         current = time.time()
-    return begins - current < NEAR_START_SECONDS
+    return begins - current < (NEAR_START_SECONDS if seconds is None else seconds)
+
+
+def _tuning(value: Optional[float], default: float, name: str, low: float, high: float) -> float:
+    """A tuned parameter (learn/registry.py), or the module's constant when None; ValueError outside [low, high]."""
+    if value is None:
+        return default
+    number = _number(value)
+    if number is None or not low <= number <= high:
+        raise ValueError(f"{name} must be between {low} and {high}, got {value!r}")
+    return number
 
 
 def blend(sources: Iterable[Mapping[str, Any]], sport: Optional[str], weights: Optional[Mapping[str, float]] = None,
-          now: Any = None, start: Any = None, *, neutral: bool = False) -> Optional[Blend]:
+          now: Any = None, start: Any = None, *, neutral: bool = False, sharpness: float = 1.0,
+          near_start_factor: Optional[float] = None, near_start_seconds: Optional[float] = None,
+          low_confidence_shrink: Optional[float] = None) -> Optional[Blend]:
     """Blend the ok sources into one chance per outcome (see the module docstring). None with no ok source.
 
     ``weights`` overrides kind weights (merged over DEFAULT_WEIGHTS, e.g. a per-sport refit); ``now`` and
     ``start`` (epoch seconds, datetimes or ISO strings) drive the near-start rule; ``neutral`` makes the
     low-confidence shrinkage go toward an even split instead of the home base rate.
+
+    The learning loop's tuned values (learn/registry.py) come in as keywords; each default is today's constant,
+    so a call without them is unchanged. ``sharpness`` is the pool's extremising exponent ``a``:
+    ``logit p = a x sum(w_s x logit p_s)`` (three outcomes: ``p_k`` proportional to ``prod_s p_sk ** (a x w_s)``);
+    at 1 it is a no-op, otherwise the result carries a "sharpness" key. ``near_start_factor`` and
+    ``near_start_seconds`` replace NEAR_START_FACTOR and NEAR_START_SECONDS, ``low_confidence_shrink``
+    LOW_CONFIDENCE_SHRINK.
     """
+    a = _number(sharpness)
+    if a is None or not 0 < a <= 10:
+        raise ValueError(f"sharpness must be a positive number, got {sharpness!r}")
+    factor = _tuning(near_start_factor, NEAR_START_FACTOR, "near_start_factor", 0.0, 1.0)
+    window = _tuning(near_start_seconds, NEAR_START_SECONDS, "near_start_seconds", 0.0, 86400.0)
+    shrink = _tuning(low_confidence_shrink, LOW_CONFIDENCE_SHRINK, "low_confidence_shrink", 0.0, 1.0)
     ok = [s for s in sources if isinstance(s, Mapping) and s.get("status") == "ok" and s.get("kind") in KINDS]
     # The outcomes: three-way when a draw is priced by the markets (or, with no market, by any rating);
     # sources that don't price every outcome can't join the pool
@@ -342,13 +367,13 @@ def blend(sources: Iterable[Mapping[str, Any]], sport: Optional[str], weights: O
     if any(source["kind"] in MARKET_KINDS for source, _ in pool):
         confidence = "normal"
         kind_weights = {**DEFAULT_WEIGHTS, **(weights or {})}
-        near = _near_start(now, start) and any(source["kind"] == "prediction_market" for source, _ in pool)
+        near = _near_start(now, start, window) and any(source["kind"] == "prediction_market" for source, _ in pool)
         per_kind = Counter(source["kind"] for source, _ in pool)
         raw = []
         for source, _ in pool:
             weight = max(_number(kind_weights.get(source["kind"])) or 0.0, 0.0)
             if near and source["kind"] == "prediction_market":
-                weight *= NEAR_START_FACTOR
+                weight *= factor
             raw.append(weight / per_kind[source["kind"]])
     else:
         confidence = "low"
@@ -357,11 +382,11 @@ def blend(sources: Iterable[Mapping[str, Any]], sport: Optional[str], weights: O
     shares = [w / total for w in raw] if total > 0 else [1 / len(pool)] * len(pool)
 
     used = [(source, chances, w) for (source, chances), w in zip(pool, shares) if w > 0]
-    p = log_pool([chances for _, chances, _ in used], [w for _, _, w in used])
+    p = log_pool([chances for _, chances, _ in used], [w if a == 1 else a * w for _, _, w in used])
     base = None
     if confidence == "low":
         base = base_rate(sport, outcomes, neutral)
-        p = {o: (1 - LOW_CONFIDENCE_SHRINK) * p[o] + LOW_CONFIDENCE_SHRINK * base[o] for o in outcomes}
+        p = {o: (1 - shrink) * p[o] + shrink * base[o] for o in outcomes}
 
     gaps = [max(c[o] for _, c in pool) - min(c[o] for _, c in pool) for o in outcomes]
     spread = 100 * max(gaps)
@@ -375,7 +400,7 @@ def blend(sources: Iterable[Mapping[str, Any]], sport: Optional[str], weights: O
     else:
         current = _ts(now)
         as_of = _iso(current if current is not None else time.time())
-    return {
+    out: Blend = {
         "p": {o: p[o] for o in outcomes},
         "used": list(named),
         "weights": named,
@@ -387,6 +412,9 @@ def blend(sources: Iterable[Mapping[str, Any]], sport: Optional[str], weights: O
         "base": base,
         "near_start": near,
     }
+    if a != 1:
+        out["sharpness"] = a  # type: ignore[typeddict-unknown-key]
+    return out
 
 
 def score(p: Mapping[str, float], outcome: str) -> Optional[Dict[str, float]]:

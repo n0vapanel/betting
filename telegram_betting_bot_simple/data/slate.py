@@ -71,6 +71,11 @@ which the short name and abbreviation can't give back. About 3.2 KB gzipped per 
 The slate is serialised once per change, kept in memory as raw bytes, gzip bytes and an ETag (a hash of
 the bytes), and saved to the store, so a restarted dashboard serves the last slate before its first
 refresh. Nothing in it changes unless the games do, so an unchanged slate keeps its ETag.
+
+The learning loop (v3, learn/): every blend is made with the live parameter version of its sport
+(learn/registry.py ``current``; version 0, today's constants, until a change passes the gate), and the logged row
+keeps that ``params_version``. Each game also gets one snapshot row a day before its start (kind "t24", logged on
+the first round 12 to 24 hours before it, whether or not anything changed), so the brain can be scored by horizon.
 """
 
 from __future__ import annotations
@@ -92,9 +97,11 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from ..engine import consensus
+from ..learn import registry
 from .espn_client import ESPN_DAY_TZ, LEAGUES as ESPN_LEAGUES, SCOREBOARD_ONLY, espn_path, team_match_score
 from .leagues import POPULAR_LEAGUES, SPORTS
 from .odds_service import MARKETS, book_roles, moneylines, summarize_markets
+from .store import T24_WINDOW
 
 log = logging.getLogger(__name__)
 
@@ -371,17 +378,26 @@ def after_start(source: Mapping[str, Any], start: Optional[float]) -> bool:
     return ts is not None and ts >= start
 
 
+def brain_params(league: str, store: Any = None) -> "registry.Params":
+    """The learning loop's live values for a league's sport (learn/registry.py), read from ``store`` when it is a
+    real Store (else the registry's bound one): today's constants (version 0) until a change passes the gate, in
+    safe mode, or when the store can't be read."""
+    return registry.current(league, store if hasattr(store, "_connect") and getattr(store, "path", None) else None)
+
+
 def market_detail(league: str, sources: Sequence[Optional[Mapping[str, Any]]], start: Optional[float], now: float,
-                  neutral: bool = False) -> Optional[Dict[str, Any]]:
+                  neutral: bool = False, params: Optional["registry.Params"] = None) -> Optional[Dict[str, Any]]:
     """{"blend": Blend | None, "sources": [Source...], "links": [{"name", "url"}]} for one game, or None without
     any source. The blend (engine/consensus.py) uses only the "ok" sources. Only opinions from before ``start``
     count: a copy from the start or later (an odds board loaded in play, a venue refreshed after the start) is left
-    out, so a started game's "Markets say" is never made from in-play prices."""
+    out, so a started game's "Markets say" is never made from in-play prices. ``params``: the sport's live values
+    (brain_params); at the defaults the call is exactly the untuned one."""
     usable = [dict(source) for source in sources if source and not after_start(source, start)]
     if not usable:
         return None
     try:
-        blend = consensus.blend(usable, league, now=now, start=start, neutral=neutral)
+        tuned = params.blend_kwargs() if params is not None else {}
+        blend = consensus.blend(usable, league, now=now, start=start, neutral=neutral, **tuned)
     except Exception as exc:
         log.warning("Slate: blending %s failed (%s)", league, type(exc).__name__)
         blend = None
@@ -749,6 +765,7 @@ class SlateBuilder:
         self._predictors: Dict[Tuple[str, str], Dict[str, Any]] = {}  # (league, ESPN id) -> ESPN's predictor
         self._predictor_asked: Dict[Tuple[str, str], float] = {}  # (league, ESPN id) -> when the worker last asked
         self._logged_sig: Dict[Tuple[str, str], str] = {}  # what consensus_log last got for each game
+        self._t24_logged: Set[Tuple[str, str]] = set()  # games whose one-day-before snapshot was sent (kind "t24")
         self._saved_seen: Dict[str, Optional[Dict[str, Any]]] = {}  # started games' logged detail, read once
         # Told when a game's status or score changes between rounds: on_change(league, odds_id=, espn_id=, board=)
         # (services.build_slate passes DashboardService.invalidate_game, so the game's computed entries in the
@@ -1546,6 +1563,7 @@ class SlateBuilder:
             by_league.setdefault(game["league"], []).append(game)
         rows = []
         for league, league_games in by_league.items():
+            params = brain_params(league, self.store)
             try:
                 upcoming = [g for g in league_games if g["status"] == "pre"]
                 matches = self._pm_matches(league, upcoming) if (self.kalshi or self.polymarket) and upcoming else {}
@@ -1569,7 +1587,8 @@ class SlateBuilder:
                             started = True
                             detail = self._markets.get(gid) or self._saved_detail(game)
                         if detail is None:  # only opinions from before the start (market_detail)
-                            detail = market_detail(league, sources, start, now, neutral=bool(game.get("_neutral")))
+                            detail = market_detail(league, sources, start, now, neutral=bool(game.get("_neutral")),
+                                                   params=params)
                     except Exception as exc:
                         self._log_failure(f"{league} markets", exc, detail=False)
                         detail = None
@@ -1589,7 +1608,7 @@ class SlateBuilder:
                 if mkt:
                     game["mkt"] = mkt
                 if not started and detail.get("blend"):
-                    rows.append(self._consensus_row(game, detail))
+                    rows.append(self._consensus_row(game, detail, params.version))
         self._markets = details
         self._markets_index = index
         current = {game["id"] for game in games}
@@ -1599,34 +1618,43 @@ class SlateBuilder:
             self._log_consensus(rows, max(now, self._now()))
 
     @staticmethod
-    def _consensus_row(game: Mapping[str, Any], detail: Mapping[str, Any]) -> Dict[str, Any]:
+    def _consensus_row(game: Mapping[str, Any], detail: Mapping[str, Any], version: int = 0) -> Dict[str, Any]:
         odds_id, espn_id = game.get("odds_id"), game.get("espn_id")
         name = lambda team: team.get("name") or team.get("short") or team.get("abbr") or "?"  # noqa: E731
         return {"league": game["league"], "game_key": f"espn:{espn_id}" if espn_id else f"odds:{odds_id}",
                 "event_id": odds_id, "espn_id": espn_id, "swapped": bool(game.get("_swapped")),
                 "home": name(game["home"]), "away": name(game["away"]), "start": game["start"],
-                "sources": detail["sources"], "blend": detail["blend"]}
+                "sources": detail["sources"], "blend": detail["blend"], "params_version": int(version or 0)}
 
     def _log_consensus(self, rows: List[Dict[str, Any]], now: float) -> None:
-        """Write the rows whose sources or blend changed since they were last written (one transaction)."""
+        """Write the rows whose sources or blend changed since they were last written (one transaction), plus each
+        game's one-day-before snapshot (kind "t24") on its first round 12 to 24 hours before the start."""
         if self.store is None or not hasattr(self.store, "log_consensus"):
             return
-        changed, signatures = [], {}
+        changed, signatures, snapshots = [], {}, []
         for row in rows:
             key = (row["league"], row["game_key"])
-            signature = hashlib.sha1(json.dumps([row["sources"], row["blend"], row["start"], row["event_id"]],
+            signature = hashlib.sha1(json.dumps([row["sources"], row["blend"], row["start"], row["event_id"],
+                                                 row.get("params_version") or 0],
                                                 sort_keys=True, default=str).encode()).hexdigest()
             if self._logged_sig.get(key) != signature:
                 changed.append(row)
                 signatures[key] = signature
-        if not changed:
+            start = _parse_time(row.get("start"))
+            if start is not None and key not in self._t24_logged and \
+                    T24_WINDOW[0] <= start - now <= T24_WINDOW[1]:
+                snapshots.append({**row, "kind": "t24"})
+        if not changed and not snapshots:
             return
         try:
-            self.store.log_consensus(changed, now)
+            self.store.log_consensus(changed + snapshots, now)
         except Exception as exc:
             self._log_failure("consensus log", exc)
             return
         self._logged_sig.update(signatures)
+        self._t24_logged.update((row["league"], row["game_key"]) for row in snapshots)
+        if len(self._t24_logged) > 20000:
+            self._t24_logged = set(list(self._t24_logged)[-10000:])
         if len(self._logged_sig) > 20000:  # games long gone
             self._logged_sig = dict(list(self._logged_sig.items())[-10000:])
 

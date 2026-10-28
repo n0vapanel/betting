@@ -1,5 +1,10 @@
 # MMA (UFC) v2 Walk-Forward Backtest Report
 
+> **Correction (2026-10-28): target leakage.** `streak_pre` is forced to 0 in every fight the fighter loses
+> (`build_features_v2.py:213-217`) and the forward fill isn't grouped by fighter, so the tree models learn the result.
+> Logistic regression alone, the clean baseline, is worse than the market (accuracy 63.6% against 67.4%, Brier 0.2249
+> against 0.2072). Kept as research; see the correction at the top of `MULTISPORT_REPORT.md`.
+
 Generated: 2026-10-24. Repo: `backtest/multisport/mma_v2/`.
 
 **Verdict up front: v2 BEATS v1 on all three headline metrics.**

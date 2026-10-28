@@ -8,6 +8,8 @@ const CSS = `
 .view-bets .mb-tabs::-webkit-scrollbar { display: none; }
 .view-bets .mb-tabs .seg { width: max-content; min-width: 100%; }
 .view-bets .mb-tabs .seg button { flex: 1 0 auto; padding: 0 12px; }
+.view-bets .mb-subtabs { margin: 0 0 12px; }
+.view-bets .mb-subtabs .seg { max-width: 440px; }
 
 .view-bets .mb-results-head { flex-wrap: wrap; row-gap: 8px; }
 .view-bets .mb-results-head h2 { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 4px; }

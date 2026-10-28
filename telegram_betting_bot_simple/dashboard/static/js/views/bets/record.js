@@ -1,6 +1,9 @@
 // My bets → Leaders and AI record, laid out for a phone (the first dashboard showed these as wide tables).
 //   Leaders:   GET /api/leaderboard: people's calls scored against the AI and the bookmakers
-//   AI record: GET /api/track-record: every NBA game the AI predicted before tip-off, graded after it
+//   AI record: two views, "Track record" (the default) and "Brain progress" (views/brain/progress.js: how the brain
+//              scores itself against the sharp market, what it changed and why; #/bets?tab=record&view=brain, or the
+//              short #/bets?tab=brain and #/brain).
+//              Track record: GET /api/track-record: every NBA game the AI predicted before tip-off, graded after it
 //              (winners, Brier scores next to the bookmakers', calibration, the spread and total), the
 //              daily Safe / Risky / Crazy AI bets' record, and the AI analysts (Claude, DeepSeek) with
 //              the trust they've earned. Misses included. Then "Markets" (GET /api/record/markets, its own
@@ -9,7 +12,8 @@
 // Every figure is the server's; this file only lays them out.
 
 import { api, isQuiet } from "../../api.js";
-import { esc, pct, shortName, badge, emptyState, errorState, skeleton, section, explain, shortDate } from "../../ui.js";
+import { replaceAddress } from "../../app.js";
+import { esc, pct, shortName, badge, emptyState, errorState, skeleton, section, explain, shortDate, segmented } from "../../ui.js";
 import { icon } from "../../icons.js";
 import { renderMarketsRecord } from "../markets/record.js";
 
@@ -125,7 +129,45 @@ function recentHtml(recent) {
   }).join("")}</ul>`);
 }
 
-export async function renderRecord(box, { signal }) {
+const VIEWS = [{ value: "record", label: "Track record" }, { value: "brain", label: "Brain progress" }];
+
+/**
+ * AI record: "Track record" or "Brain progress" (query view=brain), each drawn into a fresh pane of its own, so a
+ * view still loading when the person switches finds its pane gone and stops.
+ */
+export async function renderRecord(box, { signal, query = new URLSearchParams() } = {}) {
+  let view = query.get("view") === "brain" ? "brain" : "record";
+  box.innerHTML = `<div class="mb-subtabs">${segmented("record-view", VIEWS, view, { label: "AI record" })}</div><div data-record-pane></div>`;
+  const holder = box.querySelector("[data-record-pane]");
+  const show = async (first = false) => {
+    const pane = document.createElement("div");
+    holder.replaceChildren(pane);
+    if (view === "brain") {
+      let page;
+      try {
+        page = await import("../brain/progress.js");
+      } catch {
+        if (pane.isConnected) pane.innerHTML = errorState(new Error("Brain progress couldn't load. Check your connection and try again."));
+        return;
+      }
+      if (pane.isConnected) await page.renderBrain(pane, { signal, query: first ? query : new URLSearchParams() });
+      return;
+    }
+    await renderTrackRecord(pane, { signal });
+  };
+  box.querySelector(".mb-subtabs").addEventListener("click", (event) => {
+    const seg = event.target.closest('[data-seg="record-view"]');
+    if (!seg || seg.dataset.value === view) return;
+    view = seg.dataset.value;
+    for (const b of box.querySelectorAll('[data-seg="record-view"]')) b.setAttribute("aria-pressed", String(b === seg));
+    const hash = view === "brain" ? "#/bets?tab=record&view=brain" : "#/bets?tab=record";
+    if (location.hash !== hash) replaceAddress(hash);
+    show();
+  });
+  await show(true);
+}
+
+async function renderTrackRecord(box, { signal }) {
   box.innerHTML = skeleton("lines", 6);
   let r;
   try {

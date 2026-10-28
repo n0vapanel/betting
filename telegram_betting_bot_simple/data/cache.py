@@ -138,6 +138,15 @@ POLICY: Dict[str, Dict[Optional[str], Policy]] = {
     "mlb_schedule": {"today": Policy(10 * MINUTE, 10 * MINUTE), "past": Policy(6 * HOUR, 0),
                      "future": Policy(6 * HOUR, 0), None: Policy(10 * MINUTE, 10 * MINUTE)},
     "game_context": {None: Policy(15 * MINUTE, 15 * MINUTE)},  # computed: one game's venue & conditions block
+    # The learning loop's backfill of old games (learn/sources/*; v3 learning loop, Contract 1). Values are the parsed,
+    # compact records, not the raw files, and the hist_* tables keep what was read: the cache spares a refetch after
+    # a restart or by the other process. A finished season's file (football-data, MLB's season schedule) and the
+    # event lists of past days don't change again (7 days); a finished game's summary and odds neither, kept 2 days
+    # (thousands a night: the shared table stays small); a season still being played is read again after 12 hours.
+    "hist_file": {"past": Policy(7 * DAY, 0), "current": Policy(12 * HOUR, 0), None: Policy(12 * HOUR, 0)},
+    # ESPN's event lists and scoreboards (a window ending 2 or more days ago is "past")
+    "hist_list": {"past": Policy(7 * DAY, 0), None: Policy(HOUR, 0)},
+    "hist_game": {"final": Policy(2 * DAY, 0), None: Policy(HOUR, 0)},
 }
 
 # Other spellings of the states (ESPN's status.type.state is "pre", "in" or "post")

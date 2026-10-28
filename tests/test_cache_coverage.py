@@ -41,6 +41,8 @@ AUDITED = {
     "ai/deepseek.py": "AI: allowlisted (chats and forecasts are never cached across people)",
     "data/weather.py": "Open-Meteo's forecast and geocoder through the cache (kinds weather, geocode)",
     "data/mlb_stats.py": "MLB StatsAPI's schedule through the cache (kind mlb_schedule)",
+    "learn/sources/http.py": "the history backfill (football-data, nflverse, ESPN, MLB StatsAPI) through the cache "
+                             "(kinds hist_file, hist_list, hist_game)",
 }
 AI_FILES = {"ai/claude.py", "ai/explain.py", "ai/assistant.py", "ai/deepseek.py"}  # the anthropic SDK and DeepSeek
 TRANSPORT = {"main.py"}  # python-telegram-bot: the bot's own messaging, not a data fetch (also bot/*)
@@ -209,6 +211,9 @@ FETCHES = {
     "Ratings": {"power", "espn_predictor", "game_prob"},
     "WeatherClient": {"forecast", "forecasts", "geocode"},
     "MlbStats": {"games"},
+    "FootballData": {"season_records", "new_records"},
+    "NflVerse": {"rows", "records"},
+    "EspnHistory": {"events", "summary", "odds", "scoreboard", "mlb_season"},
 }
 NO_FETCH = {
     "EspnClient": {"event_state", "game_state", "board_state"},
@@ -221,6 +226,9 @@ NO_FETCH = {
     "Ratings": {"cached_power"},
     "WeatherClient": {"at", "attribution", "calls_today"},
     "MlbStats": {"day_state"},
+    "FootballData": set(),
+    "NflVerse": set(),
+    "EspnHistory": set(),
 }
 
 
@@ -231,9 +239,11 @@ def _clients():
     from telegram_betting_bot_simple.data.mlb_stats import MlbStats
     from telegram_betting_bot_simple.data.odds_service import OddsService
     from telegram_betting_bot_simple.data.weather import WeatherClient
+    from telegram_betting_bot_simple.learn.sources import EspnHistory, FootballData, NflVerse
     return {"EspnClient": EspnClient, "PlayerData": PlayerData, "OddsService": OddsService,
             "ApiSportsClient": ApiSportsClient, "Polymarket": Polymarket, "Kalshi": Kalshi, "Ratings": Ratings,
-            "WeatherClient": WeatherClient, "MlbStats": MlbStats}
+            "WeatherClient": WeatherClient, "MlbStats": MlbStats, "FootballData": FootballData, "NflVerse": NflVerse,
+            "EspnHistory": EspnHistory}
 
 
 def test_every_public_method_of_an_audited_client_is_classified() -> None:
@@ -309,6 +319,22 @@ def _drive_everything(cache: TTLCache) -> None:
     weather.geocode("Denver", "US")
     MlbStats(cache).games(DAY)
 
+    # The learning loop's history backfill (learn/sources): football-data.co.uk, nflverse, ESPN's past games and
+    # MLB StatsAPI's season schedule, through the real HTTP door (no budget hook: it is the Backfill's)
+    from telegram_betting_bot_simple.learn.sources import EspnHistory, FootballData, HistHttp, NflVerse
+    door = HistHttp(pace=0.0)
+    soccer = FootballData(door, cache)
+    soccer.season_records("E0", 2025)
+    soccer.season_records("E0", 2026, current=True)
+    soccer.new_records("USA")
+    NflVerse(door, cache).records()
+    past = EspnHistory(door, cache)
+    past.events(nba, DAY - espn_client.datetime.timedelta(days=7), DAY)
+    past.summary(nba, "406")
+    past.odds(nba, "406")
+    past.scoreboard("baseball_mlb", DAY)
+    past.mlb_season(2025)
+
     try:
         DeepSeekAnalyst("deepseek-key-not-real").analyze("a dossier")
     except Exception:
@@ -323,7 +349,7 @@ def test_every_fetch_goes_through_the_cache(recorder: Recorder) -> None:
             "v3.football.api-sports.io", "example.test", "newsapi.org", "gamma-api.polymarket.com",
             "api.elections.kalshi.com", "barttorvik.com", "www.tennisabstract.com", "www.eloratings.net",
             "api.deepseek.com", "api.open-meteo.com", "geocoding-api.open-meteo.com",
-            "statsapi.mlb.com"} <= hosts, hosts
+            "statsapi.mlb.com", "football-data.co.uk", "raw.githubusercontent.com"} <= hosts, hosts
     assert recorder.outside() == [], "fetched outside the cache"
     ai = [call for call in recorder.calls if call.site.split(":")[0] in AI_FILES]
     assert ai and all(call.kind is None for call in ai)  # the AI is never cached

@@ -63,6 +63,13 @@
 # Venue & conditions (weather from Open-Meteo, free for non-commercial use with attribution; optional):
 #   WEATHER_ENABLED=0             no forecasts (the venue, rest and travel stay; on by default: WEATHER_ENABLED=1)
 #   WEATHER_DAILY_CAP=1000        Open-Meteo calls a day at most, the bot and the dashboard together (default 1000)
+# The learning loop (the brain scores itself every night and tunes its settings weekly behind statistical gates;
+# every change can be undone on the Brain progress page; optional, the defaults are fine):
+#   LEARN_ENABLED=0               freeze the brain's settings (no changes, no backfill, no AI calls; on by default)
+#   LEARN_AI=auto                 which AI looks at its misses: auto (Claude, else DeepSeek, else none), claude,
+#                                 deepseek or off
+#   LEARN_AI_MONTHLY_CENTS=500    a hard cap on that AI's spend a month, in US cents (default 500: $5)
+#   LEARN_BACKFILL_PER_NIGHT=1500  old games' requests a night at most, one every 2 seconds, 01:00-06:00 (default 1500)
 #
 # Python packages are installed from requirements.lock as wheels, each checked against its pinned hash, so a
 # changed or swapped package is refused. If that install fails (say, on a CPU or Python the lock has no wheels for),
@@ -113,6 +120,10 @@ declare -A PATTERNS=(
   [MARKETS_ENABLED]='^(0|1|true|false)$'
   [WEATHER_ENABLED]='^(0|1|true|false)$'
   [WEATHER_DAILY_CAP]='^[0-9]{1,5}$'
+  [LEARN_ENABLED]='^(0|1|true|false)$'
+  [LEARN_AI]='^(auto|claude|deepseek|off)$'
+  [LEARN_AI_MONTHLY_CENTS]='^[0-9]{1,6}$'
+  [LEARN_BACKFILL_PER_NIGHT]='^[0-9]{1,5}$'
 )
 # DOMAIN is checked and saved on its own, since it can also be "off"
 DOMAIN_PATTERN='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$'

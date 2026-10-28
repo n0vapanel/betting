@@ -39,6 +39,9 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple, Union
 from zoneinfo import ZoneInfo
 
+from ..learn.brain_store import BRAIN_SCHEMA
+from ..learn.history_store import HIST_SCHEMA
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS odds_snapshots (
     sport_key TEXT PRIMARY KEY,
@@ -693,6 +696,43 @@ def _context_row(values: Sequence[Any]) -> Dict[str, Any]:
     return row
 
 
+# v3 learning loop (telegram_betting_bot_simple/learn/): columns added to tables that already exist on a server, so
+# an older betting.db is brought up to date on the next start (ALTER TABLE ... ADD COLUMN, once, under the write lock;
+# a new file gets them the same way). Every existing row reads as the defaults: blended with version 0 (today's
+# constants), and the last-before-start row (kind "last"; "t24" is the one-day-before snapshot of the same game).
+MIGRATIONS: Tuple[Tuple[str, str, str], ...] = (
+    ("consensus_log", "params_version", "INTEGER NOT NULL DEFAULT 0"),  # learn/registry.py version it was blended with
+    ("consensus_log", "kind", "TEXT NOT NULL DEFAULT 'last'"),          # last (before the start) or t24
+    ("context_log", "params_version", "INTEGER NOT NULL DEFAULT 0"),    # the version it was adjusted with
+)
+SNAPSHOT_SUFFIX = "#t24"  # a t24 row's game_key: the game's own key plus this
+T24_WINDOW = (12 * 3600.0, 24 * 3600.0)  # the snapshot is taken on the first log this long before the start
+
+
+def migrate(db: sqlite3.Connection) -> List[str]:
+    """Add MIGRATIONS' missing columns (idempotent; safe when the bot and the dashboard start together: the check and
+    the change run under one write lock, and a column another process added first is taken as done). Returns
+    "table.column" for each column added."""
+    added: List[str] = []
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        for table, column, declaration in MIGRATIONS:
+            present = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+            if not present or column in present:
+                continue
+            try:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+                added.append(f"{table}.{column}")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+    except BaseException:
+        db.execute("ROLLBACK")
+        raise
+    db.execute("COMMIT")
+    return added
+
+
 def _weather_row(values: Sequence[Any]) -> Dict[str, Any]:
     row = dict(zip(WEATHER_LOG_FIELDS, values))
     row["conditions"] = json.loads(row["conditions"]) if row["conditions"] else None
@@ -727,6 +767,11 @@ class Store:
             db.executescript(ACCOUNT_SCHEMA)
             db.executescript(CACHE_SCHEMA)
             db.executescript(CONTEXT_SCHEMA)
+            # v3 learning loop: the history tables (learn/history_store.py), the brain's versions, trials and scores
+            # (learn/brain_store.py), and the columns the older tables gain
+            db.executescript(HIST_SCHEMA)
+            db.executescript(BRAIN_SCHEMA)
+            migrate(db)
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, timeout=10, isolation_level=None)
@@ -1054,7 +1099,11 @@ class Store:
 
     def log_consensus(self, rows: Sequence[Mapping[str, Any]], now: Optional[float] = None) -> int:
         """Save each game's latest sources and blend (one transaction): a row is updated on every refresh until
-        its game starts, then frozen; rows for games already started are ignored. Returns the rows written."""
+        its game starts, then frozen; rows for games already started are ignored. Returns the rows written.
+
+        ``params_version`` (learn/registry.py's version the blend was made with, 0 for the defaults) is kept with
+        the row. A row with ``kind`` "t24" is the game's one-day-before snapshot: written once under the game's key
+        plus SNAPSHOT_SUFFIX and never updated (the learning loop scores the brain by horizon with it)."""
         now = _now(now)
         now_iso = _iso(now)
         written = 0
@@ -1063,45 +1112,71 @@ class Store:
                 start = str(row["start"])
                 if start <= now_iso:
                     continue
+                version = int(row.get("params_version") or 0)
+                if row.get("kind") == "t24":
+                    key = str(row["game_key"])
+                    key = key if key.endswith(SNAPSHOT_SUFFIX) else key + SNAPSHOT_SUFFIX
+                    cursor = db.execute(
+                        "INSERT INTO consensus_log (league, game_key, event_id, espn_id, swapped, home, away, start, "
+                        "logged_at, sources, blend, params_version, kind) VALUES "
+                        "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 't24') ON CONFLICT(league, game_key) DO NOTHING",
+                        (row["league"], key, row.get("event_id"), row.get("espn_id"), 1 if row.get("swapped") else 0,
+                         row["home"], row["away"], start, now, json.dumps(row["sources"], default=_json_default),
+                         json.dumps(row["blend"], default=_json_default), version),
+                    )
+                    written += cursor.rowcount
+                    continue
                 cursor = db.execute(
                     "INSERT INTO consensus_log (league, game_key, event_id, espn_id, swapped, home, away, start, "
-                    "logged_at, sources, blend) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "logged_at, sources, blend, params_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(league, game_key) DO UPDATE SET event_id = COALESCE(excluded.event_id, "
                     "consensus_log.event_id), espn_id = COALESCE(excluded.espn_id, consensus_log.espn_id), "
                     "swapped = excluded.swapped, home = excluded.home, away = excluded.away, start = excluded.start, "
-                    "logged_at = excluded.logged_at, sources = excluded.sources, blend = excluded.blend "
+                    "logged_at = excluded.logged_at, sources = excluded.sources, blend = excluded.blend, "
+                    "params_version = excluded.params_version "
                     "WHERE consensus_log.status = 'pending' AND consensus_log.start > ?",
                     (row["league"], row["game_key"], row.get("event_id"), row.get("espn_id"),
                      1 if row.get("swapped") else 0, row["home"], row["away"], start, now,
                      json.dumps(row["sources"], default=_json_default), json.dumps(row["blend"], default=_json_default),
-                     now_iso),
+                     version, now_iso),
                 )
                 written += cursor.rowcount
         return written
 
     def consensus_rows(self, league: Optional[str] = None, status: Optional[str] = None,
-                       started_before: Optional[str] = None, limit: int = 5000) -> List[Dict[str, Any]]:
-        """Logged consensus rows, latest start first."""
-        where, args = [], []
+                       started_before: Optional[str] = None, limit: int = 5000,
+                       snapshots: bool = False) -> List[Dict[str, Any]]:
+        """Logged consensus rows, latest start first: each game's last-before-start row (with ``snapshots`` also the
+        one-day-before rows, which carry "kind": "t24" and "params_version"; the grader scores those too)."""
+        where, args = [] if snapshots else ["kind = 'last'"], []
         for clause, value in (("league = ?", league), ("status = ?", status), ("start < ?", started_before)):
             if value is not None:
                 where.append(clause)
                 args.append(value)
-        sql = f"SELECT {', '.join(CONSENSUS_FIELDS)} FROM consensus_log"
+        fields = CONSENSUS_FIELDS + (("kind", "params_version") if snapshots else ())
+        sql = f"SELECT {', '.join(fields)} FROM consensus_log"
         if where:
             sql += " WHERE " + " AND ".join(where)
         with closing(self._connect()) as db:
             rows = db.execute(sql + " ORDER BY start DESC LIMIT ?", (*args, _limit(limit))).fetchall()
-        return [_consensus(values) for values in rows]
+        if not snapshots:
+            return [_consensus(values) for values in rows]
+        out = []
+        for values in rows:
+            row = _consensus(values[:len(CONSENSUS_FIELDS)])
+            row["kind"], row["params_version"] = values[len(CONSENSUS_FIELDS)], int(values[-1] or 0)
+            out.append(row)
+        return out
 
     def consensus_graded(self) -> Tuple[Tuple[int, Optional[float]], List[Dict[str, Any]]]:
         """Every graded row's league, blend and result (not its sources: the record needs only the scores), with a
         mark that changes whenever a row is graded ((rows, latest graded_at)), so a reader can keep what it worked
         out until the mark moves. No limit: the record counts every graded game."""
         with closing(self._connect()) as db:
-            mark = db.execute("SELECT COUNT(*), MAX(graded_at) FROM consensus_log WHERE status = 'graded'").fetchone()
+            mark = db.execute("SELECT COUNT(*), MAX(graded_at) FROM consensus_log WHERE status = 'graded' "
+                              "AND kind = 'last'").fetchone()
             rows = db.execute("SELECT league, blend, result FROM consensus_log WHERE status = 'graded' "
-                              "ORDER BY start DESC").fetchall()
+                              "AND kind = 'last' ORDER BY start DESC").fetchall()
         return ((int(mark[0]), mark[1]),
                 [{"league": league, "blend": json.loads(blend) if blend else None,
                   "result": json.loads(result) if result else None} for league, blend, result in rows])
@@ -1109,8 +1184,8 @@ class Store:
     def consensus_graded_mark(self) -> Tuple[int, Optional[float]]:
         """(graded rows, latest graded_at): changes whenever a row is graded."""
         with closing(self._connect()) as db:
-            count, latest = db.execute("SELECT COUNT(*), MAX(graded_at) FROM consensus_log WHERE status = 'graded'"
-                                       ).fetchone()
+            count, latest = db.execute("SELECT COUNT(*), MAX(graded_at) FROM consensus_log WHERE status = 'graded' "
+                                       "AND kind = 'last'").fetchone()
         return int(count), latest
 
     def consensus_row(self, league: str, event_id: Optional[str] = None, espn_id: Optional[str] = None,
@@ -1122,7 +1197,7 @@ class Store:
             with closing(self._connect()) as db:
                 values = db.execute(
                     f"SELECT {', '.join(CONSENSUS_FIELDS)} FROM consensus_log WHERE league = ? AND {column} = ? "
-                    "ORDER BY logged_at DESC LIMIT 1", (league, str(value))).fetchone()
+                    "AND kind = 'last' ORDER BY logged_at DESC LIMIT 1", (league, str(value))).fetchone()
             if values:
                 return _consensus(values)
         return None
@@ -1187,7 +1262,8 @@ class Store:
 
     def log_context(self, rows: Sequence[Mapping[str, Any]], now: Optional[float] = None) -> int:
         """Save each game's total line and chances of the over before and after any adjustment (one transaction):
-        updated on every refresh until the game starts, then frozen; rows for games already started are ignored."""
+        updated on every refresh until the game starts, then frozen; rows for games already started are ignored.
+        ``params_version`` is learn/registry.py's version the adjustment was made with (0: the defaults)."""
         now = _now(now)
         now_iso = _iso(now)
         written = 0
@@ -1198,16 +1274,19 @@ class Store:
                     continue
                 cursor = db.execute(
                     "INSERT INTO context_log (league, game_key, event_id, espn_id, home, away, start, logged_at, line, "
-                    "p_before, p_after, applied, reason, adjustment) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "p_before, p_after, applied, reason, adjustment, params_version) VALUES "
+                    "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(league, game_key) DO UPDATE SET event_id = COALESCE(excluded.event_id, "
                     "context_log.event_id), espn_id = COALESCE(excluded.espn_id, context_log.espn_id), "
                     "home = excluded.home, away = excluded.away, start = excluded.start, logged_at = excluded.logged_at, "
                     "line = excluded.line, p_before = excluded.p_before, p_after = excluded.p_after, "
-                    "applied = excluded.applied, reason = excluded.reason, adjustment = excluded.adjustment "
+                    "applied = excluded.applied, reason = excluded.reason, adjustment = excluded.adjustment, "
+                    "params_version = excluded.params_version "
                     "WHERE context_log.status = 'pending' AND context_log.start > ?",
                     (row["league"], row["game_key"], row.get("event_id"), row.get("espn_id"), row["home"], row["away"],
                      start, now, float(row["line"]), float(row["p_before"]), float(row["p_after"]),
-                     float(row.get("applied") or 0.0), row.get("reason"), _dumps(row.get("adjustment")), now_iso),
+                     float(row.get("applied") or 0.0), row.get("reason"), _dumps(row.get("adjustment")),
+                     int(row.get("params_version") or 0), now_iso),
                 )
                 written += cursor.rowcount
         return written
@@ -1316,12 +1395,12 @@ class Store:
             )
 
     def log_analyst_call(self, analyst: str, model: str, event_id: Optional[str], input_tokens: int,
-                         output_tokens: int, cost: float, ok: bool) -> None:
+                         output_tokens: int, cost: float, ok: bool, now: Optional[float] = None) -> None:
         with closing(self._connect()) as db:
             db.execute(
                 "INSERT INTO analyst_calls (ts, analyst, model, event_id, input_tokens, output_tokens, cost, ok) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (time.time(), analyst, model, event_id, input_tokens, output_tokens, cost, int(ok)),
+                (_now(now), analyst, model, event_id, input_tokens, output_tokens, cost, int(ok)),
             )
 
     def analyst_spend(self, analyst: str, since: float = 0.0) -> Tuple[int, float]:

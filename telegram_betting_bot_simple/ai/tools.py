@@ -272,7 +272,14 @@ TOOLS: List[Dict[str, Any]] = [
          "system": {"type": "string", "description": "system only, e.g. trixie, patent, yankee, lucky15"},
      }, optional=("drop", "stake", "split", "ticket_type", "k", "system"))},
 ]
+# The learning loop (learn/): read only, from the store; never a pick tool
+TOOLS.append({"name": "brain_progress",
+              "description": "Is the brain getting better? Per sport its log loss against the sharp market (95% "
+                             "range), calibration, recent changes and why: the learning loop's own numbers.",
+              "input_schema": _obj({})})
 TOOL_NAMES = tuple(tool["name"] for tool in TOOLS)
+BRAIN_SOURCE = ("The learning loop: graded games scored in code against the sharp market, and the weekly gate's "
+                "decisions (most weeks nothing changes)")
 
 
 # --- validating what Claude sent ----------------------------------------------------------------------
@@ -392,7 +399,7 @@ INPUTS: Dict[str, type] = {
     "player_get_props": PlayerInput, "news_get": NewsInput, "brain_price_legs": LegsInput,
     "ticket_price": TicketInput, "ticket_build": BuildInput, "ticket_analyse": TicketInput,
     "rollover_simulate": RolloverInput, "slip_propose": TicketInput, "user_get_context": NoInput,
-    "pasted_slip_analyse": PastedInput, "brain_top_picks": TopPicksInput,
+    "pasted_slip_analyse": PastedInput, "brain_top_picks": TopPicksInput, "brain_progress": NoInput,
 }
 
 
@@ -909,6 +916,7 @@ class Toolbox:
             "ticket_price": self._price, "ticket_build": self._build, "ticket_analyse": self._analyse,
             "rollover_simulate": self._rollover, "slip_propose": self._propose, "user_get_context": self._context,
             "pasted_slip_analyse": self._pasted, "brain_top_picks": self._top_picks,
+            "brain_progress": self._brain_progress,
         }
 
     def _as_of(self) -> str:
@@ -1450,6 +1458,24 @@ class Toolbox:
             f"{pick.get('label')} [{_ref_text(pick.get('ref') or {})}]" for pick in picks) or "no picks")
         cards = [picks_card(found, leagues)] if picks else []
         return content, summary, cards
+
+    def _brain_progress(self, data: NoInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
+        """brain_progress: the learning loop's numbers (learn/progress.py tool_facts) from the store: per sport the
+        headline against the sharp market with its 95% range and the gate's word, calibration in words and the
+        version live; the last changes; this week's held candidates; whether learning is paused."""
+        service = getattr(self.lab, "service", None)
+        store = getattr(self.lab, "store", None) or getattr(service, "store", None)
+        if store is None or not hasattr(store, "_connect"):
+            raise ToolError("unavailable", "The brain's record isn't available here",
+                            "Say the learning record isn't available right now")
+        from ..learn.progress import tool_facts
+        content = {**tool_facts(store, getattr(service, "learner", None)), "source": BRAIN_SOURCE,
+                   "hint": ("Answer from these numbers only, in plain words: a gap near 0 means about level with the "
+                            "market, which is the honest target. Most weeks nothing changes; say so when it didn't")}
+        summary = "brain_progress: " + "; ".join(f"{s['sport']} {((s.get('headline') or {}).get('word') or 'no games')}"
+                                                 for s in content["sports"]) if content["sports"] else \
+            "brain_progress: no graded games yet"
+        return content, summary, []
 
     def _analyse(self, data: TicketInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
         body = self._ticket_body(data)

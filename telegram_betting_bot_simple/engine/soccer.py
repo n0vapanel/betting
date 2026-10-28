@@ -242,18 +242,24 @@ def markets(matrix: Matrix, nudge: float = BTTS_NUDGE) -> Dict[str, Any]:
 
 
 def derive(p_home: float, p_draw: float, p_away: float, p_over_2_5: float, rho: float = DC_RHO,
-           max_goals: int = MAX_GOALS) -> Dict[str, Any]:
-    """Rates, the fit against the inputs (model minus input, in points) and every derived market."""
+           max_goals: int = MAX_GOALS, *, nudge: float = BTTS_NUDGE) -> Dict[str, Any]:
+    """Rates, the fit against the inputs (model minus input, in points) and every derived market.
+
+    ``rho`` and ``nudge`` default to DC_RHO and BTTS_NUDGE; the learning loop (learn/registry.py) passes its tuned
+    values."""
+    nudge = float(nudge)
+    if not math.isfinite(nudge) or abs(nudge) > 0.2:
+        raise ValueError(f"nudge must be a small chance, got {nudge!r}")
     lam_home, lam_away = rates_from_odds(p_home, p_draw, p_away, p_over_2_5, rho, max_goals)
     matrix = grid(lam_home, lam_away, rho, max_goals)
-    derived = markets(matrix)
+    derived = markets(matrix, nudge)
     total = p_home + p_draw + p_away
     fitted = (*outcome_probs(matrix), over_prob(matrix, 2.5))
     inputs = (p_home / total, p_draw / total, p_away / total, p_over_2_5)
     fit = {name: round((model - given) * 100, 3)
            for name, model, given in zip(("home", "draw", "away", "over_2_5"), fitted, inputs)}
     worst = max(abs(v) for v in fit.values())
-    return {"rates": {"home": lam_home, "away": lam_away}, "rho": rho, "btts_nudge": BTTS_NUDGE, "fit": fit,
+    return {"rates": {"home": lam_home, "away": lam_away}, "rho": rho, "btts_nudge": nudge, "fit": fit,
             "max_error_pp": worst, "fit_ok": worst <= FIT_OK_PP, "markets": derived}
 
 
@@ -279,10 +285,18 @@ def _legs(derived: Mapping[str, Any], home: str, away: str) -> Iterable[Tuple[st
     m = derived["markets"]
     rates = derived["rates"]
     btts = m["btts"]
+    nudge = derived.get("btts_nudge", BTTS_NUDGE)
+    nudge = BTTS_NUDGE if not isinstance(nudge, (int, float)) else float(nudge)
+    if nudge > 0:
+        yes_why, no_why = f", plus a {nudge * 100:g}-point calibration nudge", ", less the nudge"
+    elif nudge < 0:
+        yes_why, no_why = f", less a {-nudge * 100:g}-point calibration nudge", ", plus the nudge"
+    else:
+        yes_why = no_why = ""
     yield ("btts", "yes", None, "Both teams to score: Yes", btts["yes"], 0.0,
-           f"Both score in {btts['raw']:.0%} of the model's scorelines, plus a 1.5-point calibration nudge")
+           f"Both score in {btts['raw']:.0%} of the model's scorelines{yes_why}")
     yield ("btts", "no", None, "Both teams to score: No", btts["no"], 0.0,
-           f"At least one side is held scoreless in {1 - btts['raw']:.0%} of the model's scorelines, less the nudge")
+           f"At least one side is held scoreless in {1 - btts['raw']:.0%} of the model's scorelines{no_why}")
     one = m["1x2"]
     for side, team in (("home", home), ("away", away)):
         win = one[side]
