@@ -26,6 +26,8 @@ export const GROUPS = [
   { key: "ai", title: "The AI and its record" },
   { key: "builder", title: "The Builder" },
   { key: "context", title: "Venue & conditions" },
+  { key: "players", title: "Players and props" },
+  { key: "lingo", title: "Bettor talk" },
 ];
 
 // Terms the ⓘ sheets don't have (yet): same shape as GLOSSARY's entries
@@ -56,6 +58,72 @@ const NEW_TERMS = {
       + "Each leg's chance comes from the market (the bookmakers' prices with their margin taken out), from the NBA model, or is estimated from your own price minus a typical bookmaker margin. When a read looks doubtful (your bookmaker's return doesn't match, or some odds couldn't be read) the app asks you to check it before any numbers. "
       + "Screenshots aren't kept: only what was read from them, in your own history that nobody else can see. With too little AI allowance left, or while picks are paused, the free reader (code only) reads pasted text at no cost; screenshots need the AI, so paste the slip's text then.",
     example: "Celtics −3.5 at −110 and Nuggets to win at −400 for $10: $23.86 back if both win, about 1 in 2.6.",
+  },
+  pra: {
+    title: "PRA (points + rebounds + assists)",
+    short: "One prop on a player's points, rebounds and assists added together.",
+    body: "P+R, P+A and R+A add two of them; stocks are steals + blocks. The Player finder and Ask AI scan them like any other stat: the projection is the parts' projections added up, and the history counts games where the sum reached the number.",
+    example: "28 points, 9 rebounds and 6 assists is 43 PRA: over 39.5 wins.",
+  },
+  l10: {
+    title: "L5, L10, L20",
+    short: "A player's last 5, 10 or 20 games.",
+    body: "\"9/10 L10\" means he reached the number in 9 of his last 10 games: his hit rate over that stretch. The Player finder shows the last 5, the last 10 and this season side by side, so a hot week stands out against the whole season. Ten games is a small sample, which is why the chance comes from the projection, not from the count alone.",
+    example: "4/5 L5, 7/10 L10, 25/45 season: 80%, 70% and 56%, hotter lately than over the season.",
+  },
+  sgp: {
+    title: "SGP (same-game parlay)",
+    short: "A parlay of picks from one game.",
+    body: "The picks are linked (a blowout makes the over likelier), so bookmakers price the link themselves. The app doesn't put two picks from one game in a multi: multiplying linked chances as if they were unrelated would overstate the chance.",
+    example: "Thunder −6.5 and Over 224.5 in one ticket is an SGP; here they go in as two singles.",
+  },
+  attd: {
+    title: "ATTD (anytime touchdown)",
+    short: "A bet that a player scores a touchdown at any point in the game.",
+    body: "Rushing and receiving touchdowns count; a quarterback's passing touchdowns don't. It's a yes-or-no bet, so the Player finder ranks it by the chance of 1 or more.",
+    example: "+120 (2.20) with a 45% chance: 0.45 × 2.20 − 1 = −1.0%, a little under break-even.",
+  },
+  sog: {
+    title: "SOG (shots on goal)",
+    short: "Hockey shots on target: the ones the goalie saved plus the goals.",
+    body: "Blocked shots and misses don't count. A common prop is 3+ SOG (over 2.5).",
+    example: "4 shots saved and 1 goal is 5 SOG: over 2.5 wins.",
+  },
+  ks: {
+    title: "Ks (strikeouts)",
+    short: "A pitcher's strikeouts in a game.",
+    body: "Only games he pitched count in his history. Over 5.5 Ks needs 6 or more, the same as \"6+ strikeouts\" in the Player finder.",
+    example: "7 strikeouts in 6 innings: over 5.5 wins, and so does 7+; 8+ loses.",
+  },
+  tb: {
+    title: "TB (total bases)",
+    short: "The bases from a batter's hits: a single 1, a double 2, a triple 3, a home run 4.",
+    body: "Walks don't count. Over 1.5 TB needs a double or better, or two singles.",
+    example: "A single and a home run: 1 + 4 = 5 total bases.",
+  },
+  alt_line: {
+    title: "Alt line",
+    short: "The same bet at a different number from the main line, at a different price.",
+    body: "A lower number wins more often and pays less; a higher one pays more and wins less often. Milestones like \"20+ points\" are a ladder of alt lines. The Player finder's edge uses only the price for exactly your number.",
+    example: "Main over 24.5 at −110 (1.91); alt over 19.5 at −250 (1.40); alt over 29.5 at +200 (3.00).",
+  },
+  chalk_dog: {
+    title: "Chalk and dog",
+    short: "Chalk is the favourite; the dog (underdog) is the side not expected to win.",
+    body: "Minus money (−150) usually marks the chalk and plus money (+150) the dog. A pick'em is a game priced about even.",
+    example: "Celtics −250 (1.40) are the chalk; Hornets +200 (3.00) are the dog.",
+  },
+  fade_tail: {
+    title: "Fade and tail",
+    short: "Tail a pick: bet the same. Fade it: bet against it.",
+    body: "Ask AI understands both words. Whatever you tail or fade, only you add picks to your slip.",
+    example: "Someone likes the Bills −3: tailing is the Bills −3 too, fading is the Dolphins +3.",
+  },
+  lock: {
+    title: "Lock, hammer, nuke",
+    short: "Bettor talk for a pick someone feels strongly about.",
+    body: "Ask AI reads \"give me your locks\" as \"your strongest picks\" and answers with the most likely ones and their chances. No pick is certain, so the app never calls one a lock itself.",
+    example: "\"3 locks tonight\": the three strongest picks, say at 74%, 71% and 69%.",
   },
   roi: {
     title: "Net profit and ROI",
@@ -258,14 +326,14 @@ const EXTRAS = {
     worked: ["Over 24.5 points went over in 7 of the last 10 games: \"7/10\".",
       "Ten games is a small sample. A player who truly goes over 55% of the time still shows 7/10 or better about 1 time in 4 (27%).",
       "So treat 7/10 as a hint, check the minutes and injuries, and remember the line already reflects most of it."],
-    related: ["line", "projection"], see: "#/today", seeLabel: "Open a game, then a player",
+    related: ["line", "projection", "l10", "player_finder"], see: "#/today", seeLabel: "Open a game, then a player",
   },
   projection: {
     group: "ai", aliases: ["projection", "player model", "range", "p(over)"],
     worked: ["Mean 24.1 points, range 15–33 (10% to 90%).",
       "About 1 game in 5 lands outside the range: 1 in 10 below 15, 1 in 10 above 33.",
       "55% over 23.5 means fair odds of 1 ÷ 0.55 = 1.82. A book price of 1.91 is a little above fair; 1.80 a little below."],
-    related: ["hit_rate", "line", "fair_odds"], see: "#/today", seeLabel: "Open an NBA game, then a player",
+    related: ["hit_rate", "line", "fair_odds", "player_finder"], see: "#/today", seeLabel: "Open an NBA game, then a player",
   },
   rollover: {
     group: "money", aliases: ["roll over", "rollover challenge", "2 odds", "sure 2 odds", "daily double", "compounding"],
@@ -448,6 +516,76 @@ const EXTRAS = {
       "With a 2- to 5-point edge, staking everything (a rollover) is 10 to 25 times the Kelly stake.",
       "At the market's 47% the edge is negative (0.47 × 2.00 − 1 = −0.06), so Kelly says: bet nothing."],
     related: ["bankroll", "rollover", "expected_result"], see: "#/build/rollover", seeLabel: "Compare staking plans",
+  },
+  player_finder: {
+    group: "players", aka: ["player scan", "prop finder"], aliases: ["player finder", "finder", "player scan", "scan", "props", "prop finder", "20+", "projected", "projection", "who will score", "milestone", "ladder", "hit rate", "recent form", "edge"],
+    worked: ["You pick NBA, points, at least 20, tonight.",
+      "A player went 20+ in 9 of his last 10, is projected for 31.2 and has an 82% chance: he ranks near the top.",
+      "His 20+ milestone is posted at −250 (1.40): edge = 0.82 × 1.40 − 1 = +14.8%.",
+      "Another is projected for 18.5 with a 44% chance: under 50% and under 20, so he's \"Also close\"."],
+    related: ["l10", "hit_rate", "projection", "pra", "alt_line"], see: "#/players", seeLabel: "Open the Player finder",
+  },
+  pra: {
+    group: "players", aka: ["P+R", "P+A", "R+A", "stocks"], aliases: ["pra", "pts+reb+ast", "p+r+a", "p+r", "p+a", "r+a", "combo", "combos", "stocks", "stl+blk", "points rebounds assists"],
+    worked: ["28 points + 9 rebounds + 6 assists = 43 PRA.", "Over 39.5 PRA needs 40 or more: 43 wins.", "Projected 27.1 + 8.4 + 5.9 = 41.4 PRA."],
+    related: ["player_finder", "line", "projection"], see: "#/players?league=basketball_nba&stat=pra&at=line&day=today", seeLabel: "PRA in the Player finder",
+  },
+  l10: {
+    group: "players", aka: ["last 10", "last 5", "last 20"], aliases: ["l5", "l10", "l20", "last 5", "last 10", "last 20", "form", "hot", "cold", "trend", "9/10"],
+    worked: ["Last 10 games at 20+ points: 24, 31, 18, 22, 27, 20, 25, 19, 30, 21.", "Eight of them are 20 or more: \"8/10 L10\".",
+      "The last 5 (24, 31, 18, 22, 27) have four: \"4/5 L5\"."],
+    related: ["hit_rate", "player_finder", "projection"], see: "#/players", seeLabel: "Open the Player finder",
+  },
+  sgp: {
+    group: "lingo", aka: ["same-game parlay", "same game multi"], aliases: ["sgp", "same game parlay", "same-game parlay", "same game multi", "bet builder"],
+    worked: ["Thunder −6.5 at 1.91 and Over 224.5 at 1.91.", "Multiplied as if unrelated: 1.91 × 1.91 = 3.65.",
+      "But a Thunder blowout makes the over likelier, so the real chance of both differs: the app plays them as singles."],
+    related: ["same_game", "multi"], see: "#/build", seeLabel: "Open your slip",
+  },
+  attd: {
+    group: "lingo", aka: ["anytime TD", "anytime touchdown scorer"], aliases: ["attd", "anytime td", "anytime touchdown", "td scorer", "touchdown scorer", "scores a td"],
+    worked: ["+120 is 1 + 120 ÷ 100 = 2.20 in decimal.", "A 45% chance: 0.45 × 2.20 = 0.99 back for each $1.",
+      "Edge = 0.99 − 1 = −1.0%: a little under break-even."],
+    related: ["player_finder", "implied_probability"], see: "#/players?league=americanfootball_nfl&stat=anytime_td&at=1&day=today", seeLabel: "Anytime TD in the Player finder",
+  },
+  sog: {
+    group: "lingo", aka: ["shots on goal", "shots"], aliases: ["sog", "shots on goal", "shots", "shots on net"],
+    worked: ["4 shots saved + 1 goal = 5 shots on goal.", "A blocked shot and a miss add nothing.", "Over 2.5 SOG (3+) wins."],
+    related: ["player_finder", "line"], see: "#/players?league=icehockey_nhl&stat=sog&at=3&day=today", seeLabel: "SOG in the Player finder",
+  },
+  ks: {
+    group: "lingo", aka: ["strikeouts", "pitcher strikeouts"], aliases: ["ks", "k", "strikeouts", "pitcher strikeouts", "punchouts"],
+    worked: ["Over 5.5 Ks is the same as 6+ strikeouts.", "7 strikeouts: over 5.5 wins, 7+ wins, 8+ loses."],
+    related: ["player_finder", "line"], see: "#/players?league=baseball_mlb&stat=k&at=6&day=today", seeLabel: "Ks in the Player finder",
+  },
+  tb: {
+    group: "lingo", aka: ["total bases"], aliases: ["tb", "total bases", "bases"],
+    worked: ["Single 1, double 2, triple 3, home run 4.", "A single and a home run: 1 + 4 = 5 TB.", "Over 1.5 TB needs 2 or more: a double alone does it, a single alone doesn't."],
+    related: ["player_finder", "line"], see: "#/players?league=baseball_mlb&stat=tb&at=2&day=today", seeLabel: "TB in the Player finder",
+  },
+  alt_line: {
+    group: "lingo", aka: ["alternate line", "ladder", "milestone"], aliases: ["alt line", "alt", "alternate", "ladder", "milestone", "alt lines"],
+    worked: ["−110 is 1 + 100 ÷ 110 = 1.91; −250 is 1 + 100 ÷ 250 = 1.40; +200 is 3.00.",
+      "Over 19.5 at 1.40 implies 1 ÷ 1.40 = 71%; over 29.5 at 3.00 implies 33%.",
+      "The lower rung wins more often and pays less."],
+    related: ["line", "implied_probability", "player_finder"], see: "#/players", seeLabel: "Open the Player finder",
+  },
+  chalk_dog: {
+    group: "lingo", aka: ["favourite and underdog", "favorite", "underdog", "pick'em"], aliases: ["chalk", "dog", "underdog", "favorite", "favourite", "plus money", "pick em", "pickem", "pick'em"],
+    worked: ["Celtics −250 is 1.40: they imply 1 ÷ 1.40 = 71%.", "Hornets +200 is 3.00: they imply 1 ÷ 3.00 = 33%.",
+      "71.4% + 33.3% = 104.8%: the extra 4.8% is the bookmaker's cut."],
+    related: ["american_odds", "moneyline", "book_cut"], see: "#/today", seeLabel: "See tonight's prices",
+  },
+  fade_tail: {
+    group: "lingo", aka: ["fade", "tail"], aliases: ["fade", "tail", "tailing", "fading", "follow"],
+    worked: ["A friend's pick: Bills −3.", "Tail it: Bills −3. Fade it: Dolphins +3.", "Either way, only you add it to your slip."],
+    related: ["spread", "ai_vs_market"], see: "#/ask", seeLabel: "Ask AI",
+  },
+  lock: {
+    group: "lingo", aka: ["hammer", "nuke", "best bet"], aliases: ["lock", "locks", "hammer", "nuke", "best bet", "strongest", "slam"],
+    worked: ["\"Give me 3 locks\" asks for the three strongest picks.", "Ask AI ranks the most likely winners: say 74%, 71% and 69%.",
+      "Three such picks together win about 0.74 × 0.71 × 0.69 ≈ 36% of the time."],
+    related: ["one_in", "multi", "ai_chance"], see: "#/ask", seeLabel: "Ask AI",
   },
   roi: {
     group: "money", aka: ["profit and loss", "yield"], aliases: ["return on investment", "profit and loss", "p&l", "pnl", "net", "net profit", "yield", "total won"],
@@ -636,4 +774,6 @@ export const FAQ = [
     a: "<p>A model has to be tested on graded games before it deserves trust. Other sports show the market's chance (margin removed), the honest baseline, and say so.</p>" },
   { q: "How do I set limits or take a break?",
     a: "<p>In <a href=\"#/settings?focus=limits\">Settings → Limits</a>: a weekly budget, a reality-check reminder, and breaks from 24 hours to 3 months. A break can't be cut short.</p>" },
+  { q: "How do I find players projected for 20+ points tonight?",
+    a: "<p>Open the <a href=\"#/players\">Player finder</a> (Build → Find players, or Find a player on Today), or just ask Ask AI in your own words: \"who's going for 10+ boards tonight?\", \"anytime TD scorers\", \"PRA overs\". Both rank each player by the chance of reaching the number, with his last 5, last 10 and season record at it, tonight's projection and the posted line. It's free: no AI allowance on the Player finder, and no odds requests either way. See <a href=\"#/help/player_finder\">Player finder</a>.</p>" },
 ];

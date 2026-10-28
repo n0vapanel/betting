@@ -124,14 +124,16 @@ function setHtml(el, html) {
   if (key && focusLost()) el.querySelector(key)?.focus({ preventScroll: true });
 }
 
-/** Player search in a sheet (ESPN's search, any league; results open the player page or the inspector). */
+/** Player search in a sheet (ESPN's search, any league; results open the player page or the inspector), and the way
+ * into the Player finder (#/players: players ranked for a number). */
 function openSearch() {
   const s = sheet.open({
     title: "Find a player",
     size: "tall",
     body: `<div class="search-row"><label class="sr-only" for="player-q">Player name</label>
         <input id="player-q" class="input" type="search" placeholder="e.g. LeBron James" autocomplete="off" enterkeyhint="search"></div>
-      <ul class="list search-results" data-results></ul>`,
+      <ul class="list search-results" data-results></ul>
+      <a class="list-item finder-link" href="#/players">${icon("users", { size: 20 })}<span class="grow"><b>Player finder</b><span>Who's projected for 20+ points, 10+ boards or an anytime TD tonight</span></span>${icon("chevron", { size: 18 })}</a>`,
   });
   const input = s.body.querySelector("#player-q");
   const results = s.body.querySelector("[data-results]");

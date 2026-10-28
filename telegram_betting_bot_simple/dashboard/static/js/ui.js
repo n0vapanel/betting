@@ -941,6 +941,13 @@ export const GLOSSARY = {
     example: "A right 70% call scores +16; a wrong one −24.",
     see: "#/bets",
   },
+  player_finder: {
+    title: "Player finder",
+    short: "Players ranked for a number tonight: how often each got there, the projection, the chance and the posted line.",
+    body: "Pick a league, a stat and a number (\"20+ points\", \"3+ shots on goal\"), or each player's posted line, and today or tomorrow. For each player with a game the app counts how often he reached the number in his last 5 and last 10 games and this season, projects tonight (the NBA game model, with minutes and injuries; elsewhere a form model from the game log, labelled \"Recent form\") and works out the chance of getting there. Players who reached it at least once in their last 10, or are projected for 80% of it, are ranked by that chance: those projected to get there (or 50% likely or more) come first, and up to five more are \"Also close\". Players ruled out are left out; questionable ones carry a Q or GTD chip. The line and price are DraftKings' via ESPN; edge is the chance × that price − 1, shown only when the price is for exactly your number. Ask AI uses the same scan for \"who's projected for 20+ tonight?\". It's free: no AI allowance and no odds requests.",
+    example: "Projected 31.2 points with 9 of his last 10 at 20+ and an 82% chance: 20 or more in about 8 games of 10 like this one.",
+    see: "#/players",
+  },
 };
 
 let explainContext = () => ({});

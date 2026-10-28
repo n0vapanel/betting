@@ -11,7 +11,10 @@ answer is checked before anyone sees it:
   lose", "win back", calling a ticket safe, or nudging toward a bigger stake.
 
 A rejected answer is retried once with the reasons; after that the reader
-gets a template written by code from the same facts. The same checks guard
+gets a template written by code from the same facts. The chat assistant also
+sends back a reply that refuses or lectures while a tool could answer
+(refusal_problems), in the same one retry, and its templates include the
+player scan's (scan_template). The same checks guard
 the chat assistant's replies (ai/assistant.py), and ``ClaudeCaller`` is the
 one place both send requests to Claude: refusal fallbacks where the model
 supports them, plain-English errors and a cost estimate, as in ai/claude.py.
@@ -554,6 +557,100 @@ def problems(text: str, sources: Set[float], exempt: Optional["re.Pattern[str]"]
     return found
 
 
+# --- refusals and lectures ---------------------------------------------------------------------
+
+# A reply on a look-up, a build or an analysis that says no, or describes a tool's limits, while a tool could have
+# answered ("I can't pull up a list ... the props tool only works one player at a time"), or that lectures about the
+# downside nobody asked about ("a projection of 20 points doesn't mean he'll score 20", "close to a coin flip"). The
+# assistant sends it back once with a correction naming the tool to use, sharing the numbers check's one retry; a
+# second failure gets code's template from the tools already called.
+REFUSALS: Sequence[Tuple[str, "re.Pattern[str]"]] = [
+    ("I can't", re.compile(r"\bI\s+(?:can(?:'|’)?t|cannot|can\s+not)\b", re.I)),
+    ("I'm not able", re.compile(r"\bI(?:(?:'|’)m|\s+am)\s+not\s+able\b", re.I)),
+    ("I'm unable", re.compile(r"\bI(?:(?:'|’)m|\s+am)\s+unable\b", re.I)),
+    ("isn't possible", re.compile(r"\b(?:isn(?:'|’)?t|is\s+not|not)\s+possible\b", re.I)),
+    ("only works one", re.compile(r"\bonly\s+works?\s+(?:for\s+|on\s+|with\s+)?one\b", re.I)),
+    ("can't pull", re.compile(r"\b(?:can(?:'|’)?t|cannot|can\s+not)\s+pull\b", re.I)),
+    ("can't list", re.compile(r"\b(?:can(?:'|’)?t|cannot|can\s+not)\s+list\b", re.I)),
+]
+LECTURES: Sequence[Tuple[str, "re.Pattern[str]"]] = [
+    ("doesn't mean he'll", re.compile(r"\bdoes(?:n(?:'|’)?t|\s+not)\s+mean\s+(?:he|she|they)(?:(?:'|’)ll|\s+will)\b",
+                                      re.I)),
+    ("coin flip", re.compile(r"\bcoin[-\s]?flips?\b", re.I)),
+    ("no guarantee", re.compile(r"\bno\s+guarantees?\b", re.I)),
+    ("nothing is guaranteed", re.compile(r"\bnothing(?:(?:'|’)s|\s+is)\s+(?:ever\s+)?guaranteed\b", re.I)),
+    ("the house always wins", re.compile(r"\bthe\s+house\s+always\s+wins\b", re.I)),
+    ("the bookmaker always wins", re.compile(r"\bthe\s+(?:bookmakers?|bookies?|books?|sportsbooks?)\s+always\s+wins?\b",
+                                             re.I)),
+    ("chance of each one missing", re.compile(r"\bchance\s+of\s+each\s+(?:one\s+)?missing\b", re.I)),
+    ("you'll lose more", re.compile(r"\byou(?:(?:'|’)ll|\s+will)\s+lose\s+more\b", re.I)),
+]
+GUARDED_INTENTS = ("lookup", "build", "analyse")
+# Quoted words in a reply are someone else's (the user's question read back, a tool's label), not the reply's own
+_QUOTED = re.compile(r"\"[^\"\n]{0,300}\"|“[^”\n]{0,300}”|‘[^’\n]{0,300}’|«[^»\n]{0,300}»")
+# A user asking about the downside gets it: no lecture check then
+_ASKS_RISK = re.compile(r"\brisk|\bdownside\b|\bworst[-\s]case\b|\bchances?\s+of\s+(?:losing|missing|it\s+missing)\b"
+                        r"|\bhow\s+(?:likely|often)\b[^.?!]{0,40}\b(?:lose|loses|losing|miss|misses|missing|fail)\b"
+                        r"|\bcould\s+(?:it|he|she|they|this)\s+(?:lose|miss)\b|\bwhat\s+if\s+(?:it|he|she|they)\s+miss",
+                        re.I)
+
+
+# The app's own rules, which a reply may state with "I can't": only the user adds to the slip or places a bet, and
+# nothing suggests a bigger stake or gets round a budget or a break
+_RULE_TALK = re.compile(r"\b(?:slip|place|placing|placed|stakes?|budget|break|helpline|deposit|wager\s+for)\b", re.I)
+_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _route_intent(route: Any) -> Optional[str]:
+    """The intent of a route given as the assistant's Route, a mapping ({"intent": ...}) or the intent itself."""
+    if isinstance(route, str):
+        return route
+    if isinstance(route, Mapping):
+        return route.get("intent")
+    return getattr(route, "intent", None)
+
+
+def refusal_problems(text: str, route: Any, tools_available: Any, asked: str = "", allowed: str = "") -> List[str]:
+    """Why a reply refuses or lectures when the tools could answer (empty when it doesn't), on a look-up, build or
+    analyse ``route`` (the assistant's Route, a mapping or an intent; anything else, a support reply included, is
+    never checked).
+
+    - A refusal ("I can't", "I'm not able", "I'm unable", "isn't possible", "only works one", "can't pull", "can't
+      list") counts only while ``tools_available`` (the tools that could answer, or True): picks paused after a
+      warning sign leave nothing to call, and saying so is right.
+    - A lecture ("doesn't mean he'll", "coin flip", "no guarantee", "nothing is guaranteed", "the house/bookmaker
+      always wins", "chance of each one missing", "you'll lose more") counts unless the user asked about the risk.
+
+    Quoted words are left out, and so is a phrase the user's own message (``asked``) used or the turn's tool results
+    (``allowed``, e.g. a chance label "coin flip") hold: those are theirs, not the reply's."""
+    if _route_intent(route) not in GUARDED_INTENTS or not text:
+        return []
+    own = _QUOTED.sub(" ", text)
+    asked_text, allowed_text = asked or "", allowed or ""
+    found: List[str] = []
+
+    def said(patterns: Sequence[Tuple[str, "re.Pattern[str]"]], rules: bool = False) -> List[str]:
+        names = []
+        for name, pattern in patterns:
+            if pattern.search(asked_text) or pattern.search(allowed_text):
+                continue
+            # "I can't add it to your slip" or "I can't suggest a bigger stake" is the app's rule, not a refusal
+            sentences = [s for s in _SENTENCE.split(own) if pattern.search(s)]
+            if any(not (rules and _RULE_TALK.search(sentence)) for sentence in sentences):
+                names.append(name)
+        return names
+
+    if tools_available:
+        refused = said(REFUSALS, rules=True)
+        if refused:
+            found.append("a refusal (" + ", ".join(f'"{name}"' for name in refused) + ") although a tool can answer")
+    if not _ASKS_RISK.search(asked_text):
+        lectured = said(LECTURES)
+        if lectured:
+            found.append("a lecture nobody asked for (" + ", ".join(f'"{name}"' for name in lectured) + ")")
+    return found
+
+
 # --- formatting helpers shared with the templates ---------------------------------------------
 
 def pct(p: Any, decimals: int = 0) -> str:
@@ -914,6 +1011,140 @@ def picks_template(card: Dict[str, Any], most: int = 5) -> str:
             line += f": {first.rstrip('.')}"
         lines.append(line + ".")
     lines.append("Add any of them to your slip from the card below.")
+    return "\n".join(lines)
+
+
+FORM_WORDS = "from recent form"  # how a row from the form model (not the NBA game model) is labelled everywhere
+
+
+def _number(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def scan_hits(hits: Any, window: str = "l10") -> Optional[str]:
+    """A row's history in words: "9 of last 10" (``window`` "l5" or "l10"), "30 of 45 this season"; None without
+    games. ``hits`` is the scan's {l5: [hits, games], l10: [...], season: [...]}."""
+    pair = (hits or {}).get(window) if isinstance(hits, Mapping) else None
+    if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+        return None
+    made, games = (_number(part) for part in pair)
+    if made is None or not games:
+        return None
+    if window == "season":
+        return f"{made:g} of {games:g} this season"
+    return f"{made:g} of last {games:g}"
+
+
+def scan_matchup(row: Mapping[str, Any]) -> str:
+    """"DAL v PHX": the player's team v the opponent (abbreviations when the scan has them)."""
+    team = row.get("team_abbr") or row.get("team")
+    opponent = row.get("opponent_abbr") or row.get("opponent")
+    if team and opponent:
+        return f"{team} v {opponent}"
+    return str(team or opponent or row.get("game") or "")
+
+
+def scan_when(content: Mapping[str, Any]) -> str:
+    return "tomorrow" if content.get("day") == "tomorrow" else "tonight"
+
+
+def scan_ask(content: Mapping[str, Any]) -> str:
+    """The ask in words ("20+ points"): the scan's own, else built from its fields."""
+    ask = content.get("ask")
+    if isinstance(ask, str) and ask.strip():
+        return ask.strip()
+    if isinstance(ask, Mapping) and ask.get("label"):
+        return str(ask["label"])
+    label = content.get("stat_label") or content.get("stat") or "the stat"
+    threshold = _number(content.get("threshold"))
+    if threshold is None:
+        return f"{label} against the posted line"
+    if content.get("side") == "under":
+        return f"under {threshold - 0.5:g} {label}"
+    return f"{threshold:g}+ {label}"
+
+
+def scan_heading(content: Mapping[str, Any]) -> str:
+    """A scan's heading: "Projected for 20+ points" (or "under 9.5 rebounds") for a number, "Strongest anytime TD" or
+    "Strongest PRA overs (posted lines)" for a yes/no ask or each player's posted line."""
+    ask = scan_ask(content)
+    if "+" in ask.split(" ")[0] or ask.startswith("under "):
+        return f"Projected for {ask}"
+    return f"Strongest {ask}"
+
+
+def scan_row_text(row: Mapping[str, Any], under: bool = False) -> str:
+    """One scan row in code's words: "Luka Dončić (DAL v PHX) 31.2 projected, 82% to get there, 9 of last 10"."""
+    name = " ".join(str(row.get("name") or "A player").split())
+    matchup = scan_matchup(row)
+    bits = []
+    projection = _number(row.get("projection"))
+    if projection is not None:
+        bits.append(f"{projection:.1f} projected")
+    chance = _number(row.get("chance"))
+    if chance is not None:
+        bits.append(f"{pct(chance)} to {'stay under' if under else 'get there'}")
+    history = scan_hits(row.get("hits")) or scan_hits(row.get("hits"), "season")
+    if history:
+        bits.append(history)
+    line = row.get("line") if isinstance(row.get("line"), Mapping) else None
+    if line and line.get("kind") == "milestone" and _number(line.get("line")) is not None:
+        reached = line.get("label") or f"{_number(line.get('line')) + 0.5:g}+"  # a 19.5 milestone is "20+"
+        bits.append(f"{reached} posted")
+    elif line and _number(line.get("line")) is not None:
+        bits.append(f"line {_number(line['line']):g} posted")
+    text = f"{name} ({matchup})" if matchup else name
+    if row.get("status") and str(row["status"]).lower() not in ("active", "healthy", "available"):
+        text += f" [{row['status']}]"
+    if bits:
+        text += " " + ", ".join(bits)
+    if row.get("model") == "form":
+        text += f" ({FORM_WORDS})"
+    return text
+
+
+def scan_loading_text(loading: Any) -> Optional[str]:
+    """"8 of 10 games loaded so far: ask again in a minute for the rest." for a partial board, else None."""
+    if not isinstance(loading, Mapping):
+        return None
+    ready, total = _number(loading.get("games_ready")), _number(loading.get("games_total"))
+    if not total:  # the day's games themselves are still being read
+        return "The games are still loading: ask again in a minute."
+    if ready is None or ready >= total:
+        return None
+    return f"{ready:g} of {total:g} games loaded so far: ask again in a minute for the rest."
+
+
+def scan_template(content: Mapping[str, Any], most: int = 5) -> str:
+    """The chat's answer in code's own words for a player scan (players_scan's card, or Lab.player_scan's result),
+    strongest first: "Projected for 20+ points tonight:" then one line per player (up to ``most``) with the
+    projection, the chance and the history, then "Also close: ..." and, for a partial board, how many games are
+    loaded. It never refuses: when nobody qualifies yet it says so and what's still loading."""
+    under = content.get("side") == "under"
+    ask, when, heading = scan_ask(content), scan_when(content), scan_heading(content)
+    players = [row for row in content.get("players") or [] if isinstance(row, Mapping)]
+    close = [row for row in content.get("close") or [] if isinstance(row, Mapping)]
+    lines = []
+    if players:
+        lines.append(f"{heading} {when}:")
+        lines += [f"{row.get('rank') or i}. {scan_row_text(row, under)}" for i, row in enumerate(players[:most], 1)]
+        rest = players[most:] + close
+        if rest:
+            lines.append("Also close: " + "; ".join(scan_row_text(row, under) for row in rest[:3]) + ".")
+    elif close:
+        lines.append(f"Nobody is projected for {ask} {when} yet; closest:")
+        lines += [f"{i}. {scan_row_text(row, under)}" for i, row in enumerate(close[:most], 1)]
+    else:
+        where = ", ".join(str(league) for league in content.get("leagues_without_games") or [])
+        lines.append(f"No player is projected for {ask} {when} yet" + (f" ({where}: no games)" if where else "") + ".")
+    loading = scan_loading_text(content.get("loading"))
+    if loading:
+        lines.append(loading)
+    if players or close:
+        lines.append("The card below has each player's lines and history.")
     return "\n".join(lines)
 
 

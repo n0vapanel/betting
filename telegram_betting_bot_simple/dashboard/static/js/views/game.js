@@ -26,6 +26,7 @@ import { factorsSection, bindFactors } from "./markets/factors.js";
 import { goalsSection } from "./markets/goals.js";
 import { ensureMarketStyles } from "./markets/styles.js";
 import { gameContext, bindContext, adjustedNote, RECHECK_MS } from "./context/conditions.js";
+import { scanLeague } from "./players/scan.js";
 
 let current = null; // {game, params} for the Telegram main button
 
@@ -146,7 +147,8 @@ function playersHtml(game, side) {
     return `<p class="muted small">Find a player to see their last 10 games, hit rates and news.</p>
       <div class="search-row" style="margin-top:8px"><label class="sr-only" for="game-player-q">Player name</label>
         <input id="game-player-q" class="input" type="search" placeholder="Search ${esc(leagueTitle(game.league))} players" autocomplete="off" data-player-search></div>
-      <ul class="list search-results" data-player-results></ul>`;
+      <ul class="list search-results" data-player-results></ul>
+      ${scanLeague(game.league) ? `<a class="list-item finder-link" href="${esc(`#/players?league=${encodeURIComponent(game.league)}`)}">${icon("users", { size: 20 })}<span class="grow"><b>Player finder</b><span>${esc(leagueTitle(game.league))} players ranked for a number tonight</span></span>${icon("chevron", { size: 18 })}</a>` : ""}`;
   }
   const list = game.players[side] || [];
   return `${segmented("players-side", [{ value: "away", label: shortName(game.away, game.league) }, { value: "home", label: shortName(game.home, game.league) }], side, { label: "Team" })}

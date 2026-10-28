@@ -62,6 +62,11 @@ ESPN's cache and kept: they don't change). Each row's ``badges`` then gain the b
 tz-away:3, adj, ...) after the slate's own (live, neutral, b2b-home/b2b-away); building the slate never waits for the
 worker and never fetches for it.
 
+The player scan (v3, data/player_board.py): at most every PLAYERS_EVERY seconds a round hands the games still to start
+to the PlayerBoard's ``prewarm`` (the ``player_board`` given here, else the service's or its Lab's), which starts the
+boards of leagues with a game in the next 12 hours in the background (the NBA first, one cold build at a time) and
+their due props and injuries refreshes. It returns at once; nothing is fetched on the slate's thread.
+
 Size: each game leaves out ``espn_id`` or ``odds_id`` when its ``id`` already holds it and sends ESPN logos as their
 path after https://a.espncdn.com/ (the app puts the host back). Each team keeps its full ``name``: Today's search
 finds a game by city or full name ("Brooklyn", "Golden State") and a slip names the team as the game page does,
@@ -169,6 +174,7 @@ MODEL_DETAIL = "NBA team model alone: points for and against, home court, rest, 
 # --- context (v3 Stage 4: data/context.py) ---
 CONTEXT_EVERY = 60.0  # the context worker's round: each game's venue & conditions block, in the background
 CONTEXT_SOON = 5.0  # a reader asked for a block not built yet: a round now, at most this often (request_context)
+PLAYERS_EVERY = 5 * 60.0  # the player boards' game-day prewarm (data/player_board.py): at most this often
 PAST_KEPT = 600  # past scoreboards (league, day) the context worker keeps: they don't change
 
 
@@ -710,7 +716,8 @@ class SlateBuilder:
                  now: Callable[[], float] = time.time, polymarket: Any = None, kalshi: Any = None,
                  ratings: Any = None, markets_every: float = MARKETS_EVERY, log_consensus: bool = True,
                  on_change: Optional[Callable[..., Any]] = None, context: Any = None,
-                 context_every: float = CONTEXT_EVERY) -> None:
+                 context_every: float = CONTEXT_EVERY, player_board: Any = None,
+                 players_every: float = PLAYERS_EVERY) -> None:
         self.odds = odds
         self.espn = espn
         self.store = store
@@ -782,6 +789,11 @@ class SlateBuilder:
         self._context_asked = -math.inf
         self._past: "OrderedDict[Tuple[str, datetime.date], List[Dict[str, Any]]]" = OrderedDict()
         self._past_lock = threading.Lock()
+        # The player scan's boards (data/player_board.py's PlayerBoard; else the service's ``player_board`` when one
+        # is set): prewarmed for leagues with a game in the next 12 hours, at most every ``players_every`` seconds
+        self.player_board = player_board
+        self.players_every = max(1.0, float(players_every))
+        self._players_next = 0.0
 
     # --- serving -----------------------------------------------------------------------------------
 
@@ -958,6 +970,7 @@ class SlateBuilder:
             self._schedule_markets(games, now)
             self._apply_context(games)
             self._schedule_context(games, now)
+            self._prewarm_players(games, now)
             self._publish(leagues, games, as_of, now, self._quota())
             return self._next_delay(season, today, self._now())
 
@@ -1805,6 +1818,32 @@ class SlateBuilder:
             self._context_busy = False
         if again:
             self.wake()
+
+    def _prewarm_players(self, games: Sequence[Mapping[str, Any]], now: float) -> None:
+        """The player boards' game-day prewarm: hand the games to be played to PlayerBoard.prewarm, which starts the
+        boards of leagues with a game in the next 12 hours (in the background: it returns at once) and the props and
+        injuries refreshes that are due. At most every ``players_every`` seconds; never fetches here."""
+        if now < self._players_next:
+            return
+        board = self.player_board if self.player_board is not None else getattr(self.service, "player_board", None)
+        if board is None:
+            # The dashboard's Lab makes the process's board on first use (data/player_board.board_for): asked here, the
+            # prewarm runs from the first round rather than from the first scan
+            try:
+                board = getattr(getattr(self.service, "lab", None), "player_board", None)
+            except Exception:
+                log.exception("Slate: the player boards couldn't start")
+                board = None
+        prewarm = getattr(board, "prewarm", None)
+        if not callable(prewarm):
+            return
+        self._players_next = now + self.players_every
+        rows = [{"league": game.get("league"), "start": game.get("start"), "status": game.get("status")}
+                for game in games if game.get("status") == "pre"]
+        try:
+            prewarm(rows)
+        except Exception:
+            log.exception("Slate: the player boards' prewarm failed")
 
     def request_context(self) -> None:
         """A reader asked for a game whose context block isn't built yet (ContextService.for_game queued it): run the

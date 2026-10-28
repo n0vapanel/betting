@@ -30,7 +30,7 @@ import {
   gameShort, picksBlock, blockNote,
 } from "./common.js";
 import { createAnalysis } from "./analyse.js";
-import { createBuilder } from "./target.js";
+import { createBuilder, finderCardHtml } from "./target.js";
 
 let saved = null; // {text, view}: the slip as last saved (POST /api/slips) and the request it was saved from
 // The slip before "Clear" or a replace, so it can be put back: {legs, type, stake, k, system, reason:
@@ -428,7 +428,8 @@ export function mountSlip(root, { params, refresh }) {
       <div data-action-note></div>
     </section>
     <div data-analysis></div>
-    <div data-builder></div>`;
+    <div data-builder></div>
+    ${finderCardHtml()}`;
   const $ = (sel) => root.querySelector(sel);
   const stakeInput = $("#bx-stake");
   let stakeTimer = null;

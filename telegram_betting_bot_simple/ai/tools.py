@@ -42,6 +42,15 @@ for Claude to quote (each option with its own relaxed words: the options
 loosen the same rule to different steps). brain_top_picks ranks the likeliest winners (the Builder's
 legs, one a game, by the brain's chance) as a card of picks, each with its
 own "Add to slip".
+
+The player scan (v3): players_scan ranks today's or tomorrow's players for a
+stat and a number ("20+ points", "10+ boards", "anytime TD", "PRA overs" on
+each posted line) through Lab.player_scan (engine/scan.py over the player
+board: ESPN game logs and DraftKings props through the shared cache, never
+the Odds API). Its facts carry every number the reply may quote (projection,
+chance, hits as "9/10" and "9 of last 10", averages, line, price, edge) and
+its player_scan card the ranked rows; a row is for reading (the slip takes
+game picks).
 """
 
 from __future__ import annotations
@@ -63,7 +72,7 @@ from ..data.leagues import POPULAR_LEAGUES
 from ..engine import consensus
 from ..engine.pasted import system_key
 from ..engine.tickets import ai_given_no_push, chance_label, combinations, one_in
-from .explain import relaxed_texts
+from .explain import FORM_WORDS, relaxed_texts, scan_ask, scan_heading, scan_hits, scan_when
 
 # The leagues the assistant may name and load odds for, chosen on purpose (not every scoreboard the slate shows):
 # each key is spelled out in the router prompt and in about ten tool schemas, so every key costs input tokens on
@@ -116,10 +125,28 @@ PASTED_SOURCE = ("The user's pasted slip at their own odds, priced by the brain:
 MAX_PASTED_LEGS = 20
 TOP_PICKS_SOURCE = ("The brain's likeliest winners: the Builder's legs (cached boards at books a person can bet at, never a "
                     "game under way or a stale price), ranked by chance in code, one per game")
+# The player scan (engine/scan.py over data/player_board.py, through Lab.player_scan): players ranked for a stat and a
+# number. The stat keys the router and players_scan take (engine/scan.py's STATS across its leagues); a phrase
+# ("boards", "threes", "shots on goal") is mapped through the aliases by the Lab
+SCAN_STAT_KEYS: Tuple[str, ...] = (
+    "pts", "reb", "ast", "fg3m", "stl", "blk", "stocks", "pra", "pr", "pa", "ra", "dd", "td",
+    "pass_yds", "pass_td", "rush_yds", "rec_yds", "rec", "rush_rec_yds", "anytime_td",
+    "goals", "assists", "points", "sog", "saves", "anytime_goal",
+    "hits", "tb", "hr", "rbi", "runs", "hrr", "k",
+    "shots", "sot",
+)
+SCAN_DAYS = ("today", "tomorrow")
+SCAN_N = 10  # players a scan returns by default
+MAX_SCAN_N = 25
+SCAN_SOURCE = ("The player scan: ESPN game logs (hits in the last 5, last 10 and this season), the NBA game model's "
+               "projection (else a recency-weighted form model from the game log), DraftKings lines from ESPN; "
+               "ranked by chance in code")
+# The app's slip takes game picks: a scan row is for reading (its price shown), as on the player page
+SCAN_SLIP_NOTE = "Player props are for reading here; the slip takes game picks."
 # Tools that price or build tickets: off while picks are paused after a warning sign
 PICK_TOOLS = frozenset({"odds_get_prices", "brain_price_legs", "ticket_price", "ticket_build", "ticket_analyse",
                         "rollover_simulate", "slip_propose", "player_get_props", "pasted_slip_analyse",
-                        "brain_top_picks"})
+                        "brain_top_picks", "players_scan"})
 
 
 # --- what Claude sees -------------------------------------------------------------------------------
@@ -272,6 +299,24 @@ TOOLS: List[Dict[str, Any]] = [
          "system": {"type": "string", "description": "system only, e.g. trixie, patent, yankee, lucky15"},
      }, optional=("drop", "stake", "split", "ticket_type", "k", "system"))},
 ]
+# The player scan (v3): not strict either; a list of players always goes through it
+TOOLS.append({
+    "name": "players_scan",
+    "description": "Players ranked for a stat and a number today or tomorrow ('20+ points', '10+ boards', 'anytime "
+                   "TD', 'PRA overs'), strongest first: each one's hits (last 5, last 10, season), projection, chance "
+                   "and posted line, plus who is close. Use it for any list of players.",
+    "input_schema": _obj({
+        "league": {**_LEAGUE, "description": "Leave out for the leagues with games that day"},
+        "stat": {"type": "string", "description": "A stat key (pts, reb, ast, fg3m, pra, sog, k, anytime_td; td is the "
+                                                  "NBA triple-double, sent with its league) or the user's word "
+                                                  "('boards', 'threes')"},
+        "threshold": {"type": ["number", "null"], "description": "The number to reach (20 for 20+ or over 19.5, 1 "
+                                                                 "for anytime); null for each posted line"},
+        "side": {"type": "string", "enum": ["over", "under"]},
+        "day": {"type": "string", "enum": list(SCAN_DAYS)},
+        "n": {"type": "integer", "description": f"1 to {MAX_SCAN_N}"},
+    }, optional=("league", "side", "day", "n")),
+})
 # The learning loop (learn/): read only, from the store; never a pick tool
 TOOLS.append({"name": "brain_progress",
               "description": "Is the brain getting better? Per sport its log loss against the sharp market (95% "
@@ -383,6 +428,29 @@ class NoInput(BaseModel):
     pass
 
 
+class ScanInput(BaseModel):
+    """players_scan's input: the league (None: the leagues with games that day), the stat (a key or a phrase), the
+    number to reach (None: each player's posted line), over or under, today or tomorrow, how many players."""
+    league: Optional[LeagueKey] = None  # type: ignore[valid-type]
+    stat: str = Field(min_length=1, max_length=40)
+    threshold: Optional[float] = Field(None, gt=0, le=999)
+    side: Literal["over", "under"] = "over"
+    day: Literal[SCAN_DAYS] = "today"  # type: ignore[valid-type]
+    n: Optional[int] = Field(None, ge=1, le=MAX_SCAN_N)
+
+    @field_validator("league", "side", "day", mode="before")
+    @classmethod
+    def _plain(cls, value: Any) -> Any:
+        """"" is no league; "Tonight" is today; words are read in lower case."""
+        if isinstance(value, str):
+            value = value.strip().lower()
+            if value == "":
+                return None
+            if value == "tonight":
+                return "today"
+        return value
+
+
 class PastedInput(BaseModel):
     pasted_id: int = Field(ge=1)
     drop: List[int] = Field(default_factory=list, max_length=MAX_PASTED_LEGS)
@@ -400,6 +468,7 @@ INPUTS: Dict[str, type] = {
     "ticket_price": TicketInput, "ticket_build": BuildInput, "ticket_analyse": TicketInput,
     "rollover_simulate": RolloverInput, "slip_propose": TicketInput, "user_get_context": NoInput,
     "pasted_slip_analyse": PastedInput, "brain_top_picks": TopPicksInput, "brain_progress": NoInput,
+    "players_scan": ScanInput,
 }
 
 
@@ -663,6 +732,103 @@ def picks_card(found: Mapping[str, Any], leagues: Sequence[str]) -> Dict[str, An
             "leagues": list(leagues), "picks": picks, "as_of": found.get("as_of")}
 
 
+SCAN_FIELDS = ("ask", "stat", "stat_label", "threshold", "side", "day", "leagues", "players", "close", "loading",
+               "as_of", "leagues_without_games", "note")
+
+
+def scan_card(found: Mapping[str, Any]) -> Dict[str, Any]:
+    """players_scan's card: Lab.player_scan's result as it came (the ranked rows, the close ones, a partial board's
+    loading), titled "Projected for 20+ points · NBA · tonight". A row offers "Add to slip" only when its own
+    ``addable`` says so (the app's slip takes game picks, so for now none does: the price is shown instead)."""
+    where = " + ".join(LEAGUE_TITLES.get(league, str(league).split("_")[-1].upper())
+                       for league in found.get("leagues") or [])
+    title = " · ".join(part for part in (scan_heading(found), where, scan_when(found)) if part)
+    card = {"type": "player_scan", "source": "players_scan", "title": title, "slip_note": SCAN_SLIP_NOTE}
+    card.update({key: found.get(key) for key in SCAN_FIELDS if found.get(key) is not None})
+    card.setdefault("players", [])
+    card.setdefault("close", [])
+    return card
+
+
+def _hits_fact(hits: Any) -> Optional[Dict[str, str]]:
+    """A row's hits as the reply may write them ("9/10" per window)."""
+    if not isinstance(hits, Mapping):
+        return None
+    out = {}
+    for window, pair in hits.items():
+        if isinstance(pair, (list, tuple)) and len(pair) == 2 and all(isinstance(x, (int, float)) for x in pair):
+            out[str(window)] = f"{pair[0]:g}/{pair[1]:g}"
+    return out or None
+
+
+def _tenth(value: Any) -> Any:
+    number = _p(value)
+    return round(number, 1) if number is not None else None
+
+
+def scan_row_facts(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One scan row as Claude sees it: every number the reply may quote (the projection, the chance, the hits as
+    "9/10" and in words, the averages, the posted line and price, the edge) and the row's own short reasons."""
+    hits = row.get("hits")
+    history = [words for words in (scan_hits(hits, "l5"), scan_hits(hits, "l10"), scan_hits(hits, "season")) if words]
+    avg = row.get("avg") if isinstance(row.get("avg"), Mapping) else {}
+    why = row.get("why")
+    facts = {
+        "rank": row.get("rank"), "name": row.get("name"), "league": row.get("league"), "team": row.get("team"),
+        "opponent": row.get("opponent"), "game": row.get("game"), "start": row.get("start"),
+        "status": row.get("status"), "status_tag": row.get("status_tag"), "minutes": _tenth(row.get("minutes")),
+        "threshold": row.get("threshold"), "projection": _tenth(row.get("projection")),
+        "chance": _p(row.get("chance")), "chance_source": row.get("chance_source"), "model": row.get("model"),
+        "model_label": row.get("model_label") or (FORM_WORDS if row.get("model") == "form" else None),
+        "hits": _hits_fact(hits), "history": history or None,
+        "avg": {str(k): _tenth(v) for k, v in avg.items() if _tenth(v) is not None} or None,
+        "line": dict(row["line"]) if isinstance(row.get("line"), Mapping) else None, "edge": _p(row.get("edge")),
+        "why": [str(entry) for entry in why][:3] if isinstance(why, (list, tuple)) else why,
+    }
+    return {key: value for key, value in facts.items() if value not in (None, "", [], {})}
+
+
+def scan_facts(found: Mapping[str, Any]) -> Dict[str, Any]:
+    """players_scan's result for Claude: the ask, the ranked players and the close ones (scan_row_facts), the
+    loading state of a partial board, the leagues without games, the source and a hint to lead with the players."""
+    players = [row for row in found.get("players") or [] if isinstance(row, Mapping)]
+    close = [row for row in found.get("close") or [] if isinstance(row, Mapping)]
+    content: Dict[str, Any] = {
+        "ask": scan_ask(found), "stat": found.get("stat"), "threshold": found.get("threshold"),
+        "side": found.get("side") or "over", "day": found.get("day") or "today",
+        "leagues": list(found.get("leagues") or []),
+        "players": trim([scan_row_facts(row) for row in players], items=MAX_SCAN_N, text=160),
+        "close": trim([scan_row_facts(row) for row in close], items=5, text=160),
+        "source": SCAN_SOURCE,
+    }
+    if found.get("more"):
+        content["more"] = found["more"]  # how many more qualified beyond the players shown
+    if found.get("games"):
+        content["games"] = found["games"]
+    loading = found.get("loading")
+    if isinstance(loading, Mapping):
+        content["loading"] = {key: loading.get(key) for key in ("games_ready", "games_total")}
+    if found.get("leagues_without_games"):
+        content["leagues_without_games"] = list(found["leagues_without_games"])
+    if found.get("note"):
+        content["note"] = found["note"]
+    lead = ("Lead with the players, strongest first: for each, the projection, the chance and the history in a few "
+            "words (e.g. '31.2 projected, 82% to get 20+, 9 of last 10'), and the posted line when there is one. "
+            "Rows with model form are from recent form: say so. With no number asked, each row's threshold is its "
+            "posted line's. The card shows every row")
+    if players:
+        content["hint"] = lead
+    elif close:
+        content["hint"] = "Nobody reaches it yet: give the closest ones the same way, strongest first"
+    else:
+        content["hint"] = "No player qualifies right now: say so in one line and offer another stat, number or day"
+    ready, total = ((content.get("loading") or {}).get(key) or 0 for key in ("games_ready", "games_total"))
+    if content.get("loading") and (ready < total or not total):
+        content["hint"] += ("; the board is still loading: give what's ready and say in one line how many games are "
+                            "loaded so far (loading)")
+    return content
+
+
 def plan_card(body: Dict[str, Any], compare: Dict[str, Any]) -> Dict[str, Any]:
     return {"type": "plan", "source": "rollover_simulate",
             "title": f"{body['days']}-day rollover at {compare.get('min_odds') or body['min_odds']}",
@@ -866,6 +1032,7 @@ STEPS: Dict[str, Callable[[Dict[str, Any]], str]] = {
     "slip_propose": lambda a: "Preparing a slip for you to check…",
     "user_get_context": lambda a: "Checking your settings…",
     "pasted_slip_analyse": lambda a: "Re-checking your slip…",
+    "players_scan": lambda a: f"Scanning {'tomorrow' if a.get('day') == 'tomorrow' else 'tonight'}'s players…",
 }
 
 
@@ -916,7 +1083,7 @@ class Toolbox:
             "ticket_price": self._price, "ticket_build": self._build, "ticket_analyse": self._analyse,
             "rollover_simulate": self._rollover, "slip_propose": self._propose, "user_get_context": self._context,
             "pasted_slip_analyse": self._pasted, "brain_top_picks": self._top_picks,
-            "brain_progress": self._brain_progress,
+            "brain_progress": self._brain_progress, "players_scan": self._players_scan,
         }
 
     def _as_of(self) -> str:
@@ -1457,6 +1624,21 @@ class Toolbox:
         summary = f"brain_top_picks({', '.join(leagues)}): " + ("; ".join(
             f"{pick.get('label')} [{_ref_text(pick.get('ref') or {})}]" for pick in picks) or "no picks")
         cards = [picks_card(found, leagues)] if picks else []
+        return content, summary, cards
+
+    def _players_scan(self, data: ScanInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
+        """players_scan: Lab.player_scan (engine/scan.py over the player board: ESPN game logs, the NBA model, ESPN's
+        DraftKings props through the shared cache; no Odds API quota) as facts Claude may quote and a player_scan
+        card. A partial board answers with what's ready and its loading state."""
+        found = self.lab.player_scan(self.uid, data.league, data.stat, data.threshold, data.side, data.day,
+                                     data.n or SCAN_N) or {}
+        content = scan_facts(found)
+        rows = [row for row in found.get("players") or [] if isinstance(row, Mapping)]
+        shown = "; ".join(f"{row.get('name')} {_tenth(row.get('projection'))} ({_p(row.get('chance'))})"
+                          for row in rows[:5])
+        leagues = ", ".join(found.get("leagues") or []) or "no league with games"
+        summary = f"players_scan({content['ask']}, {leagues}, {content['day']}): {shown or 'nobody yet'}"
+        cards = [scan_card(found)] if rows or found.get("close") or found.get("loading") else []
         return content, summary, cards
 
     def _brain_progress(self, data: NoInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:

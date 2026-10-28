@@ -450,20 +450,25 @@ class EspnClient:
                             state=None if season is None else "past")
 
     def roster(self, league: str, team_id: str) -> List[Dict[str, Any]]:
-        """The team's players: id, name, position and injury status ('' when healthy)."""
+        """The team's players: id, name, position and injury status ('' when healthy). The NFL's, NHL's and MLB's
+        rosters come in groups (offense, "Centers", "Pitchers", the NFL's practice squad): each of their players also
+        carries his ``group``."""
         sport, path = LEAGUES[league]
 
         def load() -> List[Dict[str, Any]]:
             data = self._get(f"{SITE}/{sport}/{path}/teams/{team_id}/roster")
             players = []
-            for athlete in data.get("athletes", []):
+            for athlete, group in _roster_athletes(data.get("athletes", [])):
                 injuries = athlete.get("injuries") or []
-                players.append({
+                player = {
                     "id": athlete["id"],
                     "name": athlete.get("displayName"),
                     "position": (athlete.get("position") or {}).get("abbreviation", ""),
                     "status": injuries[0].get("status", "") if injuries else "",
-                })
+                }
+                if group is not None:
+                    player["group"] = group
+                players.append(player)
             return players
 
         return self._cached(("espn", "roster", league, str(team_id)), "roster", load)
@@ -602,6 +607,21 @@ class EspnClient:
             for event in events
             for competitor in event.get("competitions", [{}])[0].get("competitors", [])
         }
+
+
+def _roster_athletes(entries: Any) -> List[Tuple[Dict[str, Any], Optional[str]]]:
+    """(athlete, group) for a roster's players: a flat list (the NBA's, soccer's: group None), or ESPN's groups of
+    them ({"position": "offense", "items": [...]}, the NFL's, NHL's and MLB's: each player with his group's name)."""
+    out: List[Tuple[Dict[str, Any], Optional[str]]] = []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        if isinstance(entry.get("items"), list):
+            group = str(entry.get("position") or "") or None
+            out += [(item, group) for item in entry["items"] if isinstance(item, dict) and item.get("id")]
+        elif entry.get("id"):
+            out.append((entry, None))
+    return out
 
 
 def _home_record(stats: Any) -> Optional[str]:

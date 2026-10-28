@@ -57,7 +57,8 @@ from ..ai.assistant import (
     risk_flags,
     support_message,
 )
-from ..ai.explain import first_reason, money, one_in_text, pct, relaxed_texts
+from ..ai.explain import (FORM_WORDS, first_reason, money, one_in_text, pct, relaxed_texts, scan_loading_text,
+                          scan_matchup)
 from ..ai.slip_reader import MAX_IMAGE_BYTES
 from ..ai.tools import pasted_card, pasted_label
 from ..config import Config
@@ -77,6 +78,7 @@ PRIVATE_MESSAGE = "AI chat is private for now; tap /start to browse games."
 NO_AI_MESSAGE = "The AI chat isn't switched on here (the server needs ANTHROPIC_API_KEY). Tap /start to browse games."
 ASK_PROMPT = ("💬 <b>Ask AI</b>\nType your question as a normal message, for example:\n"
               "• <i>Who does the AI favour in the NBA tonight?</i>\n"
+              "• <i>Players projected for 20+ points tonight</i>\n"
               "• <i>NBA, $10 to get about $50 back, max 3 legs</i>\n"
               "• <i>What are the real odds of a 5-day rollover at 2.0?</i>\n\n"
               "Our code works out every number; the AI explains them.")
@@ -329,6 +331,112 @@ def _picks_text(card: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+MAX_SCAN_SHOWN = 5  # a player scan's rows written out (the app's card has them all)
+MAX_SCAN_VIEW = 3  # "View player" buttons under a scan: its top rows
+SCAN_PLAYER_GONE = "This player isn't available any more."
+
+
+def _decimal_price(price: Any) -> Optional[str]:
+    """A price as decimal odds to 2 places ("1.87"), from 1.87, "1.87" or {"decimal": 1.87}; None without one."""
+    if isinstance(price, dict):
+        price = price.get("decimal")
+    try:
+        value = float(price)
+    except (TypeError, ValueError):
+        return None
+    return f"{value:.2f}" if value > 1 else None
+
+
+def scan_line_text(line: Any) -> Optional[str]:
+    """A scan row's posted line and price: "o24.5 1.87 · u24.5 1.95 (DraftKings)", "20+ 1.62" for a milestone,
+    "yes 2.10" for a yes/no prop; "(may be out of date)" when the line couldn't refresh."""
+    if not isinstance(line, dict):
+        return None
+    number = line.get("line")
+    bits = []
+    over, under, yes = _decimal_price(line.get("over")), _decimal_price(line.get("under")), _decimal_price(line.get("yes"))
+    shown = f"{number:g}" if isinstance(number, (int, float)) and not isinstance(number, bool) else None
+    if line.get("kind") == "milestone" and isinstance(number, (int, float)) and (over or yes):
+        reached = line.get("label") or f"{number + 0.5:g}+"  # a 2.5 milestone is "3+"
+        bits.append(f"{reached} {over or yes}")
+    else:
+        if over and shown:
+            bits.append(f"o{shown} {over}")
+        if under and shown:
+            bits.append(f"u{shown} {under}")
+        if yes and not bits:
+            bits.append(f"yes {yes}")
+    if not bits:
+        return None
+    text = " · ".join(bits) + (f" ({line['book']})" if line.get("book") else "")
+    return text + (" (may be out of date)" if line.get("stale") else "")
+
+
+def _scan_row_text(row: Dict[str, Any], number: int, under: bool) -> List[str]:
+    esc = html.escape
+    head = f"{row.get('rank') or number}. <b>{esc(str(row.get('name') or 'A player'))}</b>"
+    matchup = scan_matchup(row)
+    if matchup:
+        head += f" ({esc(matchup)})"
+    status = str(row.get("status") or "")
+    if status and status.lower() not in ("active", "healthy", "available"):
+        head += f" · {esc(status)}"
+    bits = []
+    if isinstance(row.get("projection"), (int, float)):
+        bits.append(f"{row['projection']:.1f} proj")
+    if isinstance(row.get("chance"), (int, float)):
+        bits.append(pct(row["chance"]) + (" to stay under" if under else ""))
+    hits = row.get("hits") or {}
+    for window, name in (("l10", "L10"), ("season", "season")):
+        pair = hits.get(window) if isinstance(hits, dict) else None
+        if isinstance(pair, (list, tuple)) and len(pair) == 2 and pair[1]:
+            bits.append(f"{pair[0]:g}/{pair[1]:g} {name}")
+    line = scan_line_text(row.get("line"))
+    if line:
+        bits.append(esc(line))
+    lines = [head]
+    if bits:
+        lines.append("   " + " · ".join(bits))
+    first = first_reason(row.get("why"))
+    notes = [esc(first)] if first else []
+    if row.get("model") == "form":
+        notes.append(FORM_WORDS)
+    if notes:
+        lines.append(f"   <i>{' · '.join(notes)}</i>")
+    return lines
+
+
+def _scan_text(card: Dict[str, Any]) -> str:
+    """A player scan (players_scan's card), as a numbered list strongest first: each player's matchup, status, the
+    projection, the chance, the L10 and season hits and the posted line and price, a short why, and "from recent
+    form" for the form model's rows; then who is close and, while the board builds, how many games are loaded.
+    The first rows get "View player" buttons (reply_markup); props aren't added to the slip."""
+    esc = html.escape
+    under = card.get("side") == "under"
+    lines = [f"📊 <b>{esc(str(card.get('title') or 'Player scan'))}</b>"]
+    players = [row for row in card.get("players") or [] if isinstance(row, dict)]
+    for number, row in enumerate(players[:MAX_SCAN_SHOWN], 1):
+        lines += _scan_row_text(row, number, under)
+    if len(players) > MAX_SCAN_SHOWN:
+        lines.append(f"… and {len(players) - MAX_SCAN_SHOWN} more (📱 open the app to see them all)")
+    close = [row for row in card.get("close") or [] if isinstance(row, dict)]
+    if close:
+        names = []
+        for row in close[:5]:
+            bit = esc(str(row.get("name") or "A player"))
+            numbers = [f"{row['projection']:.1f}" if isinstance(row.get("projection"), (int, float)) else None,
+                       pct(row["chance"]) if isinstance(row.get("chance"), (int, float)) else None]
+            numbers = [part for part in numbers if part]
+            names.append(bit + (f" ({', '.join(numbers)})" if numbers else ""))
+        lines.append(("Also close: " if players else "Closest: ") + "; ".join(names))
+    if not players and not close:
+        lines.append("Nobody qualifies yet.")
+    loading = scan_loading_text(card.get("loading"))
+    if loading:
+        lines.append(f"<i>⏳ {esc(loading)}</i>")
+    return "\n".join(lines)
+
+
 def card_text(card: Dict[str, Any]) -> str:
     """One card from the assistant as Telegram HTML (the numbers are the code's, as priced)."""
     kind = card.get("type")
@@ -336,6 +444,8 @@ def card_text(card: Dict[str, Any]) -> str:
         return _ticket_text(card)
     if kind == "picks":
         return _picks_text(card)
+    if kind == "player_scan":
+        return _scan_text(card)
     if kind == "plan":
         return _plan_text(card)
     if kind == "player":
@@ -358,7 +468,7 @@ def reply_text(result: Dict[str, Any], asked: Optional[str] = None) -> str:
     foot = []
     # Under a ticket, a plan, a pasted slip or the likeliest winners, the helpline, as the app shows it on every screen
     shown = (reply.get("cards") or [])[:MAX_CARDS]
-    if any(card.get("type") in ("ticket", "plan", "pasted", "picks") for card in shown) \
+    if any(card.get("type") in ("ticket", "plan", "pasted", "picks", "player_scan") for card in shown) \
             and HELPLINE not in body_text(result):
         foot.append(f"<i>{html.escape(HELPLINE)}</i>")
     if credits.get("daily_cents"):
@@ -408,6 +518,15 @@ def reply_markup(result: Dict[str, Any], config: Optional[Config], private: bool
                                             callback_data=f"ai:pick:{thread}:{at}:{index}:{n - 1}")
                        for n, pick in enumerate((card.get("picks") or [])[:MAX_PICKS_SHOWN], 1)]
             rows += [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+        for index, card in enumerate(cards):
+            if card.get("type") != "player_scan":
+                continue
+            # A player scan: "View player" for its top rows (the player's page, read here; props aren't slip legs)
+            for n, row in enumerate((card.get("players") or [])[:MAX_SCAN_VIEW], 1):
+                if isinstance(row, dict) and row.get("athlete_id") and row.get("league"):
+                    name = str(row.get("name") or "player")[:40]
+                    rows.append([InlineKeyboardButton(f"👤 View {name}",
+                                                      callback_data=f"ai:pl:{thread}:{at}:{index}:{n - 1}")])
         chips = [InlineKeyboardButton(chip[:60], callback_data=f"ai:{thread}:{at}:{i}")
                  for i, chip in enumerate((reply.get("chips") or [])[:4])]
         rows += [chips[i:i + 2] for i in range(0, len(chips), 2)]
@@ -845,6 +964,79 @@ async def add_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                        show_alert=True)
 
 
+def player_page_text(player: Dict[str, Any]) -> str:
+    """A player's page (Lab.player) as Telegram HTML: who, status, next game, the NBA model's projection on game day
+    and the posted props with their hit rates and the model's chance of the over."""
+    esc = html.escape
+    about = ", ".join(str(part) for part in (player.get("team"), player.get("position")) if part)
+    lines = [f"👤 <b>{esc(str(player.get('name') or 'Player'))}</b>" + (f" ({esc(about)})" if about else "")]
+    if player.get("injury") or (player.get("status") and str(player["status"]).lower() != "active"):
+        lines.append(f"Status: {esc(str(player.get('injury') or player.get('status')))}")
+    game = player.get("next_game") or {}
+    if isinstance(game, dict) and (game.get("name") or game.get("opponent")):
+        lines.append(f"Next: {esc(str(game.get('name') or game.get('opponent')))}")
+    projection = player.get("projection") or {}
+    stats = projection.get("stats") if isinstance(projection, dict) else None
+    if isinstance(stats, dict):
+        shown = [f"{key} {value['mean']:g}" for key, value in stats.items()
+                 if key in ("pts", "reb", "ast", "fg3m", "pra") and isinstance(value, dict)
+                 and isinstance(value.get("mean"), (int, float))]
+        if shown:
+            lines.append("Projected: " + ", ".join(shown))
+    for prop in (player.get("props") or [])[:6]:
+        if not isinstance(prop, dict):
+            continue
+        bits = [esc(str(prop.get("label") or prop.get("name") or prop.get("market") or "Prop"))]
+        price = scan_line_text({"line": prop.get("line"), "over": prop.get("over"), "under": prop.get("under"),
+                                "yes": prop.get("yes"), "kind": prop.get("kind")})
+        if price:
+            bits.append(esc(price))
+        rates = prop.get("hit_rates") or {}
+        if isinstance(rates, dict) and rates.get("last10"):
+            bits.append(f"L10 {esc(str(rates['last10']))}")
+        ai = prop.get("ai") or {}
+        if isinstance(ai, dict) and isinstance(ai.get("over"), (int, float)):
+            bits.append(f"AI {pct(ai['over'])} over")
+        lines.append("• " + " · ".join(bits))
+    info = player.get("props_info") or {}
+    if not player.get("props") and isinstance(info, dict) and info.get("reason"):
+        lines.append(f"<i>{esc(str(info['reason']))}</i>")
+    lines.append("<i>Player props are for reading here; the slip takes game picks.</i>")
+    return "\n".join(lines)
+
+
+async def view_player(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """"View player" under a player scan: that row's player page, sent as a message (behind the player pages'
+    gates: age confirmed, not on a break)."""
+    query = update.callback_query
+    if not await _check_button(update, context):
+        return
+    _, _, thread, at, index, number = query.data.split(":")
+    stored = await _stored_reply(context, _uid(update), int(thread), int(at))
+    cards = stored.get("cards") or []
+    card = cards[int(index)] if int(index) < len(cards) else None
+    rows = (card or {}).get("players") or [] if (card or {}).get("type") == "player_scan" else []
+    row = rows[int(number)] if int(number) < len(rows) and isinstance(rows[int(number)], dict) else {}
+    lab = _lab(context)
+    if not row.get("athlete_id") or not row.get("league") or lab is None:
+        await query.answer(SCAN_PLAYER_GONE, show_alert=True)
+        return
+    await query.answer()
+
+    def page() -> Dict[str, Any]:
+        lab.ready(_uid(update))
+        return lab.player(str(row["league"]), str(row["athlete_id"]))
+
+    try:
+        text = player_page_text(await asyncio.to_thread(page))
+    except (CallRejected, NotFound) as exc:
+        text = html.escape(str(exc) or SCAN_PLAYER_GONE)
+    except Exception:
+        logging.exception("Couldn't load a player page in the bot")
+        text = "Couldn't load that player right now: try again in a minute."
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
 async def confirm_age(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not await _check_button(update, context):
@@ -894,6 +1086,8 @@ def setup_chat(application: Application, config: Config) -> None:
     # through to the catch-all, which says the menu has expired
     application.add_handler(CallbackQueryHandler(add_to_slip, pattern=r"^ai:add:\d{1,12}:\d{1,6}:\d$"))
     application.add_handler(CallbackQueryHandler(add_pick, pattern=r"^ai:pick:\d{1,12}:\d{1,6}:\d:\d$"))
+    application.add_handler(CallbackQueryHandler(view_player, pattern=r"^ai:pl:\d{1,12}:\d{1,6}:\d:\d{1,2}$",
+                                                 block=False))
     # A chat turn takes seconds: block=False lets the bot keep serving everyone else's taps meanwhile
     application.add_handler(CallbackQueryHandler(chip_tapped, pattern=r"^ai:\d{1,12}:\d{1,6}:\d$", block=False))
     # New messages only: editing a sent message shouldn't start a second (paid) turn

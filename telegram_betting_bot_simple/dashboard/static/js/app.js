@@ -16,6 +16,7 @@
 // Routes (hash based, so a link is just href="#/..."):
 //   #/today  #/game/<league>/<id>  #/player/<league>/<id>  #/build  #/build/rollover  #/build/builder  #/ask
 //   #/bets  #/help  #/help/<topic>  #/settings        (?query parts are passed in params.query)
+//   #/players?league=&stat=&at=<n|line>&day=today|tomorrow[&side=under][&sort=]  the Player finder (views/finder.js)
 // Deep links in use: #/ask?game=<league>:<id>  #/ask?player=<league>:<id>&name=..  #/build?analyse=1
 //   #/game/<league>/<id>?section=analysts  #/bets?tab=calls|leaders|record|slips
 //   #/bets?tab=record&view=brain (Brain progress; #/bets?tab=brain and the short #/brain land there too)
@@ -131,6 +132,7 @@ const ROUTES = [
   { name: "today", pattern: /^today$/, tab: "today", load: () => import("./views/today.js") },
   { name: "game", pattern: /^game\/([a-z0-9_]{2,64})\/([A-Za-z0-9_-]{1,64})$/, keys: ["league", "id"], tab: "today", sub: "#/today", title: "Game", load: () => import("./views/game.js") },
   { name: "player", pattern: /^player\/([a-z0-9_]{2,64})\/([0-9]{1,12})$/, keys: ["league", "id"], tab: "today", sub: "#/today", title: "Player", load: () => import("./views/player.js") },
+  { name: "players", pattern: /^players$/, tab: "build", sub: "#/build", title: "Player finder", load: () => import("./views/finder.js") },
   { name: "build", pattern: /^build(?:\/(rollover|builder))?$/, keys: ["mode"], tab: "build", title: "Rollover planner",
     titles: { rollover: "Rollover planner", builder: "Builder" }, load: () => import("./views/build.js") },
   { name: "ask", pattern: /^ask$/, tab: "ask", load: () => import("./views/ask.js") },

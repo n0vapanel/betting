@@ -9,6 +9,13 @@
 // fit line ("3.52x · 27% (you asked 3.5x · 80%)") and a muted "Relaxed: …" line (card.option, card.fit,
 // card.relaxed). brain_top_picks' card (type "picks") is the likeliest winners, ranked, each with its chance,
 // price, book, a short why and its own "Add to slip".
+//
+// The player scan (v3): players_scan's card (type "player_scan", ai/tools.py scan_card) ranks players for a stat and a
+// number ("Projected for 20+ points · NBA · tonight"): each row's name, team v opponent and tip time, an injury chip
+// (Q, GTD), the projection, the chance with a small bar, the hits ("9/10" L10, "30/45" season), the posted line and
+// price, the model ("Recent form" for the form model), "View player" (and "Add to slip" only where the row allows
+// it). "Also close" is collapsed; a board still loading says "8 of 10 games loaded" with a Refresh chip that runs
+// the scan again (ask.js: GET /api/players/scan, no AI allowance) and redraws the card in place.
 
 import { esc, pct, chanceText, money, signedMoney, priceText, shortName, timeLabel, ago, badge, injuryBadge, notice, explain } from "../../ui.js";
 import { slip } from "../../app.js";
@@ -16,6 +23,9 @@ import { icon } from "../../icons.js";
 import { pastedCardHtml } from "./pasted.js";
 import { optionOf, fitParts, relaxedText } from "../build/builder/fit.js";
 import { unitsFor } from "../context/units.js";
+import {
+  rowItemHtml, rowLeg, loadingText, ensureScanStyles, finderHash, scanLeague, askText, whenText,
+} from "../players/scan.js";
 
 // --- tickets: legs and bodies -------------------------------------------------------------------------
 
@@ -319,6 +329,11 @@ export function syncCardButtons(root, findCard) {
     slot.innerHTML = pickButton(pick, `${mi}:${ci}`, Number(pi));
     if (had) slot.querySelector("button")?.focus({ preventScroll: true });
   }
+  for (const button of root.querySelectorAll("[data-scan-add]")) {
+    const [mi, ci, ri] = button.dataset.scanAdd.split(":");
+    const row = scanRowAt(findCard(`${mi}:${ci}`), ri);
+    if (row) button.outerHTML = scanAddButton(row, `${mi}:${ci}`, Number(ri));
+  }
   for (const button of root.querySelectorAll("[data-alt-add]")) {
     const [mi, ci, ai] = button.dataset.altAdd.split(":");
     const alt = findCard(`${mi}:${ci}`)?.alternatives?.[Number(ai)];
@@ -434,10 +449,87 @@ export function playerCardHtml(card) {
   </article>`;
 }
 
-/** Any card by its type ("ticket", "plan", "player", "pasted", "picks"); unknown types show their title only. */
+// --- the player scan (players_scan) -------------------------------------------------------------------------
+
+/** The card's ask for GET /api/players/scan and the Player finder: {league, stat, threshold, side, day, n}. */
+export function scanAsk(card) {
+  const league = (card?.leagues || [])[0] || (card?.players || [])[0]?.league || null;
+  const threshold = card?.threshold == null || card?.threshold === "" ? null : Number(card.threshold);
+  return {
+    league, stat: card?.stat || "pts", threshold: Number.isFinite(threshold) ? threshold : null,
+    side: card?.side === "under" ? "under" : "over", day: card?.day === "tomorrow" ? "tomorrow" : "today",
+    n: Math.max(10, (card?.players || []).length),
+  };
+}
+
+/** A fresh GET /api/players/scan result laid over the card (its title and source stay). */
+export function refreshedScan(card, fresh) {
+  const out = { ...card };
+  for (const key of ["ask", "stat", "stat_label", "threshold", "side", "day", "leagues", "players", "close", "as_of", "leagues_without_games", "note"]) {
+    if (fresh?.[key] !== undefined) out[key] = fresh[key];
+  }
+  if (fresh?.loading) out.loading = fresh.loading;
+  else delete out.loading;
+  if (!fresh?.leagues_without_games) delete out.leagues_without_games;
+  return out;
+}
+
+/** A scan row's own "Add to slip" (only a row the server marks addable, with a game pick the slip takes). */
+function scanAddButton(row, key, i) {
+  const leg = rowLeg(row);
+  if (!leg) return "";
+  const label = String(row.label || row.name || "this pick");
+  return slip.has(leg.ref)
+    ? `<button type="button" class="btn btn-secondary small" data-scan-add="${esc(key)}:${i}" aria-pressed="true" aria-label="${esc(`${label}: in your slip. Tap to take it out`)}">${icon("check", { size: 16 })}In your slip</button>`
+    : `<button type="button" class="btn btn-primary small" data-scan-add="${esc(key)}:${i}" aria-pressed="false" aria-label="${esc(`Add ${label} to your slip`)}">${icon("plus", { size: 16 })}Add to slip</button>`;
+}
+
+/** The scan row behind "key:i" (players first, then the close ones). */
+export function scanRowAt(card, i) {
+  const rows = [...(card?.players || []), ...(card?.close || [])];
+  return rows[Number(i)] || null;
+}
+
+function scanLoadingHtml(card, key, refreshing) {
+  const words = loadingText(card.loading);
+  if (!words) return "";
+  return `<p class="ps-loading" role="status">${icon("clock", { size: 14 })}<span>${esc(words)}</span>
+    <button type="button" class="chip" data-scan-refresh="${esc(key)}"${refreshing ? " disabled aria-busy=\"true\"" : ""}>${icon("refresh", { size: 16 })}${refreshing ? "Refreshing…" : "Refresh"}</button></p>`;
+}
+
+/** Players ranked for a stat and a number: the strongest first, "Also close" collapsed, a loading line with Refresh. */
+export function scanCardHtml(card, key, { stale = "", refreshing = false } = {}) {
+  ensureScanStyles();
+  const side = card.side === "under" ? "under" : "over";
+  const players = (card.players || []).filter((row) => row && typeof row === "object");
+  const close = (card.close || []).filter((row) => row && typeof row === "object");
+  const where = (card.leagues || []).map((l) => scanLeague(l)?.title || String(l).split("_").pop().toUpperCase()).join(" + ");
+  const title = card.title || `Projected for ${askText(card)} · ${whenText(card)}`;
+  const ask = scanAsk(card);
+  const without = (card.leagues_without_games || []).filter(Boolean);
+  const item = (row, i) => rowItemHtml({ league: ask.league, ...row }, i, { side, addButton: (r, n) => scanAddButton(r, key, n) });
+  return `<article class="card ask-card ask-scan" data-card-key="${esc(key)}" aria-label="${esc(title)}">
+    <header class="ask-card-head"><div class="grow"><span class="eyebrow">Player scan${where ? ` · ${esc(where)}` : ""}</span>
+      <h3>${esc(title)}</h3>
+      <span class="muted small">Strongest first: projection, chance, hits and the posted line</span></div></header>
+    ${scanLoadingHtml(card, key, refreshing)}
+    ${without.length ? `<p class="ps-note">No games ${esc(whenText(card))} in ${esc(without.join(", "))}.</p>` : ""}
+    ${players.length ? `<ol class="ps-list" aria-label="${esc(`Players for ${askText(card)}`)}">${players.map(item).join("")}</ol>`
+      : `<p class="small">${close.length ? "Nobody is projected to get there yet: the closest are below." : "No player qualifies yet."}</p>`}
+    ${close.length ? `<details class="ps-close"${players.length ? "" : " open"}><summary>${icon("chevron", { size: 16 })}Also close (${close.length})</summary>
+      <ol class="ps-list" aria-label="Also close">${close.map((row, i) => item(row, players.length + i)).join("")}</ol></details>` : ""}
+    ${stale ? `<p class="ask-stale">${icon("clock", { size: 14 })}${esc(stale)}</p>` : ""}
+    <p class="ps-note">${esc(card.slip_note || "Player props are for reading here; the slip takes game picks.")} L5, L10 and Season count the games at the number.${
+      [...players, ...close].some((r) => r.model === "form") ? " \"Recent form\" rows are projected from the game log." : ""} Lines: DraftKings via ESPN.</p>
+    ${ask.league && scanLeague(ask.league) ? `<div class="ask-card-actions"><a class="btn btn-secondary small" href="${esc(finderHash(ask))}">${icon("search", { size: 16 })}Open in Player finder</a></div>` : ""}
+  </article>`;
+}
+
+/** Any card by its type ("ticket", "plan", "player", "pasted", "picks", "player_scan"); unknown types show their title only. */
 export function cardHtml(card, key, options = {}) {
   if (card?.type === "ticket" && card.ticket) return ticketCardHtml(card, key, options);
   if (card?.type === "picks" && Array.isArray(card.picks)) return picksCardHtml(card, key, options);
+  if (card?.type === "player_scan" && (Array.isArray(card.players) || Array.isArray(card.close))) return scanCardHtml(card, key, options);
   if (card?.type === "pasted" && card.pasted) return pastedCardHtml(card, key, options);
   if (card?.type === "plan" && card.compare) return planCardHtml(card);
   if (card?.type === "player") return playerCardHtml(card);

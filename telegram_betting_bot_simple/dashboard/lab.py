@@ -55,6 +55,14 @@ across the Telegram Mini App, the bot and a browser ("tg:<id>" or "web:<id>"):
   goals-model leg is priced at fair odds: it can be priced, analysed and
   added to the slip, but never saved as a bet.
 
+- The player scan (v3; engine/scan.py over data/player_board.py): GET
+  /api/players/scan, the AI's players_scan and the bot rank today's or
+  tomorrow's players for a stat and a number ("20+ points": the history in
+  the last 5, the last 10 and the season, the projection, the chance and the
+  posted line) through Lab.player_scan, behind the player pages' gates. It
+  reads ESPN through the shared cache only and never spends Odds API quota;
+  a row is for reading (the slip takes game picks).
+
 Odds quota is precious (about 500 requests a month, 3 per league fetch), so
 only the leagues a person asks for are loaded, leagues out of season are
 never fetched, and every board comes from the shared 2-hour cache. A pasted
@@ -170,6 +178,21 @@ REQUEST_WORDS = {  # the slate's answer to a request for odds, as a league witho
 }
 MAX_WINDOW_DAYS = 8  # the slate holds today and the next six days
 WINDOW_STEP = 300  # window edges are widened to 5 minutes, so people asking in the same few minutes share a result
+# The player scan (Lab.player_scan): today's or tomorrow's players ranked for a stat and a number
+SCAN_DAYS = ("today", "tomorrow")
+SCAN_N = 10
+MAX_SCAN_N = 25
+MAX_SCAN_THRESHOLD = 999  # engine/scan.py's threshold_for takes numbers under 1000
+# A scan without a league looks at the leagues whose tables name the stat (Lab._scan_candidates, in engine/scan.py's
+# league order: the NBA first for points, the NFL for yards and TDs, the NHL for shots and goals) and scans the first
+# with games that day
+MAX_SCAN_CHECKS = 3  # leagues a scan without one looks at for games before it says none has any
+YES_STATS = ("anytime_td", "anytime_goal", "dd", "td")  # asks that are a yes or no ("anytime TD", "double-double")
+SCAN_TITLES = {"basketball_nba": "NBA", "basketball_wnba": "WNBA", "americanfootball_nfl": "NFL", "icehockey_nhl": "NHL",
+               "baseball_mlb": "MLB", "soccer_epl": "EPL", "soccer_spain_la_liga": "La Liga",
+               "soccer_italy_serie_a": "Serie A", "soccer_germany_bundesliga": "Bundesliga",
+               "soccer_france_ligue_one": "Ligue 1", "soccer_usa_mls": "MLS",
+               "soccer_uefa_champs_league": "Champions League"}
 BOOK_NAMES = {"draftkings": "DraftKings", "fanduel": "FanDuel", "betmgm": "BetMGM", "williamhill_us": "Caesars",
               "espnbet": "ESPN BET", "betrivers": "BetRivers", "bovada": "Bovada", "betonlineag": "BetOnline.ag",
               "lowvig": "LowVig.ag", "mybookieag": "MyBookie.ag", "ballybet": "Bally Bet", "fanatics": "Fanatics",
@@ -184,6 +207,16 @@ def _engine_builder() -> Any:
 def _engine_presets() -> Any:
     from ..engine import presets
     return presets
+
+
+def _engine_scan() -> Any:
+    from ..engine import scan as engine_scan  # the player scan's engine (v3)
+    return engine_scan
+
+
+def _player_board_module() -> Any:
+    from ..data import player_board  # the player scan's board (v3)
+    return player_board
 
 
 def _iso_z(ts: float) -> str:
@@ -806,6 +839,7 @@ class Lab(Gates):
         # The API runs requests on many threads: a person's writes take their lock (see _writing)
         self._write_locks = tuple(threading.RLock() for _ in range(WRITE_LOCKS))
         self._graded_at = 0.0
+        self._player_board: Any = None  # the player scan's board (data/player_board.py), made on first use
         # The games service runs the slip and plan grader inside its grading lease
         service.lab = self
 
@@ -821,6 +855,19 @@ class Lab(Gates):
         if self._players is None:
             self._players = PlayerData(self.service.espn)
         return self._players
+
+    @property
+    def player_board(self) -> Any:
+        """The player scan's board (data/player_board.py): the games, projections or game logs, injuries and props per
+        (league, day), built in the background through the shared cache. One per process, shared with the games
+        service (whose slate worker prewarms it on game days)."""
+        if self._player_board is None:
+            self._player_board = _player_board_module().board_for(self.service, self.players, now=self._now)
+        return self._player_board
+
+    @player_board.setter
+    def player_board(self, board: Any) -> None:
+        self._player_board = board
 
     def _writing(self, uid: str) -> threading.RLock:
         """The lock a person's money-moving writes hold from their checks to their save.
@@ -2376,6 +2423,136 @@ class Lab(Gates):
             view["ai"] = ai
         return view
 
+    # --- the player scan -----------------------------------------------------------------------------
+
+    def player_scan(self, uid: str, league: Optional[str] = None, stat: str = "pts", threshold: Any = None,
+                    side: str = "over", day: str = "today", n: int = SCAN_N) -> Dict[str, Any]:
+        """Today's (or tomorrow's) players ranked for a stat and a number: engine/scan.py over the player board
+        (data/player_board.py: ESPN game logs, the NBA model's projections, injuries and ESPN's DraftKings props, all
+        through the shared cache; no Odds API quota). ``stat`` is a key of the engine's STATS or a phrase its aliases
+        know ("boards", "threes", "shots on goal"); ``threshold`` the whole number to reach (19.5 is read as 20) or
+        None for each player's posted line. Without ``league``, the leagues whose tables match the stat best
+        (engine.leagues_for: the NBA first for points, the NFL for yards and TDs, the NHL for shots and goals) are
+        looked at in order and the first with games that day is scanned. Behind the same gates as the player pages
+        (age confirmed, not on a break).
+
+        Returns {ask ("20+ points"), stat, stat_label, threshold, side, day, leagues, players: [row], close: [row],
+        more, games, loading?: {games_ready, games_total}, as_of, leagues_without_games?}; each row is the engine's
+        ({rank, athlete_id, name, team, opponent, home, game, event_id, start, status, status_tag, minutes?,
+        threshold, projection, chance, chance_source, model, model_label, hits, avg, line?, edge?, why}) with its
+        league and ``addable`` (False: the slip takes game picks). A partial board answers at once with what's ready
+        and ``loading``. Raises CallRejected for a stat, league, side, day or number the scan can't take."""
+        self.ready(uid)
+        day = str(day or "today").strip().lower()
+        day = "today" if day == "tonight" else day
+        if day not in SCAN_DAYS:
+            raise CallRejected("The player scan covers today and tomorrow.")
+        side = str(side or "over").strip().lower()
+        if side not in ("over", "under"):
+            raise CallRejected("Side must be over or under.")
+        reach = self._scan_threshold(threshold)
+        try:
+            n = max(1, min(int(n or SCAN_N), MAX_SCAN_N))
+        except (TypeError, ValueError):
+            raise CallRejected(f"n must be 1 to {MAX_SCAN_N}.") from None
+        try:
+            engine = _engine_scan()
+        except ImportError:  # a server running without the scan's engine
+            raise CallRejected("The player scan isn't available on this server yet.") from None
+        phrase = " ".join(str(stat or "").split())[:40]
+        if not phrase:
+            raise CallRejected("Say which stat to scan (points, rebounds, threes, ...).")
+        if league:
+            if not LEAGUE_KEY.fullmatch(str(league)) or league not in engine.STATS:
+                raise CallRejected("The player scan covers the NBA, WNBA, NFL, NHL, MLB and soccer.")
+            key = engine.resolve_stat(league, phrase)
+            if key is None:
+                raise CallRejected(f"The scan doesn't know {phrase!r} for {_scan_title(engine, league)}.")
+            candidates = [(league, key)]
+        else:
+            candidates = self._scan_candidates(engine, phrase)
+            if not candidates:
+                raise CallRejected(f"The scan doesn't know {phrase!r}: try points, rebounds, assists, threes, PRA, "
+                                   "passing yards, anytime TD, shots on goal or strikeouts.")
+        without: List[str] = []
+        chosen: Optional[Tuple[str, str, Dict[str, Any]]] = None
+        board = self.player_board
+        for name, key in candidates[:MAX_SCAN_CHECKS]:
+            try:
+                out = board.scan(name, key, reach, side, day, n)
+            except ValueError as exc:  # an ask the engine can't make (make_ask's reason)
+                raise CallRejected(str(exc)) from None
+            out = dict(out) if isinstance(out, Mapping) else {}
+            if self._no_games(out):
+                without.append(name)
+                continue
+            chosen = (name, key, out)
+            break
+        name, key, out = chosen or (candidates[0][0], candidates[0][1], {})
+        spec = engine.STATS[name][key]
+        asked = out.get("ask") if isinstance(out.get("ask"), Mapping) else {}
+        if not asked:
+            try:
+                asked = engine.make_ask(name, key, reach, side, day)
+            except ValueError as exc:
+                raise CallRejected(str(exc)) from None
+        view: Dict[str, Any] = {
+            "ask": asked.get("label") or scan_words(spec.get("label") or key, key, reach, side),
+            "stat": key, "stat_label": spec.get("label") or key, "threshold": asked.get("threshold", reach),
+            "side": asked.get("side") or side, "day": day, "leagues": [name] if chosen else [],
+            "players": [self._scan_row(row, name) for row in out.get("players") or [] if isinstance(row, Mapping)],
+            "close": [self._scan_row(row, name) for row in out.get("close") or [] if isinstance(row, Mapping)],
+            "more": int(out.get("more") or 0), "games": int(out.get("games") or 0),
+            "as_of": out.get("as_of") or _iso_z(self._now()),
+        }
+        loading = out.get("loading")
+        if isinstance(loading, Mapping):
+            view["loading"] = {"games_ready": loading.get("games_ready"), "games_total": loading.get("games_total")}
+        if without:
+            view["leagues_without_games"] = [_scan_title(engine, league_key) for league_key in without]
+        return view
+
+    @staticmethod
+    def _scan_threshold(threshold: Any) -> Optional[int]:
+        """The whole number a scan asks for: 19.5 ("over 19.5") is 20, and None is each player's posted line."""
+        if threshold is None or threshold == "":
+            return None
+        try:
+            value = float(threshold)
+        except (TypeError, ValueError):
+            raise CallRejected("The number to reach must be a number, like 20.") from None
+        if isinstance(threshold, bool) or not math.isfinite(value) or not 0 < value <= MAX_SCAN_THRESHOLD:
+            raise CallRejected(f"The number to reach must be above 0 and at most {MAX_SCAN_THRESHOLD}.")
+        return int(math.ceil(value - 1e-9))
+
+    @staticmethod
+    def _scan_candidates(engine: Any, phrase: str) -> List[Tuple[str, str]]:
+        """[(league, stat key)] to look at, in order, for a stat with no league named: engine.leagues_for's strongest
+        matches in its league order (a stat's own name, its key or an alias, counts most: "points" is the NBA's, the
+        WNBA's and the NHL's, "TD" the NFL's anytime TD, "shots" the NHL's shots on goal; "anytime TD scorers" is the
+        NFL's, not the NBA's "scorers"): the NBA first for points, rebounds and assists, the NFL for yards and TDs, the
+        NHL for shots and goals. A soccer league only when nothing else has the stat (a soccer scan names its
+        league)."""
+        return list(engine.leagues_for(phrase).items())
+
+    @staticmethod
+    def _no_games(out: Mapping[str, Any]) -> bool:
+        """Whether a league's scan found no games that day: the board's own word (``no_games``), else none to load
+        and no rows. A board still reading the day's games is not "no games"."""
+        if "no_games" in out:
+            return bool(out["no_games"])
+        if out.get("players") or out.get("close") or out.get("loading"):
+            return False
+        return out.get("games") == 0
+
+    @staticmethod
+    def _scan_row(row: Mapping[str, Any], league: str) -> Dict[str, Any]:
+        """An engine row for the app: its league and whether the slip takes it."""
+        view = dict(row)
+        view.setdefault("league", league)
+        view["addable"] = False  # the slip takes game picks; a player prop is shown with its price only
+        return view
+
     # --- the AI chat (ai/assistant.py does the work) ----------------------------------------------
 
     def chat(self, uid: str, body: Mapping[str, Any]) -> Dict[str, Any]:
@@ -3277,6 +3454,22 @@ def _versus(alt: Mapping[str, Any], base: Mapping[str, Any], currency: Optional[
         return ""
     text = "; ".join(parts)
     return f"{text[0].upper()}{text[1:]} (by {'the AI' if basis == 'ai' else 'the market'}'s chances)."
+
+
+def _scan_title(engine: Any, league: str) -> str:
+    """A league's name in a sentence ("NBA", "Premier League")."""
+    return (getattr(engine, "TITLES", None) or {}).get(league) or SCAN_TITLES.get(league) or league
+
+
+def scan_words(label: str, key: str, threshold: Optional[int], side: str) -> str:
+    """A scan's ask in words: "20+ points", "under 9.5 rebounds", "anytime TD", "PRA against the posted line"."""
+    if threshold is None:
+        return f"{label} {'unders' if side == 'under' else 'overs'} on the posted line"
+    if key in YES_STATS and threshold <= 1 and side == "over":
+        return label
+    if side == "under":
+        return f"under {threshold - 0.5:g} {label}"
+    return f"{threshold}+ {label}"
 
 
 def _mean(row: Mapping[str, Any], stat: str) -> float:

@@ -6,11 +6,16 @@
 // each opening the Builder with that preset built at once. Nothing goes on the slip from here.
 // On a break, or in the 24-hour pause after a warning sign in the chat, the server refuses the Builder: the
 // card's buttons are off up front, with one plain line saying until when (common.js picksBlock).
+//
+// "Find players" (finderCardHtml, under it): the way into the Player finder (#/players, views/finder.js) with a few
+// common asks one tap away ("20+ points", "10+ rebounds", "3+ threes", "anytime TD", "3+ shots on goal"). A scan is
+// code only (no AI allowance, no odds requests); the server answers a break with its own words there.
 
 import { navigate } from "../../app.js";
-import { esc } from "../../ui.js";
+import { esc, linkChip } from "../../ui.js";
 import { icon } from "../../icons.js";
 import { picksBlock, blockNote } from "./common.js";
+import { finderHash } from "../players/scan.js";
 
 const BLOCK_ID = "bx-block-builder"; // the line that says why the Builder is off
 const PRESETS = [
@@ -56,4 +61,25 @@ export function createBuilder(root) {
     },
     draw() {},
   };
+}
+
+// The Player finder's common asks
+const FINDER_ASKS = [
+  { label: "20+ points", league: "basketball_nba", stat: "pts", threshold: 20 },
+  { label: "10+ rebounds", league: "basketball_nba", stat: "reb", threshold: 10 },
+  { label: "3+ threes", league: "basketball_nba", stat: "fg3m", threshold: 3 },
+  { label: "Anytime TD", league: "americanfootball_nfl", stat: "anytime_td", threshold: 1 },
+  { label: "3+ SOG", league: "icehockey_nhl", stat: "sog", threshold: 3 },
+];
+
+/** Build's "Find players" card: who's projected to reach a number tonight, in the Player finder. */
+export function finderCardHtml() {
+  return `<section class="card section bx-finder" id="find-players" aria-labelledby="bx-finder-title">
+    <div class="section-head"><h2 id="bx-finder-title">${icon("search", { size: 18 })} Find players</h2></div>
+    <p class="small muted">Who's projected for 20+ points, 10+ boards or an anytime TD: how often each player got there (last 5, last 10, season), the projection, the chance and the posted line. Free: no AI allowance.</p>
+    <div class="chip-row wrap" style="margin-top:10px" role="group" aria-label="Common asks">
+      ${FINDER_ASKS.map((a) => linkChip(a.label, finderHash(a))).join("")}
+    </div>
+    <a class="btn btn-secondary block" href="#/players" style="margin-top:12px">${icon("users", { size: 18 })}Open the Player finder</a>
+  </section>`;
 }

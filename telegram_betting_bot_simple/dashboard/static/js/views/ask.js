@@ -5,7 +5,8 @@
 //     sent as {request}; the server builds the tickets in code and the assistant explains them;
 //   - the thread: the person's messages, the AI's replies (paragraphs and lists, escaped), the cards
 //     the server built from the brain's results (tickets with Add to slip / Tweak, rollover plans,
-//     players), follow-up chips, the AI disclosure at the top and a typing state with step lines;
+//     players, likeliest winners, player scans), follow-up chips, the AI disclosure at the top and a typing
+//     state with step lines; a player scan still loading offers "Refresh" (the scan again, code only, in place);
 //   - the composer dock: free text, optionally with the slip (or a ticket from a card) attached;
 //   - "📋 Paste a slip" (ask/paste.js): a bookmaker's slip as text or a screenshot, read by the AI
 //     (POST /api/chat/slip, a chat turn) or by the free code-only reader (POST /api/pasted, no AI: also
@@ -35,7 +36,10 @@ import { formatReply, describeRequest, describeTicket, stepsFor } from "./ask/fo
 import {
   loadRequest, saveRequest, checkRequest, requestHtml, requestSummary, amountChips, targetChoices, MAX_SPORTS, STAKES,
 } from "./ask/request.js";
-import { cardHtml, ticketLegs, ticketBody, slipState, syncCardButtons, plainStake, kindLine, pickLeg } from "./ask/cards.js";
+import {
+  cardHtml, ticketLegs, ticketBody, slipState, syncCardButtons, plainStake, kindLine, pickLeg, scanAsk, refreshedScan, scanRowAt,
+} from "./ask/cards.js";
+import { scanQuery, askText, rowLeg } from "./players/scan.js";
 import { openPasteSheet, looksLikeSlip, shotBlocked, MAX_PASTE } from "./ask/paste.js";
 import {
   pastedClick, pastedChange, pastedInput, pastedToggle, syncPastedButtons, revealPasted, markAnswered, pastedText, loadPlan,
@@ -883,11 +887,44 @@ async function loadIntoBuild(card) {
   });
 }
 
-/** Draw one card again (after it was confirmed on the spot). */
+/** Draw one card again (after it was confirmed on the spot, or a player scan refreshed). */
 function redrawCard(key) {
   const box = view?.root.querySelector(`[data-card-key="${CSS.escape(key)}"]`);
   const card = findCard(key);
-  if (box && card) box.outerHTML = cardHtml(card, key, cardOptions(Number(String(key).split(":")[0])));
+  if (box && card) box.outerHTML = cardHtml(card, key, { ...cardOptions(Number(String(key).split(":")[0])), refreshing: scanRefreshing.has(key) });
+}
+
+// A player scan's card while its board loads: "Refresh" runs the scan again (GET /api/players/scan: code only, no
+// AI allowance, never the Odds API) and redraws the card in place with what's ready now
+const scanRefreshing = new Set();
+
+async function refreshScan(key) {
+  const card = findCard(key);
+  if (card?.type !== "player_scan" || scanRefreshing.has(key)) return;
+  scanRefreshing.add(key);
+  redrawCard(key);
+  let fresh = null;
+  try {
+    fresh = await api(scanQuery(scanAsk(card)));
+  } catch (error) {
+    if (!isQuiet(error)) toast(error.message || "Couldn't refresh the players", { kind: "warn" });
+  }
+  scanRefreshing.delete(key);
+  const [mi, ci] = String(key).split(":").map(Number);
+  if (fresh && state.messages[mi]?.cards?.[ci] === card) {
+    const next = refreshedScan(card, fresh);
+    state.messages[mi].cards[ci] = next;
+    const rows = (next.players || []).length;
+    announce(`Refreshed: ${rows} player${rows === 1 ? "" : "s"} for ${askText(next)}${next.loading ? ", still loading" : ""}.`);
+  }
+  redrawCard(key);
+  const again = view?.root.querySelector(`[data-scan-refresh="${CSS.escape(key)}"]`);
+  const head = view?.root.querySelector(`[data-card-key="${CSS.escape(key)}"] h3`);
+  if (again) again.focus({ preventScroll: true });
+  else if (head) {
+    head.setAttribute("tabindex", "-1");
+    head.focus({ preventScroll: true });
+  }
 }
 
 // What the pasted cards need from the screen (ask/pasted.js handles their own taps and typing)
@@ -1475,6 +1512,25 @@ function onClick(event) {
     const [mi, ci, ai] = altAdd.dataset.altAdd.split(":");
     const alt = findCard(`${mi}:${ci}`)?.alternatives?.[Number(ai)];
     if (alt?.ticket) addTicket(alt.ticket, alt.refs);
+    return;
+  }
+  const scanAdd = target.closest("[data-scan-add]");
+  if (scanAdd) {
+    // A scan row the server marks addable (a game pick): on the slip or off it again, by the person's tap only
+    const [mi, ci, ri] = scanAdd.dataset.scanAdd.split(":");
+    const leg = rowLeg(scanRowAt(findCard(`${mi}:${ci}`), ri));
+    if (!leg) return;
+    const added = slip.toggle(leg);
+    if (added === null) toast("Your slip is full: remove a pick first", { kind: "warn" });
+    else {
+      haptic.select();
+      toast(added ? `Added ${leg.label || "the pick"} to your slip` : `Took ${leg.label || "the pick"} off your slip`, { kind: added ? "good" : "info" });
+    }
+    return;
+  }
+  const scanRefresh = target.closest("[data-scan-refresh]");
+  if (scanRefresh) {
+    refreshScan(scanRefresh.dataset.scanRefresh);
     return;
   }
   const tweak = target.closest("[data-card-tweak]");

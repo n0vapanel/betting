@@ -1128,6 +1128,21 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
                       uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> List[Dict[str, Any]]:
         return lab_call(lambda: lab.player_search(q, league))
 
+    @app.get("/api/players/scan")
+    def player_scan(league: Optional[str] = Query(None, pattern=LEAGUE_KEY),
+                    stat: str = Query(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9+_ ./'-]{1,40}$"),
+                    threshold: Optional[float] = Query(None, gt=0, le=999),
+                    side: str = Query("over", pattern=r"^(over|under)$"),
+                    day: str = Query("today", pattern=r"^(today|tomorrow)$"),
+                    n: int = Query(10, ge=1, le=25),
+                    uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+        """The player scan: today's or tomorrow's players ranked for a stat and a number (``stat`` a key such as pts,
+        reb, fg3m, pra, sog or k, or a phrase such as "boards"; ``threshold`` 20 for "20+", left out for each
+        player's posted line), strongest first, with who is close and, while the board builds, ``loading``. No
+        league: the leagues that know the stat with games that day. Behind the player pages' gates (age confirmed,
+        not on a break); no Odds API quota is spent."""
+        return lab_call(lambda: lab.player_scan(uid, league, stat, threshold, side, day, n))
+
     @app.get("/api/players/{league}/{athlete_id}")
     def player(league: str, athlete_id: str, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
         if not re.fullmatch(LEAGUE_KEY, league) or not re.fullmatch(r"[0-9]{1,12}", athlete_id):

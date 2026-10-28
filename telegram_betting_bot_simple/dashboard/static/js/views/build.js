@@ -1,7 +1,8 @@
 // Build: the slip and everything done with it, in three routes.
 //   #/build           the slip (build/slip.js): picks, Single · Multi · Round robin by k · a named
 //                     System, stake chips, the server's numbers, "Analyse with AI" (build/analyse.js),
-//                     Save, Share code, Clear, then the Builder's card (build/target.js)
+//                     Save, Share code, Clear, then the Builder's card and "Find players" (build/target.js: the
+//                     way into the Player finder, #/players)
 //   #/build/builder   the Builder (build/builder.js): Safe · Risky · Crazy presets filling every control,
 //                     up to five tickets that share no leg, each leg with Why and Swap, near misses
 //   #/build/rollover  the rollover planner (build/rollover.js): classic, bank half, pot-and-ladder and
