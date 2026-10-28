@@ -1,0 +1,37 @@
+{
+ "header": {
+  "competitions": [
+   {
+    "competitors": [
+     {
+      "homeAway": "home",
+      "team": {
+       "abbreviation": "BOS",
+       "id": "2"
+      }
+     },
+     {
+      "homeAway": "away",
+      "team": {
+       "abbreviation": "BKN",
+       "id": "17"
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "predictor": {
+  "awayTeam": {
+   "gameProjection": "16",
+   "id": "17",
+   "teamChanceLoss": "84"
+  },
+  "header": "Matchup Predictor",
+  "homeTeam": {
+   "gameProjection": "84",
+   "id": "2",
+   "teamChanceLoss": "16"
+  }
+ }
+}

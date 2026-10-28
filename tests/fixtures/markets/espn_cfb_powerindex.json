@@ -1,0 +1,158 @@
+{
+ "count": 6,
+ "items": [
+  {
+   "lastUpdated": "2026-10-26T08:00Z",
+   "predictives": [
+    {
+     "abbreviation": "FPI",
+     "description": "Football Power Index that measures team's true strength on net points scale; expected point margin vs average opponent on neutral field.",
+     "displayName": "FPI",
+     "displayValue": "28.2",
+     "name": "fpi",
+     "value": 28.181
+    },
+    {
+     "abbreviation": "FPI",
+     "description": "Football Power Index Rank vs all FBS teams.",
+     "displayName": "FPI RK",
+     "displayValue": "1st",
+     "name": "fpirank",
+     "value": 1.0
+    }
+   ],
+   "season": 2026,
+   "team": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/2026/teams/194?lang=en&region=us"
+   }
+  },
+  {
+   "lastUpdated": "2026-10-26T08:00Z",
+   "predictives": [
+    {
+     "abbreviation": "FPI",
+     "description": "Football Power Index that measures team's true strength on net points scale; expected point margin vs average opponent on neutral field.",
+     "displayName": "FPI",
+     "displayValue": "27.5",
+     "name": "fpi",
+     "value": 27.539
+    },
+    {
+     "abbreviation": "FPI",
+     "description": "Football Power Index Rank vs all FBS teams.",
+     "displayName": "FPI RK",
+     "displayValue": "3rd",
+     "name": "fpirank",
+     "value": 3.0
+    }
+   ],
+   "season": 2026,
+   "team": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/2026/teams/2390?lang=en&region=us"
+   }
+  },
+  {
+   "lastUpdated": "2026-10-26T08:00Z",
+   "predictives": [
+    {
+     "abbreviation": "FPI",
+     "description": "Football Power Index that measures team's true strength on net points scale; expected point margin vs average opponent on neutral field.",
+     "displayName": "FPI",
+     "displayValue": "11.1",
+     "name": "fpi",
+     "value": 11.117
+    },
+    {
+     "abbreviation": "FPI",
+     "description": "Football Power Index Rank vs all FBS teams.",
+     "displayName": "FPI RK",
+     "displayValue": "34th",
+     "name": "fpirank",
+     "value": 34.0
+    }
+   ],
+   "season": 2026,
+   "team": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/2026/teams/130?lang=en&region=us"
+   }
+  },
+  {
+   "lastUpdated": "2026-10-26T08:00Z",
+   "predictives": [
+    {
+     "abbreviation": "FPI",
+     "description": "Football Power Index that measures team's true strength on net points scale; expected point margin vs average opponent on neutral field.",
+     "displayName": "FPI",
+     "displayValue": "-9.6",
+     "name": "fpi",
+     "value": -9.641
+    },
+    {
+     "abbreviation": "FPI",
+     "description": "Football Power Index Rank vs all FBS teams.",
+     "displayName": "FPI RK",
+     "displayValue": "104th",
+     "name": "fpirank",
+     "value": 104.0
+    }
+   ],
+   "season": 2026,
+   "team": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/2026/teams/193?lang=en&region=us"
+   }
+  },
+  {
+   "lastUpdated": "2026-10-26T08:00Z",
+   "predictives": [
+    {
+     "abbreviation": "FPI",
+     "description": "Football Power Index that measures team's true strength on net points scale; expected point margin vs average opponent on neutral field.",
+     "displayName": "FPI",
+     "displayValue": "-14.2",
+     "name": "fpi",
+     "value": -14.165
+    },
+    {
+     "abbreviation": "FPI",
+     "description": "Football Power Index Rank vs all FBS teams.",
+     "displayName": "FPI RK",
+     "displayValue": "120th",
+     "name": "fpirank",
+     "value": 120.0
+    }
+   ],
+   "season": 2026,
+   "team": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/2026/teams/338?lang=en&region=us"
+   }
+  },
+  {
+   "lastUpdated": "2026-10-26T08:00Z",
+   "predictives": [
+    {
+     "abbreviation": "FPI",
+     "description": "Football Power Index that measures team's true strength on net points scale; expected point margin vs average opponent on neutral field.",
+     "displayName": "FPI",
+     "displayValue": "-16.0",
+     "name": "fpi",
+     "value": -16.046
+    },
+    {
+     "abbreviation": "FPI",
+     "description": "Football Power Index Rank vs all FBS teams.",
+     "displayName": "FPI RK",
+     "displayValue": "126th",
+     "name": "fpirank",
+     "value": 126.0
+    }
+   ],
+   "season": 2026,
+   "team": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/2026/teams/2393?lang=en&region=us"
+   }
+  }
+ ],
+ "pageCount": 1,
+ "pageIndex": 1,
+ "pageSize": 400
+}

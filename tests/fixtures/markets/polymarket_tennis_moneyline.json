@@ -1,0 +1,102 @@
+[
+ {
+  "active": true,
+  "bestAsk": 1,
+  "closed": false,
+  "endDate": "2026-11-01T02:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-24",
+    "slug": "itf-chen6-chen7-2026-10-25",
+    "startTime": "2026-10-25T02:00:00Z",
+    "title": "W35 Kunshan: Sitong Chen vs Meng Yi Chen"
+   }
+  ],
+  "gameStartTime": "2026-10-25 02:00:00+00",
+  "id": "6132742",
+  "outcomePrices": "[\"0.5\", \"0.5\"]",
+  "outcomes": "[\"Sitong Chen\", \"Meng Yi Chen\"]",
+  "question": "W35 Kunshan: Sitong Chen vs Meng Yi Chen",
+  "slug": "itf-chen6-chen7-2026-10-25",
+  "sportsMarketType": "moneyline",
+  "spread": 1
+ },
+ {
+  "active": true,
+  "bestAsk": 0.71,
+  "bestBid": 0.67,
+  "closed": false,
+  "endDate": "2026-11-02T09:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-26",
+    "slug": "atp-doubles-arenjoh-mansneu-2026-10-26",
+    "startTime": "2026-10-26T09:00:00Z",
+    "title": "Erste Bank Open, Qualification (Doubles): Arends/Johnson vs Mansouri/Neuchrist"
+   }
+  ],
+  "gameStartTime": "2026-10-26 09:00:00+00",
+  "id": "6172966",
+  "lastTradePrice": 0.69,
+  "liquidityNum": 298.1774,
+  "outcomePrices": "[\"0.69\", \"0.31\"]",
+  "outcomes": "[\"Arends/Johnson\", \"Mansouri/Neuchrist\"]",
+  "question": "Erste Bank Open, Qualification (Doubles): Arends/Johnson vs Mansouri/Neuchrist",
+  "slug": "atp-doubles-arenjoh-mansneu-2026-10-26",
+  "sportsMarketType": "moneyline",
+  "spread": 0.04,
+  "volumeNum": 139.520441
+ },
+ {
+  "active": true,
+  "bestAsk": 0.81,
+  "bestBid": 0.8,
+  "closed": false,
+  "endDate": "2026-11-03T02:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-27",
+    "slug": "wta-fernand-sakatsu-2026-10-26",
+    "startTime": "2026-10-27T06:00:00Z",
+    "title": "Pan Pacific Open: Leylah Fernandez vs Himeno Sakatsume"
+   }
+  ],
+  "gameStartTime": "2026-10-27 06:00:00+00",
+  "id": "6173065",
+  "lastTradePrice": 0.81,
+  "liquidityNum": 71233.4351,
+  "outcomePrices": "[\"0.805\", \"0.195\"]",
+  "outcomes": "[\"Leylah Fernandez\", \"Himeno Sakatsume\"]",
+  "question": "Pan Pacific Open: Leylah Fernandez vs Himeno Sakatsume",
+  "slug": "wta-fernand-sakatsu-2026-10-26",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 43139.00449600001
+ },
+ {
+  "active": true,
+  "bestAsk": 0.83,
+  "bestBid": 0.8,
+  "closed": false,
+  "endDate": "2026-11-02T15:00:09Z",
+  "events": [
+   {
+    "eventDate": "2026-10-27",
+    "slug": "atp-carabel-coria-2026-10-26",
+    "startTime": "2026-10-27T17:30:00Z",
+    "title": "Guayaquil: Camilo Ugo Carabelli vs Federico Coria"
+   }
+  ],
+  "gameStartTime": "2026-10-27 17:30:00+00",
+  "id": "6176348",
+  "lastTradePrice": 0.84,
+  "liquidityNum": 4324.4987,
+  "outcomePrices": "[\"0.815\", \"0.185\"]",
+  "outcomes": "[\"Camilo Ugo Carabelli\", \"Federico Coria\"]",
+  "question": "Guayaquil: Camilo Ugo Carabelli vs Federico Coria",
+  "slug": "atp-carabel-coria-2026-10-26",
+  "sportsMarketType": "moneyline",
+  "spread": 0.03,
+  "volumeNum": 1.190475
+ }
+]

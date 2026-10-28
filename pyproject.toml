@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Telegram sports-betting tips bot: fixtures, odds, news -> tiered predictions"
 requires-python = ">=3.10"
 dependencies = [
-    "python-telegram-bot==20.8",
+    "python-telegram-bot==22.8",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",
@@ -16,6 +16,10 @@ dependencies = [
     "aiohttp>=3.9",
     "pandas>=1.5",
     "numpy>=1.24",
+    "tzdata>=2023.3",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+    "anthropic>=2.3,<3",
 ]
 
 [project.optional-dependencies]

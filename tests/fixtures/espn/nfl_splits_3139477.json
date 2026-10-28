@@ -1,0 +1,125 @@
+{
+ "displayName": "2026 Splits",
+ "labels": [
+  "CMP",
+  "ATT",
+  "YDS",
+  "CMP%",
+  "AVG",
+  "TD",
+  "INT",
+  "LNG",
+  "SACK",
+  "RTG",
+  "CAR",
+  "YDS",
+  "AVG",
+  "TD",
+  "LNG"
+ ],
+ "names": [
+  "completions",
+  "passingAttempts",
+  "passingYards",
+  "completionPct",
+  "yardsPerPassAttempt",
+  "passingTouchdowns",
+  "interceptions",
+  "longPassing",
+  "sacks",
+  "QBRating",
+  "rushingAttempts",
+  "rushingYards",
+  "yardsPerRushAttempt",
+  "rushingTouchdowns",
+  "longRushing"
+ ],
+ "displayNames": [
+  "Completions",
+  "Passing Attempts",
+  "Passing Yards",
+  "Completion Percentage",
+  "Yards Per Pass Attempt",
+  "Passing Touchdowns",
+  "Interceptions",
+  "Longest Pass",
+  "Total Sacks",
+  "Passer Rating",
+  "Rushing Attempts",
+  "Rushing Yards",
+  "Yards Per Rush Attempt",
+  "Rushing Touchdowns",
+  "Long Rushing"
+ ],
+ "splitCategories": [
+  {
+   "name": "split",
+   "displayName": "split",
+   "splits": [
+    {
+     "abbreviation": "Any",
+     "displayName": "All Splits",
+     "stats": [
+      "105",
+      "158",
+      "1,309",
+      "66.5",
+      "8.3",
+      "9",
+      "3",
+      "59",
+      "6",
+      "103.1",
+      "17",
+      "57",
+      "3.4",
+      "1",
+      "15"
+     ]
+    },
+    {
+     "abbreviation": "Home",
+     "displayName": "Home",
+     "stats": [
+      "70",
+      "104",
+      "838",
+      "67.3",
+      "8.1",
+      "5",
+      "2",
+      "59",
+      "4",
+      "99.8",
+      "14",
+      "56",
+      "4.0",
+      "1",
+      "15"
+     ]
+    },
+    {
+     "abbreviation": "Away",
+     "displayName": "Away",
+     "stats": [
+      "35",
+      "54",
+      "471",
+      "64.8",
+      "8.7",
+      "4",
+      "1",
+      "55",
+      "2",
+      "109.4",
+      "3",
+      "1",
+      "0.3",
+      "0",
+      "1"
+     ]
+    }
+   ]
+  }
+ ]
+}

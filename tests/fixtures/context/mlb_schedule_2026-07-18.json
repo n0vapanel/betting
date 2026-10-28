@@ -1,0 +1,602 @@
+{
+"totalGames":16,
+"dates":[
+{
+"date":"2026-07-18",
+"games":[
+{
+"gamePk":824414,
+"gameDate":"2026-07-18T17:10:00Z",
+"doubleHeader":"S",
+"gameNumber":1,
+"dayNight":"day",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":114,
+"name":"Cleveland Guardians"
+}
+},
+"away":{
+"team":{
+"id":134,
+"name":"Pittsburgh Pirates"
+}
+}
+},
+"venue":{
+"id":5,
+"name":"Progressive Field",
+"fieldInfo":{
+"roofType":"Open"
+}
+},
+"weather":{
+"condition":"Partly Cloudy",
+"temp":"89",
+"wind":"14 mph, Out To RF"
+}
+},
+{
+"gamePk":824412,
+"gameDate":"2026-07-18T23:10:00Z",
+"doubleHeader":"S",
+"gameNumber":2,
+"dayNight":"night",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":114,
+"name":"Cleveland Guardians"
+}
+},
+"away":{
+"team":{
+"id":134,
+"name":"Pittsburgh Pirates"
+}
+}
+},
+"venue":{
+"id":5,
+"name":"Progressive Field",
+"fieldInfo":{
+"roofType":"Open"
+}
+},
+"weather":{
+"condition":"Cloudy",
+"temp":"79",
+"wind":"6 mph, L To R"
+}
+},
+{
+"gamePk":824657,
+"gameDate":"2026-07-18T18:20:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"day",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":112,
+"name":"Chicago Cubs"
+}
+},
+"away":{
+"team":{
+"id":142,
+"name":"Minnesota Twins"
+}
+}
+},
+"venue":{
+"id":17,
+"name":"Wrigley Field",
+"fieldInfo":{
+"roofType":"Open"
+}
+},
+"weather":{
+"condition":"Partly Cloudy",
+"temp":"81",
+"wind":"12 mph, L To R"
+}
+},
+{
+"gamePk":823441,
+"gameDate":"2026-07-18T19:05:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"day",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":143,
+"name":"Philadelphia Phillies"
+}
+},
+"away":{
+"team":{
+"id":121,
+"name":"New York Mets"
+}
+}
+},
+"venue":{
+"id":2681,
+"name":"Citizens Bank Park",
+"fieldInfo":{
+"roofType":"Open"
+}
+},
+"weather":{
+"condition":"Overcast",
+"temp":"87",
+"wind":"8 mph, Out To RF"
+}
+},
+{
+"gamePk":822790,
+"gameDate":"2026-07-18T19:07:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"day",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":141,
+"name":"Toronto Blue Jays"
+}
+},
+"away":{
+"team":{
+"id":145,
+"name":"Chicago White Sox"
+}
+}
+},
+"venue":{
+"id":14,
+"name":"Rogers Centre",
+"fieldInfo":{
+"roofType":"Retractable"
+}
+},
+"weather":{
+"condition":"Roof Closed",
+"temp":"68",
+"wind":"0 mph, None"
+}
+},
+{
+"gamePk":824331,
+"gameDate":"2026-07-18T19:10:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"day",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":115,
+"name":"Colorado Rockies"
+}
+},
+"away":{
+"team":{
+"id":113,
+"name":"Cincinnati Reds"
+}
+}
+},
+"venue":{
+"id":19,
+"name":"Coors Field",
+"fieldInfo":{
+"roofType":"Open"
+}
+},
+"weather":{
+"condition":"Sunny",
+"temp":"89",
+"wind":"3 mph, R To L"
+}
+},
+{
+"gamePk":824169,
+"gameDate":"2026-07-18T20:10:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"day",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":117,
+"name":"Houston Astros"
+}
+},
+"away":{
+"team":{
+"id":110,
+"name":"Baltimore Orioles"
+}
+}
+},
+"venue":{
+"id":2392,
+"name":"Daikin Park",
+"fieldInfo":{
+"roofType":"Retractable"
+}
+},
+"weather":{
+"condition":"Roof Closed",
+"temp":"73",
+"wind":"0 mph, None"
+}
+},
+{
+"gamePk":824088,
+"gameDate":"2026-07-18T20:10:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"day",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":118,
+"name":"Kansas City Royals"
+}
+},
+"away":{
+"team":{
+"id":135,
+"name":"San Diego Padres"
+}
+}
+},
+"venue":{
+"id":7,
+"name":"Kauffman Stadium",
+"fieldInfo":{
+"roofType":"Open"
+}
+},
+"weather":{
+"condition":"Partly Cloudy",
+"temp":"90",
+"wind":"6 mph, R To L"
+}
+},
+{
+"gamePk":825059,
+"gameDate":"2026-07-18T20:10:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"day",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":109,
+"name":"Arizona Diamondbacks"
+}
+},
+"away":{
+"team":{
+"id":138,
+"name":"St. Louis Cardinals"
+}
+}
+},
+"venue":{
+"id":15,
+"name":"Chase Field",
+"fieldInfo":{
+"roofType":"Retractable"
+}
+},
+"weather":{
+"condition":"Roof Closed",
+"temp":"76",
+"wind":"0 mph, None"
+}
+},
+{
+"gamePk":824738,
+"gameDate":"2026-07-18T20:10:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"day",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":111,
+"name":"Boston Red Sox"
+}
+},
+"away":{
+"team":{
+"id":139,
+"name":"Tampa Bay Rays"
+}
+}
+},
+"venue":{
+"id":3,
+"name":"Fenway Park",
+"fieldInfo":{
+"roofType":"Open"
+}
+},
+"weather":{
+"condition":"Cloudy",
+"temp":"71",
+"wind":"10 mph, Out To LF"
+}
+},
+{
+"gamePk":824899,
+"gameDate":"2026-07-18T20:10:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"day",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":144,
+"name":"Atlanta Braves"
+}
+},
+"away":{
+"team":{
+"id":140,
+"name":"Texas Rangers"
+}
+}
+},
+"venue":{
+"id":4705,
+"name":"Truist Park",
+"fieldInfo":{
+"roofType":"Open"
+}
+},
+"weather":{
+"condition":"Partly Cloudy",
+"temp":"92",
+"wind":"5 mph, Out To LF"
+}
+},
+{
+"gamePk":823763,
+"gameDate":"2026-07-18T20:10:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"day",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":158,
+"name":"Milwaukee Brewers"
+}
+},
+"away":{
+"team":{
+"id":146,
+"name":"Miami Marlins"
+}
+}
+},
+"venue":{
+"id":32,
+"name":"American Family Field",
+"fieldInfo":{
+"roofType":"Retractable"
+}
+},
+"weather":{
+"condition":"Sunny",
+"temp":"86",
+"wind":"7 mph, In From CF"
+}
+},
+{
+"gamePk":823116,
+"gameDate":"2026-07-19T00:08:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"night",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":136,
+"name":"Seattle Mariners"
+}
+},
+"away":{
+"team":{
+"id":137,
+"name":"San Francisco Giants"
+}
+}
+},
+"venue":{
+"id":680,
+"name":"T-Mobile Park",
+"fieldInfo":{
+"roofType":"Retractable"
+}
+},
+"weather":{
+"condition":"Clear",
+"temp":"74",
+"wind":"8 mph, L To R"
+}
+},
+{
+"gamePk":824979,
+"gameDate":"2026-07-19T02:05:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"night",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":133,
+"name":"Athletics"
+}
+},
+"away":{
+"team":{
+"id":120,
+"name":"Washington Nationals"
+}
+}
+},
+"venue":{
+"id":2529,
+"name":"Sutter Health Park",
+"fieldInfo":{
+"roofType":"Open"
+}
+},
+"weather":{
+"condition":"Clear",
+"temp":"88",
+"wind":"9 mph, Out To CF"
+}
+},
+{
+"gamePk":824008,
+"gameDate":"2026-07-19T02:07:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"night",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Final"
+},
+"teams":{
+"home":{
+"team":{
+"id":108,
+"name":"Los Angeles Angels"
+}
+},
+"away":{
+"team":{
+"id":116,
+"name":"Detroit Tigers"
+}
+}
+},
+"venue":{
+"id":1,
+"name":"Angel Stadium",
+"fieldInfo":{
+"roofType":"Open"
+}
+},
+"weather":{
+"condition":"Clear",
+"temp":"79",
+"wind":"6 mph, R To L"
+}
+},
+{
+"gamePk":823523,
+"gameDate":"2026-07-19T00:08:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"night",
+"status":{
+"abstractGameState":"Final",
+"detailedState":"Postponed"
+},
+"teams":{
+"home":{
+"team":{
+"id":147,
+"name":"New York Yankees"
+}
+},
+"away":{
+"team":{
+"id":119,
+"name":"Los Angeles Dodgers"
+}
+}
+},
+"venue":{
+"id":3313,
+"name":"Yankee Stadium",
+"fieldInfo":{
+"roofType":"Open"
+}
+},
+"weather":{
+"condition":"Sunny",
+"temp":"76",
+"wind":"15 mph, Out To RF"
+}
+}
+]
+}
+]
+}

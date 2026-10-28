@@ -1,0 +1,779 @@
+// Help's words: the glossary the Help tab shows, and the guides (Start here, How the AI decides, How the brain learns,
+// The Builder, Venue & conditions, Rollover explained, Responsible play, FAQ).
+//
+// The glossary builds on ui.js's GLOSSARY, which the ⓘ sheets on every screen read, and adds what a
+// help page needs on top: a worked example step by step, the other names people search for ("vig",
+// "juice", "parlay", "acca"...), a group, related terms, where "See it live" goes, and a few terms the
+// ⓘ sheets don't have yet (implied probability, Kelly, ROI, AI chance vs market chance). Keys are the
+// same as GLOSSARY's, so every ⓘ sheet's "More in Help" (#/help/<key>) lands on its entry here.
+//
+// Every entry needs a worked example and a "See it live" link, GLOSSARY's terms included: a term added
+// there needs its EXTRAS entry here too (group, other names, steps, related terms), or it shows without
+// them under "Odds and chances".
+//
+// Every number on these pages is fixed teaching text, worked out by hand and checked (the arithmetic is
+// written into the steps so it can be checked again). The app's own numbers always come from the server.
+
+import { GLOSSARY } from "../../ui.js";
+
+// --- the glossary ---------------------------------------------------------------------------------------
+
+export const GROUPS = [
+  { key: "odds", title: "Odds and chances" },
+  { key: "markets", title: "Markets say: the blend and its sources" },
+  { key: "bets", title: "Bet types and results" },
+  { key: "money", title: "Money, staking and plans" },
+  { key: "ai", title: "The AI and its record" },
+  { key: "builder", title: "The Builder" },
+  { key: "context", title: "Venue & conditions" },
+  { key: "players", title: "Players and props" },
+  { key: "lingo", title: "Bettor talk" },
+];
+
+// Terms the ⓘ sheets don't have (yet): same shape as GLOSSARY's entries
+const NEW_TERMS = {
+  implied_probability: {
+    title: "Implied probability",
+    short: "The chance a price suggests: 1 ÷ the decimal odds.",
+    body: "It still includes the bookmaker's margin, so both sides of a market add up to more than 100%. Take the margin out and you get the market chance the app shows.",
+    example: "2.50 implies 40%; 1.91 implies 52.4%.",
+  },
+  ai_vs_market: {
+    title: "AI chance vs market chance",
+    short: "Two views of the same outcome, shown side by side and never blended in secret.",
+    body: "The market chance is the bookmakers' view with their margin removed: the hardest benchmark there is (closing prices pick about 68% of NBA winners). The AI chance is the brain's own estimate. Where they differ the app shows both, and a big gap gets a warning rather than a cheer.",
+    example: "Thunder: market 64%, AI 68%. The AI likes them 4 points more than the bookmakers do.",
+  },
+  kelly: {
+    title: "Kelly stake",
+    short: "The stake that grows a bankroll fastest when you truly have an edge. With no edge it's zero.",
+    body: "Kelly = (chance × odds − 1) ÷ (odds − 1), as a share of your bankroll. It needs a real edge, which almost nobody has against the market, and an overconfident chance makes it overbet, so many professionals use half of it or less. This app never sizes stakes from the AI's confidence.",
+    example: "A true 55% chance at 2.00: Kelly says 10% of the bankroll, half-Kelly 5%.",
+  },
+  paste_slip: {
+    title: "Paste a slip",
+    short: "Paste a bet slip from any bookmaker (its text or a screenshot) and the app checks it at your own odds.",
+    body: "In Ask AI, tap 📋 Paste a slip. The AI only copies what the slip says; the app's code checks that copy, finds each leg among the games it has odds for and works out the honest chance, what the bookmaker keeps, the weakest leg, better prices elsewhere and cheaper ways to play it. Then you can talk it through: \"what if I drop leg 3?\". "
+      + "It reads moneylines, spreads, totals and NBA player points, rebounds, assists, threes, steals, blocks and turnovers. It can't model player props outside the NBA or unusual markets (both teams to score, correct score, first scorer): those legs are priced at your odds with an estimated chance, and the card says so. "
+      + "Each leg's chance comes from the market (the bookmakers' prices with their margin taken out), from the NBA model, or is estimated from your own price minus a typical bookmaker margin. When a read looks doubtful (your bookmaker's return doesn't match, or some odds couldn't be read) the app asks you to check it before any numbers. "
+      + "Screenshots aren't kept: only what was read from them, in your own history that nobody else can see. With too little AI allowance left, or while picks are paused, the free reader (code only) reads pasted text at no cost; screenshots need the AI, so paste the slip's text then.",
+    example: "Celtics −3.5 at −110 and Nuggets to win at −400 for $10: $23.86 back if both win, about 1 in 2.6.",
+  },
+  pra: {
+    title: "PRA (points + rebounds + assists)",
+    short: "One prop on a player's points, rebounds and assists added together.",
+    body: "P+R, P+A and R+A add two of them; stocks are steals + blocks. The Player finder and Ask AI scan them like any other stat: the projection is the parts' projections added up, and the history counts games where the sum reached the number.",
+    example: "28 points, 9 rebounds and 6 assists is 43 PRA: over 39.5 wins.",
+  },
+  l10: {
+    title: "L5, L10, L20",
+    short: "A player's last 5, 10 or 20 games.",
+    body: "\"9/10 L10\" means he reached the number in 9 of his last 10 games: his hit rate over that stretch. The Player finder shows the last 5, the last 10 and this season side by side, so a hot week stands out against the whole season. Ten games is a small sample, which is why the chance comes from the projection, not from the count alone.",
+    example: "4/5 L5, 7/10 L10, 25/45 season: 80%, 70% and 56%, hotter lately than over the season.",
+  },
+  sgp: {
+    title: "SGP (same-game parlay)",
+    short: "A parlay of picks from one game.",
+    body: "The picks are linked (a blowout makes the over likelier), so bookmakers price the link themselves. The app doesn't put two picks from one game in a multi: multiplying linked chances as if they were unrelated would overstate the chance.",
+    example: "Thunder −6.5 and Over 224.5 in one ticket is an SGP; here they go in as two singles.",
+  },
+  attd: {
+    title: "ATTD (anytime touchdown)",
+    short: "A bet that a player scores a touchdown at any point in the game.",
+    body: "Rushing and receiving touchdowns count; a quarterback's passing touchdowns don't. It's a yes-or-no bet, so the Player finder ranks it by the chance of 1 or more.",
+    example: "+120 (2.20) with a 45% chance: 0.45 × 2.20 − 1 = −1.0%, a little under break-even.",
+  },
+  sog: {
+    title: "SOG (shots on goal)",
+    short: "Hockey shots on target: the ones the goalie saved plus the goals.",
+    body: "Blocked shots and misses don't count. A common prop is 3+ SOG (over 2.5).",
+    example: "4 shots saved and 1 goal is 5 SOG: over 2.5 wins.",
+  },
+  ks: {
+    title: "Ks (strikeouts)",
+    short: "A pitcher's strikeouts in a game.",
+    body: "Only games he pitched count in his history. Over 5.5 Ks needs 6 or more, the same as \"6+ strikeouts\" in the Player finder.",
+    example: "7 strikeouts in 6 innings: over 5.5 wins, and so does 7+; 8+ loses.",
+  },
+  tb: {
+    title: "TB (total bases)",
+    short: "The bases from a batter's hits: a single 1, a double 2, a triple 3, a home run 4.",
+    body: "Walks don't count. Over 1.5 TB needs a double or better, or two singles.",
+    example: "A single and a home run: 1 + 4 = 5 total bases.",
+  },
+  alt_line: {
+    title: "Alt line",
+    short: "The same bet at a different number from the main line, at a different price.",
+    body: "A lower number wins more often and pays less; a higher one pays more and wins less often. Milestones like \"20+ points\" are a ladder of alt lines. The Player finder's edge uses only the price for exactly your number.",
+    example: "Main over 24.5 at −110 (1.91); alt over 19.5 at −250 (1.40); alt over 29.5 at +200 (3.00).",
+  },
+  chalk_dog: {
+    title: "Chalk and dog",
+    short: "Chalk is the favourite; the dog (underdog) is the side not expected to win.",
+    body: "Minus money (−150) usually marks the chalk and plus money (+150) the dog. A pick'em is a game priced about even.",
+    example: "Celtics −250 (1.40) are the chalk; Hornets +200 (3.00) are the dog.",
+  },
+  fade_tail: {
+    title: "Fade and tail",
+    short: "Tail a pick: bet the same. Fade it: bet against it.",
+    body: "Ask AI understands both words. Whatever you tail or fade, only you add picks to your slip.",
+    example: "Someone likes the Bills −3: tailing is the Bills −3 too, fading is the Dolphins +3.",
+  },
+  lock: {
+    title: "Lock, hammer, nuke",
+    short: "Bettor talk for a pick someone feels strongly about.",
+    body: "Ask AI reads \"give me your locks\" as \"your strongest picks\" and answers with the most likely ones and their chances. No pick is certain, so the app never calls one a lock itself.",
+    example: "\"3 locks tonight\": the three strongest picks, say at 74%, 71% and 69%.",
+  },
+  roi: {
+    title: "Net profit and ROI",
+    short: "What you're up or down after every stake, and that as a share of everything you staked.",
+    body: "Net profit is everything that came back minus everything staked. ROI (return on investment) is net profit ÷ total staked. The app never shows \"total won\" on its own: winnings without the losing stakes look better than the truth.",
+    example: "Staked $40, $25 came back: net −$15, ROI −37.5%.",
+  },
+};
+
+// What the Help tab adds to each term: group, other names, worked steps, related terms, "See it live"
+const EXTRAS = {
+  decimal_odds: {
+    group: "odds", aka: ["European odds"], aliases: ["odds", "decimal", "european odds", "odds format", "price"],
+    worked: ["$10 at 2.50 returns $10 × 2.50 = $25.", "That's your $10 back plus $15 profit.", "If it loses, nothing comes back: you're $10 down."],
+    related: ["american_odds", "implied_probability", "payout"],
+  },
+  american_odds: {
+    group: "odds", aka: ["US odds", "moneyline odds"], aliases: ["us odds", "moneyline odds", "+150", "-110", "odds format", "plus minus"],
+    worked: ["+150: a $100 bet wins $150 profit. In decimal that's 1 + 150 ÷ 100 = 2.50.",
+      "−150: stake $150 to win $100. In decimal that's 1 + 100 ÷ 150 = 1.67.",
+      "−110 is 1.91 decimal (1 + 100 ÷ 110): the usual price on each side of a spread."],
+    related: ["decimal_odds", "implied_probability"], seeLabel: "Switch the format in Settings",
+  },
+  implied_probability: {
+    group: "odds", aliases: ["implied odds", "implied chance", "break even", "breakeven", "probability"],
+    worked: ["1 ÷ 2.50 = 0.40, so a price of 2.50 implies a 40% chance.",
+      "A spread at 1.91 on both sides implies 1 ÷ 1.91 = 52.4% each: 104.7% in all.",
+      "The extra 4.7% is the bookmaker's margin. Take it out and each side is 50%."],
+    related: ["market_chance", "book_cut", "fair_odds"], see: "#/today", seeLabel: "See the chances on Today",
+  },
+  markets_say: {
+    group: "markets", aka: ["the blend", "consensus"],
+    aliases: ["markets", "markets say", "blend", "blended", "consensus", "brain", "weights", "log odds", "opinion pool", "low confidence", "best estimate"],
+    worked: ["Three sources price the Celtics, margins removed: Sharp books 64%, US books 62%, Kalshi 63%.",
+      "Their starting weights, 50%, 20% and 20%, add up to 90%, so they're shared out as 55.6%, 22.2% and 22.2%.",
+      "In log-odds: 0.556 × 0.575 + 0.222 × 0.490 + 0.222 × 0.532 = 0.547, which is a 63.3% chance: the blend shows 63%.",
+      "When no market price can be counted (none prices the game, or the ones shown are thin or out of date), ratings alone are averaged, pulled a quarter of the way toward the sport's usual home-win rate (an even split at a neutral site or where there is none) and labelled \"Low confidence\"."],
+    related: ["sharp_book", "prediction_market", "disagreement", "thin_market", "market_chance", "brier"], seeLabel: "See \"Markets\" on Today",
+  },
+  sharp_book: {
+    group: "markets", aka: ["sharp bookmaker", "exchange"], aliases: ["sharp", "sharps", "pinnacle", "betfair", "matchbook", "exchange", "anchor", "smart money"],
+    worked: ["Pinnacle prices the Celtics at 1.65 and the Knicks at 2.38.",
+      "1 ÷ 1.65 = 60.6% and 1 ÷ 2.38 = 42.0%: 102.6% in all, a 2.6% margin.",
+      "Divide each by 102.6%: Celtics 59%, Knicks 41%. That's the Sharp chip; the price itself is never offered as one to take."],
+    related: ["markets_say", "market_chance", "book_cut"], seeLabel: "See the Sharp chip on a game",
+  },
+  prediction_market: {
+    group: "markets", aka: ["event contract"], aliases: ["kalshi", "polymarket", "prediction market", "exchange", "contract", "bid", "ask", "mid", "crowd"],
+    worked: ["Kalshi's Celtics contract: best bid 61¢, best ask 65¢. The mid is 63¢.",
+      "The Knicks contract's mid is 39¢: 63 + 39 = 102, so each is scaled to add up to 100%: Celtics 61.8%, Knicks 38.2%.",
+      "Within 15 minutes of the start the chip counts half in the blend: prices drift near expiry.",
+      "Two games' contracts at 60¢ each don't make a 36¢ parlay: a product of leg prices is never a real parlay price."],
+    related: ["markets_say", "thin_market", "disagreement"], seeLabel: "See Kalshi and Polymarket on a game",
+  },
+  thin_market: {
+    group: "markets", aka: ["illiquid market"], aliases: ["thin", "illiquid", "liquidity", "spread", "wide spread", "not counted"],
+    worked: ["Bid 3¢, ask 97¢: a 94-cent spread, far over the 6-cent limit.",
+      "$22 waiting to trade, under the $1,000 limit.",
+      "Either one makes it thin: its chip says \"thin\" and the blend leaves it out."],
+    related: ["prediction_market", "markets_say"], seeLabel: "See the chips on a game",
+  },
+  disagreement: {
+    group: "markets", aka: ["⚖ badge", "sources differ"], aliases: ["disagree", "disagreement", "scales", "balance", "differ", "spread", "split", "conflict"],
+    worked: ["Sharp 64%, US books 62%, Kalshi 57%, ESPN 60% on the Celtics.",
+      "Highest 64%, lowest 57%: 7 points apart. That's 5 or more, so the game shows ⚖ 7.",
+      "Only sources counted in the blend take part: a thin or out-of-date one is shown but left out.",
+      "Sort Today's board by \"Sources disagree most\" to see these games first."],
+    related: ["markets_say", "thin_market", "ai_vs_market"], see: "#/today?sort=dis", seeLabel: "Sort Today by disagreement",
+  },
+  market_chance: {
+    group: "odds", aka: ["no-vig chance", "fair chance"], aliases: ["no vig", "no-vig", "fair chance", "consensus", "market", "mkt"],
+    worked: ["Best prices: Thunder 1.50, Lakers 2.70.",
+      "Implied chances: 1 ÷ 1.50 = 66.7% and 1 ÷ 2.70 = 37.0%, which add up to 103.7%.",
+      "Divide each by 103.7% to take the margin out: Thunder 64%, Lakers 36%.",
+      "That's \"Mkt\" next to a price on Today and on a game, and \"Market\" in your slip. \"Markets\" (Markets say) is another number: the blend, which also counts the exchanges, Kalshi, Polymarket and ratings, so the two can differ by a point or two."],
+    related: ["implied_probability", "markets_say", "ai_vs_market", "book_cut"], seeLabel: "See \"Mkt\" chances on Today",
+  },
+  ai_chance: {
+    group: "ai", aliases: ["ai", "model", "prediction", "brain"],
+    worked: ["The NBA model blends the bookmakers' consensus, ESPN's matchup predictor and a team model (form, rest, injuries).",
+      "It says Thunder 64%: it expects them to win about 64 games in 100 like this one.",
+      "Other sports have no model yet, so their screens show the market's chance, marked \"Mkt\"."],
+    related: ["ai_vs_market", "market_chance", "brier"],
+  },
+  ai_vs_market: {
+    group: "ai", aliases: ["edge", "disagree", "value", "gap", "far from market"],
+    worked: ["Market: Thunder 64% (bookmakers, margin removed). AI: Thunder 68%.",
+      "At odds of 1.50 a $10 bet profits $5. By the AI's chance the expected result is 0.68 × $15 − $10 = +$0.20; by the market's, 0.64 × $15 − $10 = −$0.40.",
+      "A gap of 8 points or more gets a \"Far from market\" warning: it often means news the model hasn't caught, like a late injury."],
+    related: ["ai_chance", "market_chance", "expected_result", "brier"], see: "#/bets?tab=record", seeLabel: "See the AI's record",
+  },
+  value_mark: {
+    group: "ai", aka: ["value mark", "far-from-market warning"],
+    aliases: ["value", "value mark", "triangle", "up arrow", "exclamation", "far from market", "warning", "marks", "flag"],
+    worked: ["A price of 2.00 with the market at 48% and the AI at 55%: the AI is 7 points above the market.",
+      "By the AI's chance $10 returns 0.55 × $20 = $11 on average, +$1; by the market's, 0.48 × $20 = $9.60, −$0.40. A gap of 3 to 8 points that gains more than 3% of the stake by the AI's numbers gets ▲.",
+      "Even by the AI's own chance that pick loses 45 times in 100.",
+      "Had the AI said 57%, 9 points above the market, the price would show ! instead: a gap that big usually means news the model hasn't caught, like a late injury."],
+    related: ["ai_vs_market", "expected_result", "ai_chance"], seeLabel: "See the marks on Today",
+  },
+  fair_odds: {
+    group: "odds", aliases: ["true odds", "break even odds", "no-vig odds"],
+    worked: ["A 40% chance has fair odds of 1 ÷ 0.40 = 2.50.",
+      "At 2.50, $10 returns $25 four times in ten: $10 back on average, break-even.",
+      "At 2.30 it returns $23 four times in ten: 0.40 × $23 = $9.20 on average, an expected result of −$0.80."],
+    related: ["implied_probability", "expected_result", "kelly", "dixon_coles"], see: "#/build/builder", seeLabel: "See fair odds in the Builder",
+  },
+  book_cut: {
+    group: "odds", aka: ["vig", "vigorish", "juice", "margin", "overround"], aliases: ["vig", "vigorish", "juice", "margin", "overround", "house edge", "the cut", "bookmaker's cut", "hold"],
+    worked: ["Both sides at 1.91: one person stakes $100 on each side, $200 in all.",
+      "Whichever side wins is paid $191, so the bookmaker keeps $9: 4.5% of the money staked.",
+      "In a multi the cut is paid on every leg: 5 legs at 4.5% each keep about 20.6% (1 − 0.955⁵), 10 legs about 36.9%."],
+    related: ["implied_probability", "multi", "expected_result"], seeLabel: "See it on your slip",
+  },
+  expected_result: {
+    group: "money", aka: ["expected value", "EV"], aliases: ["expected value", "ev", "+ev", "average return", "expected loss", "expected cost"],
+    worked: ["A 40% chance at 2.30, $10 staked.",
+      "Four times in ten it returns $23, six times in ten nothing: 0.40 × $23 = $9.20 back on average.",
+      "Expected result: $9.20 − $10 = −$0.80. It's positive only when the price beats the fair odds (2.50 here)."],
+    related: ["fair_odds", "book_cut", "kelly"], see: "#/build", seeLabel: "See it on your slip",
+  },
+  one_in: {
+    group: "odds", aliases: ["1 in x", "one in", "odds against", "chance"],
+    worked: ["14% is about 1 in 7 (1 ÷ 0.14 = 7.1).",
+      "A 3-leg multi of coin flips wins 0.5 × 0.5 × 0.5 = 12.5% of the time: 1 in 8.",
+      "So it loses about 7 times in every 8."],
+    related: ["multi", "most_likely"], see: "#/build", seeLabel: "See it on your slip",
+  },
+  single: {
+    group: "bets", aka: ["straight bet"], aliases: ["straight", "straight bet", "singles", "single bet"],
+    worked: ["Three singles at $10 each: 1.91, 1.80 and 2.10. They cost $30.",
+      "Two win (1.91 and 2.10), one loses: $19.10 + $21.00 = $40.10 comes back, a net +$10.10.",
+      "The same three picks as a $10 multi would have lost the whole $10."],
+    related: ["multi", "round_robin", "stake"],
+  },
+  multi: {
+    group: "bets", aka: ["parlay", "accumulator", "acca"], aliases: ["parlay", "accumulator", "acca", "accum", "combo", "multiple", "treble", "double"],
+    worked: ["Three legs at 1.91 each: 1.91 × 1.91 × 1.91 = 6.968, shown as 6.97.",
+      "$10 pays $69.68 if all three win: a $59.68 profit.",
+      "If each leg is a true coin flip, all three win 1 time in 8 (12.5%). On average $10 returns 0.125 × $69.68 = $8.71: an expected result of −$1.29.",
+      "That −$1.29 is the bookmaker's cut, taken three times."],
+    related: ["single", "round_robin", "book_cut", "same_game"],
+  },
+  round_robin: {
+    group: "bets", aliases: ["round robin", "rr", "by 2s", "by twos", "doubles"],
+    worked: ["4 picks \"by 2s\" make 6 doubles: every pair (4 × 3 ÷ 2).",
+      "$5 each costs $30. With every pick at 1.91, a winning double pays $5 × 3.6481 = $18.24.",
+      "3 of 4 win: 3 doubles pay $54.72, a $24.72 profit. 2 of 4 win: one double pays $18.24, an $11.76 loss.",
+      "With coin flips the chance of any profit is 31% (3 or 4 winners), against 6% (1 in 16) for the same picks as a 4-leg multi. Each double pays the bookmaker's cut twice, not four times: on average it returns 91% of its stake, the 4-leg multi 83%."],
+    related: ["multi", "system", "single"],
+  },
+  system: {
+    group: "bets", aka: ["full-cover bets"], aliases: ["system bet", "trixie", "patent", "yankee", "lucky 15", "lucky15", "canadian", "super yankee", "heinz", "goliath", "full cover"],
+    worked: ["Trixie: 3 picks make 3 doubles and 1 treble, 4 bets. At $2 a bet it costs $8.",
+      "With every pick at 2.00, each double pays $2 × 4 = $8 and the treble $2 × 8 = $16.",
+      "Two picks win: one double pays $8, your $8 back (net $0). All three win: 3 × $8 + $16 = $40, a $32 profit.",
+      "Bigger ones: Patent 7 bets (a Trixie plus the singles), Yankee 11 (4 picks), Lucky 15, Heinz 57 (6 picks), Goliath 247 (8 picks)."],
+    related: ["round_robin", "stake", "multi"],
+  },
+  moneyline: {
+    group: "bets", aka: ["match winner", "head to head"], aliases: ["winner", "ml", "h2h", "head to head", "match result", "1x2"],
+    worked: ["Thunder to win at 1.48: $10 returns $14.80 if they win, a $4.80 profit.",
+      "Lakers to win at 2.75: $10 returns $27.50.",
+      "In soccer there are three outcomes (home, draw, away), so a draw loses both team bets."],
+    related: ["spread", "total", "decimal_odds"], see: "#/today", seeLabel: "See the Winner column on Today",
+  },
+  spread: {
+    group: "bets", aka: ["handicap", "point spread", "run line", "puck line"], aliases: ["handicap", "point spread", "ats", "against the spread", "cover", "run line", "puck line"],
+    worked: ["Thunder −6.5 at 1.91: they must win by 7 or more.",
+      "Final 110–100 (by 10): the bet wins and $10 returns $19.10.",
+      "Final 105–100 (by 5): the bet loses, and Lakers +6.5 would have won.",
+      "On a whole-number line like −7, winning by exactly 7 is a push: the stake comes back."],
+    related: ["push", "line", "total"], see: "#/today", seeLabel: "See the Spread column on Today",
+  },
+  total: {
+    group: "bets", aka: ["over/under"], aliases: ["over under", "over/under", "o/u", "totals", "points total"],
+    worked: ["Over 224.5 at 1.91: the two scores together must reach 225.",
+      "A 115–112 final makes 227, so the over wins: $10 returns $19.10.",
+      "Over 7 runs on a 4–3 game lands exactly on 7: a push, so the stake comes back."],
+    related: ["push", "line", "spread"], see: "#/today", seeLabel: "See the Total column on Today",
+  },
+  push: {
+    group: "bets", title: "Push and void",
+    aliases: ["void", "refund", "tie", "cancelled", "canceled", "postponed", "no action", "dead heat"],
+    more: "A void leg (a game called off, or postponed past the bookmaker's limit) counts the same way: the stake on it comes back, and in a multi it drops out.",
+    worked: ["A single on Over 7 runs and the game ends 4–3: a push, your $10 comes back.",
+      "A multi of three legs at 1.91 with one push: that leg counts as 1.00, so the odds fall to 1.91 × 1.91 = 3.65 and $10 pays $36.48.",
+      "Every leg pushed or void: the whole stake comes back."],
+    related: ["total", "spread", "multi"], see: "#/bets?tab=settled", seeLabel: "See your settled bets",
+  },
+  line: {
+    group: "bets", aliases: ["prop line", "number", "props", "player prop"],
+    worked: ["LeBron James over 24.5 points: 25 or more wins, 24 or fewer loses.",
+      "Half-point lines (.5) can't push; whole-number lines can.",
+      "Lines move as money and news come in. Your picks are priced again at the current line before anything is saved."],
+    related: ["hit_rate", "projection", "push"], see: "#/today", seeLabel: "Open a game, then a player",
+  },
+  hit_rate: {
+    group: "ai", aliases: ["hit rate", "trend", "last 10", "l10", "last 5", "streak"],
+    worked: ["Over 24.5 points went over in 7 of the last 10 games: \"7/10\".",
+      "Ten games is a small sample. A player who truly goes over 55% of the time still shows 7/10 or better about 1 time in 4 (27%).",
+      "So treat 7/10 as a hint, check the minutes and injuries, and remember the line already reflects most of it."],
+    related: ["line", "projection", "l10", "player_finder"], see: "#/today", seeLabel: "Open a game, then a player",
+  },
+  projection: {
+    group: "ai", aliases: ["projection", "player model", "range", "p(over)"],
+    worked: ["Mean 24.1 points, range 15–33 (10% to 90%).",
+      "About 1 game in 5 lands outside the range: 1 in 10 below 15, 1 in 10 above 33.",
+      "55% over 23.5 means fair odds of 1 ÷ 0.55 = 1.82. A book price of 1.91 is a little above fair; 1.80 a little below."],
+    related: ["hit_rate", "line", "fair_odds", "player_finder"], see: "#/today", seeLabel: "Open an NBA game, then a player",
+  },
+  rollover: {
+    group: "money", aliases: ["roll over", "rollover challenge", "2 odds", "sure 2 odds", "daily double", "compounding"],
+    worked: ["$10 at 2.00 every day for 10 days would end at $10 × 2¹⁰ = $10,240.",
+      "Once the bookmaker's cut is out, the market gives a 2.00 bet about 47%: 0.47¹⁰ is about 1 in 1,900.",
+      "47% of runs survive day 1, 22% day 2, 10% day 3, 2.3% day 5: about 78% are over by day 2.",
+      "On average a run returns (0.47 × 2)¹⁰ = 0.94¹⁰ = 54% of its stake: an expected loss of 46%."],
+    related: ["kelly", "bankroll", "multi"], seeLabel: "Open the rollover planner", topic: "rollover",
+  },
+  bankroll: {
+    group: "money", aliases: ["budget", "bank", "units", "weekly budget"],
+    worked: ["$200 set aside for the season; 2% a bet is $4.",
+      "Ten losses in a row happen to everyone sooner or later: at $4 a bet they cost $40, leaving $160.",
+      "At 25% a bet, four losses in a row leave about $63 ($200 × 0.75⁴)."],
+    related: ["kelly", "stake", "roi"], see: "#/settings?focus=budget", seeLabel: "Set a weekly budget in Settings",
+  },
+  stake: {
+    group: "money", aliases: ["wager", "bet size", "unit stake", "amount"],
+    worked: ["Multi: the stake is the whole bet, e.g. $10.",
+      "Singles: the stake is per pick, so 3 singles at $10 cost $30.",
+      "Round robins and systems: the stake is per bet. A $2 Yankee is 11 bets, $22 in all."],
+    related: ["payout", "system", "bankroll"], see: "#/build", seeLabel: "Set a stake in Build",
+  },
+  payout: {
+    group: "money", aliases: ["return", "returns", "to win", "potential payout", "winnings", "potential win"],
+    worked: ["$10 at 4.60 pays $46: your $10 back plus $36 profit.",
+      "\"To win\" on many US sites means the profit ($36); \"payout\" includes the stake ($46).",
+      "The app always shows what comes back next to the chance of it happening."],
+    related: ["stake", "decimal_odds", "most_likely"], see: "#/build", seeLabel: "See it on your slip",
+  },
+  most_likely: {
+    group: "odds", aliases: ["most likely outcome", "likely result"],
+    worked: ["A 3-leg multi with a 14% chance pays $70 on $10.",
+      "The most likely outcome is losing the $10: 86% of the time.",
+      "That's why the app shows it next to the payout, not tucked away."],
+    related: ["one_in", "multi", "payout"], see: "#/build", seeLabel: "See it on your slip",
+  },
+  paste_slip: {
+    group: "ai", aka: ["slip reader", "slip checker"],
+    aliases: ["paste", "pasted slip", "bet slip", "betslip", "screenshot", "bookmaker slip", "check my slip", "read my slip",
+      "slip reader", "free reader", "photo of slip", "upload slip"],
+    worked: ["You paste: \"Boston Celtics -3.5 -110\", \"Denver Nuggets ML -400\", \"Stake $10\", \"To win $13.86\".",
+      "Code converts the odds: −110 is 1 + 100 ÷ 110 = 1.909 and −400 is 1 + 100 ÷ 400 = 1.25.",
+      "$10 × 1.909 × 1.25 = $23.86 back, a profit of $13.86: it matches the bookmaker's \"To win\", so the read is right.",
+      "Both legs are on tonight's board, so their chances come from the market with the margin taken out: say 50% and 77%.",
+      "Both must win: 0.50 × 0.77 = 38.5%, about 1 in 2.6. On average $23.86 × 0.385 = $9.19 comes back, so you expect to lose about $0.81 of the $10 (about 8%): the bookmaker's cut on this slip.",
+      "A leg the app can't find is priced at your odds with an estimated chance: at 1.80 with a typical 4.5% margin, (1 ÷ 1.80) ÷ 1.045 = 53.2%."],
+    related: ["book_cut", "market_chance", "one_in"], see: "#/ask?paste=1", seeLabel: "Paste a slip in Ask AI",
+  },
+  analysts: {
+    group: "ai", aliases: ["claude", "deepseek", "ai analysts", "forecast", "analyst"],
+    worked: ["Claude says Thunder 66%, the AI 64%, the market 62%.",
+      "After the game each forecast is scored with a Brier score, next to the AI's and the market's.",
+      "An analyst moves nothing until it has 40 graded games; after that it earns weight only if its record beats the AI's."],
+    related: ["brier", "ai_chance", "ai_vs_market"], see: "#/bets?tab=record", seeLabel: "See the analysts' record",
+  },
+  tiers: {
+    group: "builder", aka: ["presets"], aliases: ["safe", "risky", "crazy", "risk level", "tier", "preset", "presets", "custom", "value", "for fun"],
+    worked: ["Safe: the brain gives the ticket 60% or more, paying 1.15x to 1.80x on 1 to 3 legs. At 62% it still loses about 4 times in 10.",
+      "Risky: 25% to 60%, paying 1.50x to 4.50x on 1 to 3 legs. Crazy: 3% to 25%, paying 3.40x to 36x on up to 5 legs: expect to lose most of these.",
+      "Tap Safe and change \"Chance at least\" from 60% to 55%: the run is now Custom (from Safe), and \"Back to Safe\" puts every control back."],
+    related: ["one_in", "expected_result", "target_odds", "near_miss"], topic: "builder", see: "#/build/builder", seeLabel: "Open the Builder",
+  },
+  target_odds: {
+    group: "builder", aka: ["target", "total odds"], aliases: ["target", "target odds", "win about", "want to win", "total odds", "payout target", "10x", "multiplier"],
+    worked: ["$10 stake, win about $100: 100 ÷ 10 = a target of 10.00x.",
+      "With ±10%: 10 × 0.90 = 9.00x up to 10 × 1.10 = 11.00x. Three legs at 2.20 each pay 2.20 × 2.20 × 2.20 = 10.65x: inside.",
+      "With no edge the chance is roughly (1 − cut) for each leg, multiplied, ÷ the target: at a 4.5% cut a leg, three legs to 10x is 0.955³ ÷ 10 = 0.871 ÷ 10, about 8.7% or 1 in 11.5."],
+    related: ["tolerance", "multi", "book_cut", "one_in"], topic: "builder", see: "#/build/builder", seeLabel: "Set a target in the Builder",
+  },
+  tolerance: {
+    group: "builder", aka: ["±%", "window"], aliases: ["tolerance", "plus minus", "window", "range", "how close"],
+    worked: ["Target 20x, ±10%: 20 × 0.90 = 18x up to 20 × 1.10 = 22x.",
+      "A ticket paying 21.40x fits; one paying 23.10x doesn't.",
+      "The chance of reaching the target counts a ticket that pays at least 18x, the window's low end.",
+      "At ±0% only exactly 20.00x would fit, which legs almost never multiply to."],
+    related: ["target_odds", "multi"], topic: "builder", see: "#/build/builder", seeLabel: "Open the Builder",
+  },
+  target_chance: {
+    group: "builder", aka: ["target chance", "win chance"], aliases: ["chance you want", "target chance", "80% chance", "4 in 5", "likely", "most likely", "win chance", "probability"],
+    worked: ["80% with 2 legs: each leg needs about 90%, since 0.90 × 0.90 = 0.81.",
+      "Two legs at 1.10 each pay 1.10 × 1.10 = 1.21x: about what an 80% ticket pays, far from 3.5x.",
+      "Ask for 3.5x and 80% together and you get the closest options: the likeliest at your odds (near 3.5x, with its real chance), the closest to your chance (about 80%, with its real odds) and the best balance of the two."],
+    related: ["closest_effort", "target_odds", "one_in"], topic: "builder", see: "#/build/builder", seeLabel: "Set a chance in the Builder",
+  },
+  closest_effort: {
+    group: "builder", aka: ["best effort", "strict"], aliases: ["closest effort", "best effort", "closest", "strict", "relaxed", "relax", "options", "best balance", "likeliest at your odds", "closest to your odds", "closest to your chance"],
+    worked: ["Safe wants each leg of a multi at 72% or more, and you ask for 2 legs near 3.5x.",
+      "Two 72% legs win 0.72 × 0.72 ≈ 52% of the time and pay at most about 1 ÷ 0.52 ≈ 1.92x before the bookmaker's cut: nothing lands near 3.5x.",
+      "Closest effort lowers the per-leg floor 5 points at a time (67%, 62%, 57%, then 52%) until a pair lands near 3.5x; the ticket says \"Relaxed: per-leg chance lowered from 72% to 52%\".",
+      "Strict leaves the run empty and lists the rules that blocked it."],
+    related: ["target_chance", "near_miss", "tolerance"], topic: "builder", see: "#/build/builder", seeLabel: "Open the Builder",
+  },
+  edge: {
+    group: "builder", aka: ["value"], aliases: ["edge", "value", "points", "pts", "overlay", "+ev", "min edge"],
+    worked: ["At 2.00 the price implies 1 ÷ 2.00 = 50%. Markets say 55%: 55 − 50 = +5.0 points.",
+      "At 1.75 the price implies 1 ÷ 1.75 = 57.1%: 55 − 57.1 = −2.1 points.",
+      "\"Edge at least −2 pts\" keeps the first and leaves the second out (−2.1 is below −2): it becomes a near miss."],
+    related: ["implied_probability", "markets_say", "book_cut", "near_miss"], topic: "builder", see: "#/build/builder", seeLabel: "Open the Builder",
+  },
+  data_age: {
+    group: "builder", aka: ["price age", "as of"], aliases: ["age", "old price", "stale", "fresh", "data age", "price age", "updated", "as of", "max price age"],
+    worked: ["The NBA prices were saved at 2:00 PM; at 5:40 PM they are 3 h 40 min old.",
+      "With \"Oldest price allowed: 3 h\" every NBA leg is left out and named as a near miss.",
+      "Choose 6 h to use them, then check each price at your bookmaker before you bet: it may have moved."],
+    related: ["near_miss", "quota"], topic: "builder", see: "#/build/builder", seeLabel: "Open the Builder",
+  },
+  near_miss: {
+    group: "builder", aka: ["near misses"], aliases: ["near miss", "near misses", "left out", "rejected", "why not", "blocked", "rules"],
+    worked: ["Your rules: each leg at least 55%, prices up to 3 h old.",
+      "Knicks to win @ 2.30 with a 44% chance fails \"chance at least 55%\": a near miss, \"chance 44% below your minimum 55%\".",
+      "Lower the minimum to 40% and it can join a ticket, with a lower chance of winning.",
+      "When no ticket fits at all, the Builder says which rules ruled out how many legs, e.g. \"only 4 games pass 'min chance 55%'\"."],
+    related: ["data_age", "edge", "tolerance"], topic: "builder", see: "#/build/builder", seeLabel: "Open the Builder",
+  },
+  dixon_coles: {
+    group: "builder", aka: ["goals model", "Poisson"], aliases: ["dixon coles", "dixon-coles", "poisson", "btts", "both teams to score", "draw no bet", "dnb", "double chance", "team totals", "correct score", "soccer", "goals"],
+    worked: ["The market says home 52%, draw 25%, away 23%, and 50% for over 2.5 goals.",
+      "The goal rates that fit those best: 1.69 expected goals at home, 1.02 away.",
+      "Every score gets a chance from those rates, with the low-score correction; the scores where both teams score add up to about 54%, plus the 1.5-point nudge: about 55%.",
+      "Fair odds are 1 ÷ 0.55, about 1.81. A bookmaker paying less than that is charging its margin."],
+    related: ["fair_odds", "market_chance", "moneyline"], topic: "builder", see: "#/today", seeLabel: "See it on a soccer game",
+  },
+  explains_vs_moves: {
+    group: "context", aka: ["attribution", "adjustment", "why the line is here", "what moves it"],
+    aliases: ["explains", "moves", "attribution", "adjustment", "adjusted", "adj", "waterfall", "why the line is here", "what moves it", "weather", "wind", "forecast", "roof", "venue", "conditions", "context"],
+    worked: ["An NFL total of 44.5 was priced when the forecast said 8 mph of wind and −2°C: the weather then explained about −1.0 point of it.",
+      "Two hours later the forecast says 19 mph: the weather now explains about −6.8 points. The change since the odds is −6.8 − (−1.0) = −5.8.",
+      "Half of it counts (weight 0.5): −2.9. The NFL total's cap is ±2.0, so −2.0 is applied.",
+      "The over's chance moves from 50% to about 44%, and every totals leg says why. The margin, home field and the rest of \"Why the line is here\" move nothing."],
+    related: ["markets_say", "market_chance", "total"], topic: "conditions", see: "#/today", seeLabel: "See it on a game",
+  },
+  same_game: {
+    group: "bets", aka: ["same-game parlay", "bet builder"], aliases: ["same game parlay", "sgp", "correlated", "bet builder", "same-game"],
+    worked: ["Thunder −6.5 and Over 224.5 in the same game are linked: a blowout makes both more likely.",
+      "Multiplying their chances as if they were unrelated gets the price wrong, and bookmakers keep about 20–35% on same-game bets.",
+      "So this app blocks them in multis: play them as singles instead."],
+    related: ["multi", "single"], see: "#/build", seeLabel: "Check your slip in Build",
+  },
+  quota: {
+    group: "ai", aliases: ["odds left", "requests", "odds api", "credits"],
+    worked: ["The odds feed allows about 500 requests a month, and each league fetch costs 3.",
+      "Odds are kept for 2 hours, so keeping one league fresh all day costs 12 fetches × 3 = 36 requests.",
+      "With fewer than 50 left the app shows the last saved odds instead of fetching."],
+    related: ["market_chance"], see: "#/today", seeLabel: "See how fresh the odds are on Today",
+  },
+  log_loss: {
+    group: "ai", aka: ["log score", "ignorance score"], aliases: ["logloss", "log-loss", "cross entropy", "log score", "ignorance", "surprise"],
+    worked: ["Saying 70% for a team that wins: −ln(0.70) = 0.357.",
+      "Saying 70% for a team that loses: −ln(0.30) = 1.204, more than three times as costly.",
+      "Always saying 50% scores −ln(0.50) = 0.693 every game.",
+      "A gap of +0.0004 against the market is 0.4 more per 1,000 games: well inside the week-to-week noise."],
+    related: ["calibration", "brier"], see: "#/bets?tab=brain", seeLabel: "See the brain's progress", topic: "brain",
+  },
+  calibration: {
+    group: "ai", aka: ["reliability"], aliases: ["reliability diagram", "reliability curve", "calibration slope", "overconfident", "underconfident", "pit", "pit histogram"],
+    worked: ["The brain gave 200 games a 70% chance and 132 of them happened: 66%.",
+      "With 200 games a perfectly calibrated brain lands within about 70% ± 6.5% (two standard errors of 3.2%), so 66% is no sign of a problem.",
+      "A calibration slope of 0.9 says its chances sit a little too far from 50% (overconfident); 1.1 says a little too close (too timid)."],
+    related: ["log_loss", "brier"], see: "#/bets?tab=brain", seeLabel: "See the brain's calibration", topic: "brain",
+  },
+  brier: {
+    group: "ai", aliases: ["brier score", "accuracy", "calibration", "log loss"],
+    worked: ["Saying 70% for a team that wins: (1 − 0.70)² = 0.09.",
+      "Saying 70% for a team that loses: (0 − 0.70)² = 0.49.",
+      "Always saying 50% scores 0.25 every game; the closing market averages about 0.20 on the NBA."],
+    related: ["analysts", "ai_vs_market", "calls"], see: "#/bets?tab=record", seeLabel: "See the AI's record",
+  },
+  calls: {
+    group: "ai", aliases: ["my calls", "predictions", "leaderboard", "points"],
+    worked: ["You give the Thunder 70% and they win: 25 − 100 × (1 − 0.70)² = +16 points.",
+      "They lose (you gave the winner 30%): 25 − 100 × (1 − 0.30)² = −24 points.",
+      "A 50% call always scores 0, so you only gain by being bold and right."],
+    related: ["brier", "analysts"], see: "#/bets?tab=calls", seeLabel: "See your calls",
+  },
+  kelly: {
+    group: "money", aka: ["Kelly criterion"], aliases: ["kelly criterion", "staking", "bet sizing", "fractional kelly", "half kelly"],
+    worked: ["Suppose you truly had a 55% chance at 2.00. The edge is 0.55 × 2.00 − 1 = 0.10.",
+      "Kelly = 0.10 ÷ (2.00 − 1) = 10% of your bankroll; half-Kelly is 5%.",
+      "With a 2- to 5-point edge, staking everything (a rollover) is 10 to 25 times the Kelly stake.",
+      "At the market's 47% the edge is negative (0.47 × 2.00 − 1 = −0.06), so Kelly says: bet nothing."],
+    related: ["bankroll", "rollover", "expected_result"], see: "#/build/rollover", seeLabel: "Compare staking plans",
+  },
+  player_finder: {
+    group: "players", aka: ["player scan", "prop finder"], aliases: ["player finder", "finder", "player scan", "scan", "props", "prop finder", "20+", "projected", "projection", "who will score", "milestone", "ladder", "hit rate", "recent form", "edge"],
+    worked: ["You pick NBA, points, at least 20, tonight.",
+      "A player went 20+ in 9 of his last 10, is projected for 31.2 and has an 82% chance: he ranks near the top.",
+      "His 20+ milestone is posted at −250 (1.40): edge = 0.82 × 1.40 − 1 = +14.8%.",
+      "Another is projected for 18.5 with a 44% chance: under 50% and under 20, so he's \"Also close\"."],
+    related: ["l10", "hit_rate", "projection", "pra", "alt_line"], see: "#/players", seeLabel: "Open the Player finder",
+  },
+  pra: {
+    group: "players", aka: ["P+R", "P+A", "R+A", "stocks"], aliases: ["pra", "pts+reb+ast", "p+r+a", "p+r", "p+a", "r+a", "combo", "combos", "stocks", "stl+blk", "points rebounds assists"],
+    worked: ["28 points + 9 rebounds + 6 assists = 43 PRA.", "Over 39.5 PRA needs 40 or more: 43 wins.", "Projected 27.1 + 8.4 + 5.9 = 41.4 PRA."],
+    related: ["player_finder", "line", "projection"], see: "#/players?league=basketball_nba&stat=pra&at=line&day=today", seeLabel: "PRA in the Player finder",
+  },
+  l10: {
+    group: "players", aka: ["last 10", "last 5", "last 20"], aliases: ["l5", "l10", "l20", "last 5", "last 10", "last 20", "form", "hot", "cold", "trend", "9/10"],
+    worked: ["Last 10 games at 20+ points: 24, 31, 18, 22, 27, 20, 25, 19, 30, 21.", "Eight of them are 20 or more: \"8/10 L10\".",
+      "The last 5 (24, 31, 18, 22, 27) have four: \"4/5 L5\"."],
+    related: ["hit_rate", "player_finder", "projection"], see: "#/players", seeLabel: "Open the Player finder",
+  },
+  sgp: {
+    group: "lingo", aka: ["same-game parlay", "same game multi"], aliases: ["sgp", "same game parlay", "same-game parlay", "same game multi", "bet builder"],
+    worked: ["Thunder −6.5 at 1.91 and Over 224.5 at 1.91.", "Multiplied as if unrelated: 1.91 × 1.91 = 3.65.",
+      "But a Thunder blowout makes the over likelier, so the real chance of both differs: the app plays them as singles."],
+    related: ["same_game", "multi"], see: "#/build", seeLabel: "Open your slip",
+  },
+  attd: {
+    group: "lingo", aka: ["anytime TD", "anytime touchdown scorer"], aliases: ["attd", "anytime td", "anytime touchdown", "td scorer", "touchdown scorer", "scores a td"],
+    worked: ["+120 is 1 + 120 ÷ 100 = 2.20 in decimal.", "A 45% chance: 0.45 × 2.20 = 0.99 back for each $1.",
+      "Edge = 0.99 − 1 = −1.0%: a little under break-even."],
+    related: ["player_finder", "implied_probability"], see: "#/players?league=americanfootball_nfl&stat=anytime_td&at=1&day=today", seeLabel: "Anytime TD in the Player finder",
+  },
+  sog: {
+    group: "lingo", aka: ["shots on goal", "shots"], aliases: ["sog", "shots on goal", "shots", "shots on net"],
+    worked: ["4 shots saved + 1 goal = 5 shots on goal.", "A blocked shot and a miss add nothing.", "Over 2.5 SOG (3+) wins."],
+    related: ["player_finder", "line"], see: "#/players?league=icehockey_nhl&stat=sog&at=3&day=today", seeLabel: "SOG in the Player finder",
+  },
+  ks: {
+    group: "lingo", aka: ["strikeouts", "pitcher strikeouts"], aliases: ["ks", "k", "strikeouts", "pitcher strikeouts", "punchouts"],
+    worked: ["Over 5.5 Ks is the same as 6+ strikeouts.", "7 strikeouts: over 5.5 wins, 7+ wins, 8+ loses."],
+    related: ["player_finder", "line"], see: "#/players?league=baseball_mlb&stat=k&at=6&day=today", seeLabel: "Ks in the Player finder",
+  },
+  tb: {
+    group: "lingo", aka: ["total bases"], aliases: ["tb", "total bases", "bases"],
+    worked: ["Single 1, double 2, triple 3, home run 4.", "A single and a home run: 1 + 4 = 5 TB.", "Over 1.5 TB needs 2 or more: a double alone does it, a single alone doesn't."],
+    related: ["player_finder", "line"], see: "#/players?league=baseball_mlb&stat=tb&at=2&day=today", seeLabel: "TB in the Player finder",
+  },
+  alt_line: {
+    group: "lingo", aka: ["alternate line", "ladder", "milestone"], aliases: ["alt line", "alt", "alternate", "ladder", "milestone", "alt lines"],
+    worked: ["−110 is 1 + 100 ÷ 110 = 1.91; −250 is 1 + 100 ÷ 250 = 1.40; +200 is 3.00.",
+      "Over 19.5 at 1.40 implies 1 ÷ 1.40 = 71%; over 29.5 at 3.00 implies 33%.",
+      "The lower rung wins more often and pays less."],
+    related: ["line", "implied_probability", "player_finder"], see: "#/players", seeLabel: "Open the Player finder",
+  },
+  chalk_dog: {
+    group: "lingo", aka: ["favourite and underdog", "favorite", "underdog", "pick'em"], aliases: ["chalk", "dog", "underdog", "favorite", "favourite", "plus money", "pick em", "pickem", "pick'em"],
+    worked: ["Celtics −250 is 1.40: they imply 1 ÷ 1.40 = 71%.", "Hornets +200 is 3.00: they imply 1 ÷ 3.00 = 33%.",
+      "71.4% + 33.3% = 104.8%: the extra 4.8% is the bookmaker's cut."],
+    related: ["american_odds", "moneyline", "book_cut"], see: "#/today", seeLabel: "See tonight's prices",
+  },
+  fade_tail: {
+    group: "lingo", aka: ["fade", "tail"], aliases: ["fade", "tail", "tailing", "fading", "follow"],
+    worked: ["A friend's pick: Bills −3.", "Tail it: Bills −3. Fade it: Dolphins +3.", "Either way, only you add it to your slip."],
+    related: ["spread", "ai_vs_market"], see: "#/ask", seeLabel: "Ask AI",
+  },
+  lock: {
+    group: "lingo", aka: ["hammer", "nuke", "best bet"], aliases: ["lock", "locks", "hammer", "nuke", "best bet", "strongest", "slam"],
+    worked: ["\"Give me 3 locks\" asks for the three strongest picks.", "Ask AI ranks the most likely winners: say 74%, 71% and 69%.",
+      "Three such picks together win about 0.74 × 0.71 × 0.69 ≈ 36% of the time."],
+    related: ["one_in", "multi", "ai_chance"], see: "#/ask", seeLabel: "Ask AI",
+  },
+  roi: {
+    group: "money", aka: ["profit and loss", "yield"], aliases: ["return on investment", "profit and loss", "p&l", "pnl", "net", "net profit", "yield", "total won"],
+    worked: ["Four bets of $10: one returns $25, three lose.",
+      "$25 came back and $40 was staked: net −$15.",
+      "ROI = −$15 ÷ $40 = −37.5%. \"Total won: $25\" would hide the $30 lost on the other three.",
+      "A void bet (every pick pushed or called off) gave its whole stake back and was never at risk, so it counts in neither the staked nor the came-back total."],
+    related: ["expected_result", "bankroll"], see: "#/bets?tab=settled", seeLabel: "See your results",
+  },
+};
+
+/**
+ * Every glossary term for Help, sorted by title:
+ * {key, title, short, body, example, worked: [step], aliases (search words), aka (other names to show),
+ *  group, related: [key], see ("#/route" or null), seeLabel, topic (a guide to link) | null, live?: fn}
+ */
+export function terms() {
+  const all = { ...GLOSSARY, ...NEW_TERMS };
+  return Object.entries(all).map(([key, entry]) => {
+    const extra = EXTRAS[key] || {};
+    return {
+      key,
+      ...entry,
+      title: extra.title || entry.title,
+      body: extra.more ? `${entry.body} ${extra.more}` : entry.body,
+      group: extra.group || "odds",
+      aliases: extra.aliases || [],
+      aka: extra.aka || [],
+      worked: extra.worked || [],
+      related: (extra.related || []).filter((k) => all[k]),
+      see: extra.see || entry.see || null,
+      seeLabel: extra.seeLabel || "See it live",
+      topic: extra.topic || null,
+    };
+  }).sort((a, b) => a.title.localeCompare(b.title));
+}
+
+export function term(key) {
+  return terms().find((t) => t.key === key) || null;
+}
+
+// --- the guides -----------------------------------------------------------------------------------------
+
+export const TOPICS = [
+  { key: "start", title: "Start here", blurb: "How the app works, in 60 seconds", iconName: "book",
+    words: "start begin overview how it works tour basics new" },
+  { key: "ai", title: "How the AI decides", blurb: "The brain counts, Claude explains", iconName: "bot",
+    words: "ai brain claude model analysts trust numbers decide explain how" },
+  { key: "brain", title: "How the brain learns", blurb: "It tests itself, changes slowly and shows why", iconName: "trend",
+    words: "brain learn learning learns improve improving better backtest back test tune tuning gate gates promote promoted rollback rolled back undo pause paused experiment shadow calibration log loss market ai proposal proposals claude deepseek cost cap progress held" },
+  { key: "builder", title: "The Builder", blurb: "Presets, every control, closest effort and why each leg", iconName: "build",
+    words: "builder build presets safe risky crazy custom controls target odds chance you want tolerance legs markets near miss swap why tickets closest effort best effort strict options best balance relaxed" },
+  { key: "conditions", title: "Venue & conditions", blurb: "Weather, travel and venues: what explains the line", iconName: "stadium",
+    words: "venue stadium arena park weather wind rain cold heat temperature altitude elevation roof dome surface capacity park factors travel rest back-to-back b2b time zone jet lag conditions adjustment adjusted explains moves waterfall units metric imperial open-meteo" },
+  { key: "rollover", title: "Rollover explained", blurb: "Why long runs almost always fail", iconName: "trend",
+    words: "rollover roll over plan days ladder bank half flat classic chance finish" },
+  { key: "responsible", title: "Responsible play", blurb: "Limits, breaks and free help", iconName: "lifebuoy",
+    words: "responsible gambling limits budget break cool off cooloff reality check help helpline addiction problem stop" },
+  { key: "faq", title: "FAQ", blurb: "Odds, grading, credits, privacy", iconName: "help",
+    words: "faq questions answers" },
+];
+
+export function topic(key) {
+  return TOPICS.find((t) => t.key === key) || null;
+}
+
+// "Start here": the whole app in five steps
+export const START_STEPS = [
+  { iconName: "today", title: "Today", href: "#/today", link: "Open Today",
+    text: "Each game shows who's likely to win: \"Markets say\", one chance blended from the bookmakers, exchanges, prediction markets and ratings, plus the AI's own chance for the NBA. ⚖ marks games whose sources disagree. Tap any price to add that pick to your slip." },
+  { iconName: "bets", title: "Your slip", href: "#/build", link: "Open your slip",
+    text: "The bar above the tabs shows your picks. Open it for the chance it wins as \"1 in X\", what it pays, what the bookmaker keeps and the expected result in money." },
+  { iconName: "build", title: "Build", href: "#/build", link: "Open Build",
+    text: "Make it singles, a multi, a round robin or a system bet and ask the AI to analyse it. Or open the Builder: Safe, Risky and Crazy fill every control (sports, legs, target odds, markets) and you can change any of them. The rollover planner shows four ways to play a run of days, real chances first." },
+  { iconName: "ask", title: "Ask AI", href: "#/ask", link: "Open Ask AI",
+    text: "Ask in your own words, paste a bet slip from any bookmaker (text or a screenshot), or fill in the request bar (sports, stake, what you'd like back, legs, Safe · Risky · Crazy). Code works out every number; Claude explains them." },
+  { iconName: "chart", title: "My bets", href: "#/bets", link: "Open My bets",
+    text: "Saved bets settle by themselves from the final scores. You see your net profit and ROI, your plans day by day, your calls against the AI and the AI's own graded record." },
+];
+
+// "Rollover explained": the blueprint's computed numbers (p = the chance of winning one day at 2.00)
+export const ROLLOVER_TABLE = {
+  columns: [["5 days", "32×"], ["7 days", "128×"], ["10 days", "1,024×"], ["14 days", "16,384×"]],
+  rows: [
+    { label: "48%", note: "market, 4% cut", cells: [["1 in 39", "−18.5%"], ["1 in 170", "−24.9%"], ["1 in 1,540", "−33.5%"], ["1 in 29,015", "−43.5%"]] },
+    { label: "47%", note: "market, 6% cut", cells: [["1 in 44", "−26.6%"], ["1 in 197", "−35.2%"], ["1 in 1,901", "−46.1%"], ["1 in 38,961", "−57.9%"]] },
+    { label: "52%", note: "a real 4% edge", cells: [["1 in 26", "+21.7%"], ["1 in 97", "+31.6%"], ["1 in 692", "+48.0%"], ["1 in 9,461", "+73.2%"]] },
+    { label: "55%", note: "a real 10% edge", cells: [["1 in 20", "+61.1%"], ["1 in 66", "+94.9%"], ["1 in 395", "+159%"], ["1 in 4,314", "+280%"]] },
+  ],
+};
+
+// Survival at p = 0.47: 0.47, 0.47² = 0.221, 0.47³ = 0.104, 0.47⁴ = 0.049, 0.47⁵ = 0.023
+export const SURVIVAL = [
+  { day: 1, share: 0.47, text: "47%" },
+  { day: 2, share: 0.221, text: "22.1%" },
+  { day: 3, share: 0.104, text: "10.4%" },
+  { day: 4, share: 0.049, text: "4.9%" },
+  { day: 5, share: 0.023, text: "2.3%" },
+];
+
+// 30-day runs, one bet a day at 2.00, bankroll starting at 1: [chance of a profit, typical (median) end,
+// chance of ending at half or less], worked out exactly by engine/rollover.py's outcomes(strategy, 30, 2.0, p),
+// the same maths as the rollover planner (pots are 10% of the start), at p = 0.47 (market) and 0.53 (edge)
+export const STRATEGIES = [
+  { title: "Classic all-in rollover", market: ["≈0%", "0", "≈100%"], edge: ["≈0%", "0", "≈100%"] },
+  { title: "Roll, but bank half of each day's profit", market: ["22.1%", "0", "77.9%"], edge: ["28.1%", "0.50", "71.9%"] },
+  { title: "Pot and ladder: roll a pot of 10% of the start for at most 2 wins, bank it, start a new pot; stop below half the start", market: ["30.2%", "0.40", "55.6%"], edge: ["53.4%", "1.10", "34.1%"] },
+  { title: "Flat 5% of the start each day", market: ["30.4%", "0.90", "9.3%"], edge: ["55.9%", "1.10", "2.4%"] },
+];
+
+// "Venue & conditions": the caps on what an adjustment can move, and the starting effect sizes in plain words
+// (engine/context.py's constants, with their sources). Design choices and starting points, refitted from the
+// context log once it has enough graded games.
+export const CONTEXT_CAPS = [
+  ["NFL and college football total", "±2.0 points"],
+  ["NFL and college football side", "±1.0 point"],
+  ["MLB total", "±0.4 runs"],
+  ["NBA, WNBA and college basketball total", "±1.5 points"],
+  ["NHL total", "±0.15 goals"],
+  ["Soccer total", "±0.15 goals a team (±0.30 for the match)"],
+  ["Win chance", "±2.5 points"],
+];
+
+export const CONTEXT_EFFECTS = [
+  { what: "Home field", size: "This season's home win rate from ESPN's standings, pulled toward the usual rate with 400 games' weight (NFL 53.9%, NBA 55.4%, NHL 52.2%, MLB 52.9%, WNBA 55%, college football 57%, college basketball 60%), turned into points through how widely results spread. Soccer: home 45% and draw 27% to start, as goal difference.", source: "ESPN standings, home records", sure: "Normal" },
+  { what: "Altitude", size: "NBA in Denver: about +2.6 points (Denver's home edge is 8.6 points per 100 possessions against 6.0 elsewhere); Utah scaled by its height. Soccer: about 0.25 goals per 1,000 m of height difference above 1,500 m (half a study's slope, as team quality muddies it). NFL in Denver: +0.5 points.", source: "Sportico; BMJ 2007 (1,460 South American matches)", sure: "Normal for the NBA in Denver; small, noisy otherwise" },
+  { what: "No rest", size: "NBA back-to-back: −1.25 points. NHL team on no rest against a rested one: −5.8 points of win chance (45.0% against 50.8%).", source: "The app's NBA model; nhlscraper's back-to-back study (NHL)", sure: "Normal" },
+  { what: "Flying east", size: "Two time zones or more east within 3 days: MLB home team −3.5 points of win chance; NBA −1.3 points.", source: "PNAS 2017 (MLB); Leota et al. (NBA)", sure: "Small, noisy, untested: no study checks whether closing prices already hold it" },
+  { what: "NFL wind", size: "Nothing at 8 mph or less, −2.2 points at 12 mph, −3.8 points at 16 mph or more, in a straight line between.", source: "NFL games since 2000 (CBS Sports): 44.3 points at 0–9 mph, 42.1 at 10–14, 40.5 at 15+", sure: "Normal" },
+  { what: "NFL cold", size: "−1.0 point at 32°F (0°C) or below; with 15 mph of wind or more, 2.0 points more.", source: "NFL games since 2000 (CBS Sports)", sure: "Normal" },
+  { what: "NFL rain", size: "−1.0 point with a 60% chance or more and 0.5 mm an hour or more at kick-off.", source: "Sharp Football Analysis (unders 57.4% in measurable rain)", sure: "Small, noisy" },
+  { what: "MLB temperature", size: "+0.15 runs per 10°F above 70°F (21°C), and less below it: fly balls carry about 3 feet further per 10°F.", source: "Smithsonian", sure: "Small, noisy" },
+  { what: "MLB wind", size: "±0.08 runs per mph of wind blowing out (+) or in (−) above 5 mph, from the park's direction and the forecast, or MLB's own \"Out To RF\". At most ±1 run.", source: "FanGraphs (Wrigley Field: 6.0 runs a game blowing out, 4.1 blowing in)", sure: "Small, noisy" },
+  { what: "MLB park", size: "Baseball Savant's 3-year runs index: (index − 100) ÷ 100 × the league's average total (Coors Field high, T-Mobile Park low). Home runs are shown, not added again.", source: "Baseball Savant park factors", sure: "Normal" },
+  { what: "Soccer weather", size: "Total goals ×1.068 above 22°C, ×0.97 below 6°C, ×1.014 in rain.", source: "Mišák 2025", sure: "Small, noisy" },
+  { what: "Dome or closed roof", size: "The weather counts for nothing, and the panel says \"Roof closed\".", source: "", sure: "" },
+];
+
+export const HELPLINES = [
+  { where: "US", name: "1-800-GAMBLER (National Council on Problem Gambling)", tel: "18004262537", phone: "1-800-426-2537", url: "https://www.ncpgambling.org/", note: "Call or text, 24/7, free and confidential." },
+  { where: "UK", name: "National Gambling Helpline (GamCare)", tel: "08088020133", phone: "0808 8020 133", url: "https://www.gamcare.org.uk/", note: "Phone or live chat, 24/7, free." },
+  { where: "UK", name: "BeGambleAware", url: "https://www.begambleaware.org/", note: "Advice, self-assessment and local support." },
+  { where: "Anywhere", name: "Gamblers Anonymous", url: "https://gamblersanonymous.org/", note: "Meetings with people who've been there." },
+];
+
+export const WARNING_SIGNS = [
+  "Chasing losses: betting again to win back what you lost.",
+  "Needing bigger stakes to feel the same buzz.",
+  "Using money meant for rent, bills or debts, or borrowing to bet.",
+  "Hiding how much you bet, or feeling anxious or irritable when you can't.",
+  "Long late-night sessions, or starting rollover after rollover.",
+  "Raising your limits again and again.",
+];
+
+// Questions people ask (q, then the answer as HTML: static text written here, nothing from outside)
+export const FAQ = [
+  { q: "Is any money bet here?",
+    a: "<p>No. The app prices picks and keeps a record of them; saved bets and plans are a record only (plans start in paper mode). If you bet, you do it yourself with a licensed bookmaker.</p>" },
+  { q: "Where do the odds come from, and how fresh are they?",
+    a: "<p>From The Odds API: several US bookmakers, with the best price for each outcome, plus Pinnacle and two exchanges that only feed the \"Markets say\" blend (their prices are never offered to you). To save the monthly allowance they're kept for up to 2 hours (the pill in the header shows how many requests are left). Before anything is saved, the server prices your picks again from the latest odds it has.</p>" },
+  { q: "What does \"Markets say\" mean?",
+    a: "<p>One chance per outcome, blended from every source that prices the game: sharp bookmakers and exchanges, the US bookmakers, Kalshi and Polymarket, ESPN's predictor and ratings, and the app's own model. It's the app's best estimate, and the market usually wins, so it aims to match the market and explain it rather than beat it. Each game page shows every source's chip; ⚖ means they disagree by 5 points or more. See <a href=\"#/help/markets_say\">Markets say</a> and the record of each source under My bets → AI record.</p>" },
+  { q: "Why are the odds here different from my bookmaker's?",
+    a: "<p>The app shows the best price across several bookmakers at the last fetch. Your bookmaker may offer less, and prices move as money and news come in. Always check the price where you bet.</p>" },
+  { q: "What's the difference between \"AI 64%\" and \"Mkt 61%\"?",
+    a: "<p>\"Mkt\" is the bookmakers' chance with their margin removed; \"AI\" is the brain's own estimate (NBA only for now). See <a href=\"#/help/ai_vs_market\">AI chance vs market chance</a>.</p>" },
+  { q: "Why can't two picks from the same game go in one multi?",
+    a: "<p>Their results are linked, so multiplying their chances would overstate the chance and understate the bookmaker's cut. Play them as singles. See <a href=\"#/help/same_game\">same-game picks</a>.</p>" },
+  { q: "How does the Builder choose legs?",
+    a: "<p>From what's already saved: today's games, each league's latest bookmaker prices and the \"Markets say\" blend. It fetches nothing for a build. Each leg's chance is the blend (else the bookmakers' margin-free chance), prices come only from bookmakers you can bet at, and every leg must pass your rules; the ones that nearly made it are listed as near misses with the rule they failed. Tickets are ranked by closeness to your target, a cautious expected return and the chance of winning, and up to five that share no leg are priced at your stake. When nothing fits exactly, Closest effort (on unless you pick Strict) builds the closest tickets and says what it relaxed. See <a href=\"#/help/builder\">The Builder</a>.</p>" },
+  { q: "How are my bets settled?",
+    a: "<p>From the final scores on ESPN, usually within an hour of the end. A result exactly on the line is a push (the leg counts as 1.00); a game called off is void. A leg with no result long after its start is voided rather than guessed.</p>" },
+  { q: "Can I delete a bet?",
+    a: "<p>Yes, until its first game starts (My bets → Upcoming → Delete). Bets under way, settled bets and a plan's days stay in your history so the record stays honest.</p>" },
+  { q: "Who can see my bets?",
+    a: "<p>Only you. A share code lets someone load the same picks (and the stake) into their own slip; it doesn't show your results or your other bets. In a browser your bets belong to that browser's sign-in; inside Telegram they belong to your Telegram account. Use a share code to move a slip between them.</p>" },
+  { q: "Can I paste a slip from my bookmaker?",
+    a: "<p>Yes. In <a href=\"#/ask?paste=1\">Ask AI</a>, tap 📋 Paste a slip and paste its text or add a screenshot (in Telegram, send it to the bot). The AI copies what it says; the app's code checks the copy, finds each leg among its games and works out the real chance, the bookmaker's cut, better prices and cheaper ways to play it. Player props outside the NBA and unusual markets get a chance estimated from your odds, and say so. Screenshots aren't kept, and nobody else can see your slips. See <a href=\"#/help/paste_slip\">Paste a slip</a>.</p>" },
+  { q: "Why does the AI need credits?",
+    a: "<p>Each AI chat or written analysis costs money on the server's account, so everyone has a daily allowance (Settings shows what's left). Prices, chances, slips and plans don't use it.</p>" },
+  { q: "Can the AI give me a sure bet?",
+    a: "<p>It gives you its strongest picks, with their real chances, but never calls one a lock or guaranteed: no outcome is certain, so those words would be wrong. \"Safe\" is only the name for tickets the AI gives 60% or more, and those still lose about 4 times in 10.</p>" },
+  { q: "What if I ask for odds and a chance no ticket can have?",
+    a: "<p>You still get tickets. Ask for, say, 2 legs at about 3.5x with an 80% chance and the Builder (or Ask AI) builds the closest options: the likeliest at your odds, the closest to your chance and the best balance, each with its real odds and chance, like \"3.52x · 27% (you asked 3.5x · 80%)\". Pick Strict in the Builder if you'd rather see nothing than something close. See <a href=\"#/help/closest_effort\">Closest effort</a>.</p>" },
+  { q: "Why is there an AI model only for the NBA?",
+    a: "<p>A model has to be tested on graded games before it deserves trust. Other sports show the market's chance (margin removed), the honest baseline, and say so.</p>" },
+  { q: "How do I set limits or take a break?",
+    a: "<p>In <a href=\"#/settings?focus=limits\">Settings → Limits</a>: a weekly budget, a reality-check reminder, and breaks from 24 hours to 3 months. A break can't be cut short.</p>" },
+  { q: "How do I find players projected for 20+ points tonight?",
+    a: "<p>Open the <a href=\"#/players\">Player finder</a> (Build → Find players, or Find a player on Today), or just ask Ask AI in your own words: \"who's going for 10+ boards tonight?\", \"anytime TD scorers\", \"PRA overs\". Both rank each player by the chance of reaching the number, with his last 5, last 10 and season record at it, tonight's projection and the posted line. It's free: no AI allowance on the Player finder, and no odds requests either way. See <a href=\"#/help/player_finder\">Player finder</a>.</p>" },
+];

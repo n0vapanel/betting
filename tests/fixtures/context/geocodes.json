@@ -1,0 +1,698 @@
+{
+"source":"geocoding-api.open-meteo.com/v1/search (captured 2026-10-27, trimmed)",
+"cities":{
+"Milwaukee|Wisconsin|US":{
+"name":"Milwaukee",
+"latitude":43.0389,
+"longitude":-87.90647,
+"country_code":"US",
+"admin1":"Wisconsin"
+},
+"Anaheim|California|US":{
+"name":"Anaheim",
+"latitude":33.83529,
+"longitude":-117.9145,
+"country_code":"US",
+"admin1":"California"
+},
+"St. Louis|Missouri|US":{
+"name":"St Louis",
+"latitude":38.62727,
+"longitude":-90.19789,
+"country_code":"US",
+"admin1":"Missouri"
+},
+"Phoenix|Arizona|US":{
+"name":"Phoenix",
+"latitude":33.44838,
+"longitude":-112.07404,
+"country_code":"US",
+"admin1":"Arizona"
+},
+"Flushing|New York|US":{
+"name":"Flushing",
+"latitude":40.76538,
+"longitude":-73.81736,
+"country_code":"US",
+"admin1":"New York"
+},
+"Philadelphia|Pennsylvania|US":{
+"name":"Philadelphia",
+"latitude":39.95238,
+"longitude":-75.16362,
+"country_code":"US",
+"admin1":"Pennsylvania"
+},
+"Detroit|Michigan|US":{
+"name":"Detroit",
+"latitude":42.33143,
+"longitude":-83.04575,
+"country_code":"US",
+"admin1":"Michigan"
+},
+"Denver|Colorado|US":{
+"name":"Denver",
+"latitude":39.73915,
+"longitude":-104.9847,
+"country_code":"US",
+"admin1":"Colorado"
+},
+"Houston|Texas|US":{
+"name":"Houston",
+"latitude":29.76328,
+"longitude":-95.36327,
+"country_code":"US",
+"admin1":"Texas"
+},
+"Boston|Massachusetts|US":{
+"name":"Boston",
+"latitude":42.35843,
+"longitude":-71.05977,
+"country_code":"US",
+"admin1":"Massachusetts"
+},
+"Arlington|Texas|US":{
+"name":"Arlington",
+"latitude":32.73569,
+"longitude":-97.10807,
+"country_code":"US",
+"admin1":"Texas"
+},
+"Cincinnati|Ohio|US":{
+"name":"Cincinnati",
+"latitude":39.12711,
+"longitude":-84.51439,
+"country_code":"US",
+"admin1":"Ohio"
+},
+"Kansas City|Missouri|US":{
+"name":"Kansas City",
+"latitude":39.09973,
+"longitude":-94.57857,
+"country_code":"US",
+"admin1":"Missouri"
+},
+"Washington|District of Columbia|US":{
+"name":"Washington D.C.",
+"latitude":38.89511,
+"longitude":-77.03637,
+"country_code":"US",
+"admin1":"District of Columbia"
+},
+"San Francisco|California|US":{
+"name":"San Francisco",
+"latitude":37.77493,
+"longitude":-122.41942,
+"country_code":"US",
+"admin1":"California"
+},
+"Baltimore|Maryland|US":{
+"name":"Baltimore",
+"latitude":39.29038,
+"longitude":-76.61219,
+"country_code":"US",
+"admin1":"Maryland"
+},
+"Pittsburgh|Pennsylvania|US":{
+"name":"Pittsburgh",
+"latitude":40.44062,
+"longitude":-79.99589,
+"country_code":"US",
+"admin1":"Pennsylvania"
+},
+"San Diego|California|US":{
+"name":"San Diego",
+"latitude":32.71571,
+"longitude":-117.16472,
+"country_code":"US",
+"admin1":"California"
+},
+"Cleveland|Ohio|US":{
+"name":"Cleveland",
+"latitude":41.4995,
+"longitude":-81.69541,
+"country_code":"US",
+"admin1":"Ohio"
+},
+"Chicago|Illinois|US":{
+"name":"Chicago",
+"latitude":41.85003,
+"longitude":-87.65005,
+"country_code":"US",
+"admin1":"Illinois"
+},
+"Toronto|Ontario|CA":{
+"name":"Toronto",
+"latitude":43.70643,
+"longitude":-79.39864,
+"country_code":"CA",
+"admin1":"Ontario"
+},
+"Sacramento|California|US":{
+"name":"Sacramento",
+"latitude":38.58157,
+"longitude":-121.4944,
+"country_code":"US",
+"admin1":"California"
+},
+"Seattle|Washington|US":{
+"name":"Seattle",
+"latitude":47.60621,
+"longitude":-122.33207,
+"country_code":"US",
+"admin1":"Washington"
+},
+"Minneapolis|Minnesota|US":{
+"name":"Minneapolis",
+"latitude":44.97997,
+"longitude":-93.26384,
+"country_code":"US",
+"admin1":"Minnesota"
+},
+"St. Petersburg|Florida|US":{
+"name":"St. Petersburg",
+"latitude":27.77086,
+"longitude":-82.67927,
+"country_code":"US",
+"admin1":"Florida"
+},
+"Atlanta|Georgia|US":{
+"name":"Atlanta",
+"latitude":33.749,
+"longitude":-84.38798,
+"country_code":"US",
+"admin1":"Georgia"
+},
+"Los Angeles|California|US":{
+"name":"Los Angeles",
+"latitude":34.05223,
+"longitude":-118.24368,
+"country_code":"US",
+"admin1":"California"
+},
+"Bronx|New York|US":{
+"name":"The Bronx",
+"latitude":40.84985,
+"longitude":-73.86641,
+"country_code":"US",
+"admin1":"New York"
+},
+"Miami|Florida|US":{
+"name":"Miami",
+"latitude":25.77427,
+"longitude":-80.19366,
+"country_code":"US",
+"admin1":"Florida"
+},
+"Glendale|Arizona|US":{
+"name":"Glendale",
+"latitude":33.53865,
+"longitude":-112.18599,
+"country_code":"US",
+"admin1":"Arizona"
+},
+"Orchard Park|New York|US":{
+"name":"Orchard Park",
+"latitude":42.76756,
+"longitude":-78.74392,
+"country_code":"US",
+"admin1":"New York"
+},
+"Charlotte|North Carolina|US":{
+"name":"Charlotte",
+"latitude":35.22709,
+"longitude":-80.84313,
+"country_code":"US",
+"admin1":"North Carolina"
+},
+"Green Bay|Wisconsin|US":{
+"name":"Green Bay",
+"latitude":44.51916,
+"longitude":-88.01983,
+"country_code":"US",
+"admin1":"Wisconsin"
+},
+"Indianapolis|Indiana|US":{
+"name":"Indianapolis",
+"latitude":39.76838,
+"longitude":-86.15804,
+"country_code":"US",
+"admin1":"Indiana"
+},
+"Jacksonville|Florida|US":{
+"name":"Jacksonville",
+"latitude":30.33218,
+"longitude":-81.65565,
+"country_code":"US",
+"admin1":"Florida"
+},
+"Las Vegas|Nevada|US":{
+"name":"Las Vegas",
+"latitude":36.17497,
+"longitude":-115.13722,
+"country_code":"US",
+"admin1":"Nevada"
+},
+"Inglewood|California|US":{
+"name":"Inglewood",
+"latitude":33.96168,
+"longitude":-118.35313,
+"country_code":"US",
+"admin1":"California"
+},
+"Miami Gardens|Florida|US":{
+"name":"Miami Gardens",
+"latitude":25.94204,
+"longitude":-80.2456,
+"country_code":"US",
+"admin1":"Florida"
+},
+"Foxborough|Massachusetts|US":{
+"name":"Foxborough",
+"latitude":42.06538,
+"longitude":-71.24783,
+"country_code":"US",
+"admin1":"Massachusetts"
+},
+"New Orleans|Louisiana|US":{
+"name":"New Orleans",
+"latitude":29.95465,
+"longitude":-90.07507,
+"country_code":"US",
+"admin1":"Louisiana"
+},
+"East Rutherford|New Jersey|US":{
+"name":"East Rutherford",
+"latitude":40.83399,
+"longitude":-74.09709,
+"country_code":"US",
+"admin1":"New Jersey"
+},
+"Santa Clara|California|US":{
+"name":"Santa Clara",
+"latitude":37.35411,
+"longitude":-121.95524,
+"country_code":"US",
+"admin1":"California"
+},
+"Tampa|Florida|US":{
+"name":"Tampa",
+"latitude":27.94752,
+"longitude":-82.45843,
+"country_code":"US",
+"admin1":"Florida"
+},
+"Nashville|Tennessee|US":{
+"name":"Nashville",
+"latitude":36.16589,
+"longitude":-86.78444,
+"country_code":"US",
+"admin1":"Tennessee"
+},
+"Landover|Maryland|US":{
+"name":"Landover",
+"latitude":38.934,
+"longitude":-76.89664,
+"country_code":"US",
+"admin1":"Maryland"
+},
+"Brooklyn|New York|US":{
+"name":"Brooklyn",
+"latitude":40.6501,
+"longitude":-73.94958,
+"country_code":"US",
+"admin1":"New York"
+},
+"Dallas|Texas|US":{
+"name":"Dallas",
+"latitude":32.78306,
+"longitude":-96.80667,
+"country_code":"US",
+"admin1":"Texas"
+},
+"Memphis|Tennessee|US":{
+"name":"Memphis",
+"latitude":35.14953,
+"longitude":-90.04898,
+"country_code":"US",
+"admin1":"Tennessee"
+},
+"New York|New York|US":{
+"name":"New York",
+"latitude":40.71427,
+"longitude":-74.00597,
+"country_code":"US",
+"admin1":"New York"
+},
+"Oklahoma City|Oklahoma|US":{
+"name":"Oklahoma City",
+"latitude":35.46756,
+"longitude":-97.51643,
+"country_code":"US",
+"admin1":"Oklahoma"
+},
+"Orlando|Florida|US":{
+"name":"Orlando",
+"latitude":28.53834,
+"longitude":-81.37924,
+"country_code":"US",
+"admin1":"Florida"
+},
+"Portland|Oregon|US":{
+"name":"Portland",
+"latitude":45.52345,
+"longitude":-122.67621,
+"country_code":"US",
+"admin1":"Oregon"
+},
+"San Antonio|Texas|US":{
+"name":"San Antonio",
+"latitude":29.42412,
+"longitude":-98.49363,
+"country_code":"US",
+"admin1":"Texas"
+},
+"Salt Lake City|Utah|US":{
+"name":"Salt Lake City",
+"latitude":40.76078,
+"longitude":-111.89105,
+"country_code":"US",
+"admin1":"Utah"
+},
+"Buffalo|New York|US":{
+"name":"Buffalo",
+"latitude":42.88645,
+"longitude":-78.87837,
+"country_code":"US",
+"admin1":"New York"
+},
+"Calgary|Alberta|CA":{
+"name":"Calgary",
+"latitude":51.05011,
+"longitude":-114.08529,
+"country_code":"CA",
+"admin1":"Alberta"
+},
+"Raleigh|North Carolina|US":{
+"name":"Raleigh",
+"latitude":35.7721,
+"longitude":-78.63861,
+"country_code":"US",
+"admin1":"North Carolina"
+},
+"Columbus|Ohio|US":{
+"name":"Columbus",
+"latitude":39.96118,
+"longitude":-82.99879,
+"country_code":"US",
+"admin1":"Ohio"
+},
+"Edmonton|Alberta|CA":{
+"name":"Edmonton",
+"latitude":53.55014,
+"longitude":-113.46871,
+"country_code":"CA",
+"admin1":"Alberta"
+},
+"Sunrise|Florida|US":{
+"name":"Sunrise",
+"latitude":26.13397,
+"longitude":-80.1131,
+"country_code":"US",
+"admin1":"Florida"
+},
+"Saint Paul|Minnesota|US":{
+"name":"Saint Paul",
+"latitude":44.94441,
+"longitude":-93.09327,
+"country_code":"US",
+"admin1":"Minnesota"
+},
+"Montreal|Quebec|CA":{
+"name":"Montreal",
+"latitude":45.50884,
+"longitude":-73.58781,
+"country_code":"CA",
+"admin1":"Quebec"
+},
+"Newark|New Jersey|US":{
+"name":"Newark",
+"latitude":40.73566,
+"longitude":-74.17237,
+"country_code":"US",
+"admin1":"New Jersey"
+},
+"Elmont|New York|US":{
+"name":"Elmont",
+"latitude":40.70094,
+"longitude":-73.71291,
+"country_code":"US",
+"admin1":"New York"
+},
+"Ottawa|Ontario|CA":{
+"name":"Ottawa",
+"latitude":45.41117,
+"longitude":-75.69812,
+"country_code":"CA",
+"admin1":"Ontario"
+},
+"San Jose|California|US":{
+"name":"San Jose",
+"latitude":37.33939,
+"longitude":-121.89496,
+"country_code":"US",
+"admin1":"California"
+},
+"Vancouver|British Columbia|CA":{
+"name":"Vancouver",
+"latitude":49.24966,
+"longitude":-123.11934,
+"country_code":"CA",
+"admin1":"British Columbia"
+},
+"Winnipeg|Manitoba|CA":{
+"name":"Winnipeg",
+"latitude":49.8844,
+"longitude":-97.14704,
+"country_code":"CA",
+"admin1":"Manitoba"
+},
+"College Park|Georgia|US":{
+"name":"College Park",
+"latitude":33.65344,
+"longitude":-84.44937,
+"country_code":"US",
+"admin1":"Georgia"
+},
+"Uncasville|Connecticut|US":{
+"name":"Uncasville",
+"latitude":41.43454,
+"longitude":-72.1098,
+"country_code":"US",
+"admin1":"Connecticut"
+},
+"Austin|Texas|US":{
+"name":"Austin",
+"latitude":30.26715,
+"longitude":-97.74306,
+"country_code":"US",
+"admin1":"Texas"
+},
+"Commerce City|Colorado|US":{
+"name":"Commerce City",
+"latitude":39.80832,
+"longitude":-104.93387,
+"country_code":"US",
+"admin1":"Colorado"
+},
+"Frisco|Texas|US":{
+"name":"Frisco",
+"latitude":33.15067,
+"longitude":-96.82361,
+"country_code":"US",
+"admin1":"Texas"
+},
+"Carson|California|US":{
+"name":"Carson",
+"latitude":33.83141,
+"longitude":-118.28202,
+"country_code":"US",
+"admin1":"California"
+},
+"Chester|Pennsylvania|US":{
+"name":"Chester",
+"latitude":39.84753,
+"longitude":-75.35785,
+"country_code":"US",
+"admin1":"Pennsylvania"
+},
+"Sandy|Utah|US":{
+"name":"Sandy City",
+"latitude":40.59161,
+"longitude":-111.8841,
+"country_code":"US",
+"admin1":"Utah"
+},
+"Harrison|New Jersey|US":{
+"name":"Harrison",
+"latitude":40.74649,
+"longitude":-74.15626,
+"country_code":"US",
+"admin1":"New Jersey"
+},
+"Kansas City|Kansas|US":{
+"name":"Kansas City",
+"latitude":39.11417,
+"longitude":-94.62746,
+"country_code":"US",
+"admin1":"Kansas"
+},
+"Bournemouth|England|GB":{
+"name":"Bournemouth",
+"latitude":50.72048,
+"longitude":-1.8795,
+"country_code":"GB",
+"admin1":"England"
+},
+"London|England|GB":{
+"name":"London",
+"latitude":51.50853,
+"longitude":-0.12574,
+"country_code":"GB",
+"admin1":"England"
+},
+"Birmingham|England|GB":{
+"name":"Birmingham",
+"latitude":52.48142,
+"longitude":-1.89983,
+"country_code":"GB",
+"admin1":"England"
+},
+"Brentford|England|GB":{
+"name":"Brentford",
+"latitude":51.48619,
+"longitude":-0.3083,
+"country_code":"GB",
+"admin1":"England"
+},
+"Brighton|England|GB":{
+"name":"Brighton",
+"latitude":50.82838,
+"longitude":-0.13947,
+"country_code":"GB",
+"admin1":"England"
+},
+"Coventry|England|GB":{
+"name":"Coventry",
+"latitude":52.40656,
+"longitude":-1.51217,
+"country_code":"GB",
+"admin1":"England"
+},
+"Liverpool|England|GB":{
+"name":"Liverpool",
+"latitude":53.41058,
+"longitude":-2.97794,
+"country_code":"GB",
+"admin1":"England"
+},
+"Hull|England|GB":{
+"name":"Hull",
+"latitude":53.7446,
+"longitude":-0.33525,
+"country_code":"GB",
+"admin1":"England"
+},
+"Ipswich|England|GB":{
+"name":"Ipswich",
+"latitude":52.05917,
+"longitude":1.15545,
+"country_code":"GB",
+"admin1":"England"
+},
+"Leeds|England|GB":{
+"name":"Leeds",
+"latitude":53.79648,
+"longitude":-1.54785,
+"country_code":"GB",
+"admin1":"England"
+},
+"Manchester|England|GB":{
+"name":"Manchester",
+"latitude":53.48095,
+"longitude":-2.23743,
+"country_code":"GB",
+"admin1":"England"
+},
+"Newcastle upon Tyne|England|GB":{
+"name":"Newcastle upon Tyne",
+"latitude":54.97328,
+"longitude":-1.61396,
+"country_code":"GB",
+"admin1":"England"
+},
+"Nottingham|England|GB":{
+"name":"Nottingham",
+"latitude":52.9536,
+"longitude":-1.15047,
+"country_code":"GB",
+"admin1":"England"
+},
+"Sunderland|England|GB":{
+"name":"Sunderland",
+"latitude":54.90465,
+"longitude":-1.38222,
+"country_code":"GB",
+"admin1":"England"
+},
+"Mexico City|Mexico City|MX":{
+"name":"Mexico City",
+"latitude":19.42847,
+"longitude":-99.12766,
+"country_code":"MX",
+"admin1":"Mexico City"
+},
+"Quito|Pichincha|EC":{
+"name":"Quito",
+"latitude":-0.22985,
+"longitude":-78.52495,
+"country_code":"EC",
+"admin1":"Pichincha"
+},
+"La Paz|La Paz|BO":{
+"name":"La Paz",
+"latitude":-16.5,
+"longitude":-68.15,
+"country_code":"BO",
+"admin1":"La Paz Department"
+},
+"Bogota|Bogota D.C.|CO":{
+"name":"Bogotá",
+"latitude":4.60971,
+"longitude":-74.08175,
+"country_code":"CO",
+"admin1":"Bogota D.C."
+},
+"Saint-Denis|Ile-de-France|FR":{
+"name":"Saint-Denis",
+"latitude":48.93564,
+"longitude":2.35387,
+"country_code":"FR",
+"admin1":"Île-de-France Region"
+},
+"Rio de Janeiro|Rio de Janeiro|BR":{
+"name":"Rio de Janeiro",
+"latitude":-22.90642,
+"longitude":-43.18223,
+"country_code":"BR",
+"admin1":"Rio de Janeiro"
+},
+"Melbourne|Victoria|AU":{
+"name":"Melbourne",
+"latitude":-37.814,
+"longitude":144.96332,
+"country_code":"AU",
+"admin1":"Victoria"
+}
+}
+}

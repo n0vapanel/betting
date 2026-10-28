@@ -1,0 +1,210 @@
+{
+ "cursor": "",
+ "events": [
+  {
+   "event_ticker": "KXNBAGAME-26OCT26MINCLE",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-27T02:00:00Z",
+     "last_price_dollars": "0.7700",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-27T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBAGAME-26OCT26MINCLE-MIN",
+     "title": "Minnesota wins",
+     "volume_fp": "6719141.41",
+     "yes_ask_dollars": "0.7600",
+     "yes_bid_dollars": "0.7500",
+     "yes_sub_title": "Minnesota"
+    },
+    {
+     "expected_expiration_time": "2026-10-27T02:00:00Z",
+     "last_price_dollars": "0.2500",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-27T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBAGAME-26OCT26MINCLE-CLE",
+     "title": "Cleveland wins",
+     "volume_fp": "3178671.33",
+     "yes_ask_dollars": "0.2400",
+     "yes_bid_dollars": "0.2200",
+     "yes_sub_title": "Cleveland"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXNBAGAME",
+   "sub_title": "MIN vs CLE (Oct 26)",
+   "title": "Minnesota vs Cleveland"
+  },
+  {
+   "event_ticker": "KXNBAGAME-26OCT26WASCHA",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-27T02:00:00Z",
+     "last_price_dollars": "0.0900",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-27T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBAGAME-26OCT26WASCHA-WAS",
+     "title": "Washington wins",
+     "volume_fp": "2160375.00",
+     "yes_ask_dollars": "0.1000",
+     "yes_bid_dollars": "0.0900",
+     "yes_sub_title": "Washington"
+    },
+    {
+     "expected_expiration_time": "2026-10-27T02:00:00Z",
+     "last_price_dollars": "0.9100",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-27T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBAGAME-26OCT26WASCHA-CHA",
+     "title": "Charlotte wins",
+     "volume_fp": "1246202.47",
+     "yes_ask_dollars": "0.9100",
+     "yes_bid_dollars": "0.9000",
+     "yes_sub_title": "Charlotte"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXNBAGAME",
+   "sub_title": "WAS vs CHA (Oct 26)",
+   "title": "Washington vs Charlotte"
+  },
+  {
+   "event_ticker": "KXNBAGAME-26OCT27BKNBOS",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-28T02:30:00Z",
+     "last_price_dollars": "0.1900",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-28T02:30:00Z",
+     "status": "active",
+     "ticker": "KXNBAGAME-26OCT27BKNBOS-BKN",
+     "title": "Brooklyn wins",
+     "volume_fp": "2284.16",
+     "yes_ask_dollars": "0.1900",
+     "yes_bid_dollars": "0.1800",
+     "yes_sub_title": "Brooklyn"
+    },
+    {
+     "expected_expiration_time": "2026-10-28T02:30:00Z",
+     "last_price_dollars": "0.8300",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-28T02:30:00Z",
+     "status": "active",
+     "ticker": "KXNBAGAME-26OCT27BKNBOS-BOS",
+     "title": "Boston wins",
+     "volume_fp": "3985.27",
+     "yes_ask_dollars": "0.8300",
+     "yes_bid_dollars": "0.8100",
+     "yes_sub_title": "Boston"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXNBAGAME",
+   "sub_title": "BKN vs BOS (Oct 27)",
+   "title": "Brooklyn vs Boston"
+  },
+  {
+   "event_ticker": "KXNBAGAME-26OCT27PORLAL",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-28T06:00:00Z",
+     "last_price_dollars": "0.4200",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-28T06:00:00Z",
+     "status": "active",
+     "ticker": "KXNBAGAME-26OCT27PORLAL-POR",
+     "title": "Portland wins",
+     "volume_fp": "10098.05",
+     "yes_ask_dollars": "0.4200",
+     "yes_bid_dollars": "0.4100",
+     "yes_sub_title": "Portland"
+    },
+    {
+     "expected_expiration_time": "2026-10-28T06:00:00Z",
+     "last_price_dollars": "0.5900",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-28T06:00:00Z",
+     "status": "active",
+     "ticker": "KXNBAGAME-26OCT27PORLAL-LAL",
+     "title": "Los Angeles L wins",
+     "volume_fp": "12162.88",
+     "yes_ask_dollars": "0.5900",
+     "yes_bid_dollars": "0.5800",
+     "yes_sub_title": "Los Angeles L"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXNBAGAME",
+   "sub_title": "POR vs LAL (Oct 27)",
+   "title": "Portland vs Los Angeles L"
+  },
+  {
+   "event_ticker": "KXNBAGAME-26OCT28PHIIND",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "last_price_dollars": "0.5500",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBAGAME-26OCT28PHIIND-PHI",
+     "title": "Philadelphia wins",
+     "volume_fp": "2339.21",
+     "yes_ask_dollars": "0.5500",
+     "yes_bid_dollars": "0.5300",
+     "yes_sub_title": "Philadelphia"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "last_price_dollars": "0.4600",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBAGAME-26OCT28PHIIND-IND",
+     "title": "Indiana wins",
+     "volume_fp": "1535.02",
+     "yes_ask_dollars": "0.4600",
+     "yes_bid_dollars": "0.4500",
+     "yes_sub_title": "Indiana"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXNBAGAME",
+   "sub_title": "PHI vs IND (Oct 28)",
+   "title": "Philadelphia vs Indiana"
+  }
+ ],
+ "milestones": [
+  {
+   "details": {
+    "league": "NBA",
+    "main_game_event_ticker": "KXNBAGAME-26OCT26MINCLE",
+    "status": "inprogress"
+   },
+   "id": "f35dc969-7936-5669-9eb3-9b745565b716",
+   "primary_event_tickers": [
+    "KXNBAGAME-26OCT26MINCLE"
+   ],
+   "start_date": "2026-10-26T23:00:00Z",
+   "title": "MIN Timberwolves at CLE Cavaliers",
+   "type": "basketball_game"
+  },
+  {
+   "details": {
+    "league": "NBA",
+    "main_game_event_ticker": "KXNBAGAME-26OCT26WASCHA",
+    "status": "inprogress"
+   },
+   "id": "904dfc32-4875-5f39-900b-ab7683792236",
+   "primary_event_tickers": [
+    "KXNBAGAME-26OCT26WASCHA"
+   ],
+   "start_date": "2026-10-26T23:00:00Z",
+   "title": "WAS Wizards at CHA Hornets",
+   "type": "basketball_game"
+  }
+ ]
+}

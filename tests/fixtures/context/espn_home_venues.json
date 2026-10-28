@@ -1,0 +1,1451 @@
+{
+"source": "ESPN scoreboards (site.api.espn.com .../scoreboard), 2026 dates per league, captured 2026-10-27: home team -> venue id -> games; Liga MX and CONMEBOL kept to the altitude venues' clubs",
+"leagues": {
+"americanfootball_nfl": {
+"teams": {
+"26": {
+"name": "Seattle Seahawks",
+"venues": {
+"3673": 5
+}
+},
+"4": {
+"name": "Cincinnati Bengals",
+"venues": {
+"3874": 3
+}
+},
+"8": {
+"name": "Detroit Lions",
+"venues": {
+"3727": 4
+}
+},
+"10": {
+"name": "Tennessee Titans",
+"venues": {
+"3810": 4
+}
+},
+"11": {
+"name": "Indianapolis Colts",
+"venues": {
+"3812": 3
+}
+},
+"23": {
+"name": "Pittsburgh Steelers",
+"venues": {
+"3752": 4
+}
+},
+"29": {
+"name": "Carolina Panthers",
+"venues": {
+"3628": 3
+}
+},
+"30": {
+"name": "Jacksonville Jaguars",
+"venues": {
+"3712": 3
+}
+},
+"34": {
+"name": "Houston Texans",
+"venues": {
+"3891": 4
+}
+},
+"13": {
+"name": "Las Vegas Raiders",
+"venues": {
+"6501": 4
+}
+},
+"16": {
+"name": "Minnesota Vikings",
+"venues": {
+"5239": 3
+}
+},
+"21": {
+"name": "Philadelphia Eagles",
+"venues": {
+"3806": 4
+}
+},
+"24": {
+"name": "Los Angeles Chargers",
+"venues": {
+"7065": 3
+}
+},
+"19": {
+"name": "New York Giants",
+"venues": {
+"3839": 4
+}
+},
+"12": {
+"name": "Kansas City Chiefs",
+"venues": {
+"3622": 3
+}
+},
+"2": {
+"name": "Buffalo Bills",
+"venues": {
+"11938": 4
+}
+},
+"1": {
+"name": "Atlanta Falcons",
+"venues": {
+"5348": 4
+}
+},
+"3": {
+"name": "Chicago Bears",
+"venues": {
+"3933": 4
+}
+},
+"17": {
+"name": "New England Patriots",
+"venues": {
+"3738": 3
+}
+},
+"20": {
+"name": "New York Jets",
+"venues": {
+"3839": 4
+}
+},
+"27": {
+"name": "Tampa Bay Buccaneers",
+"venues": {
+"3886": 5
+}
+},
+"33": {
+"name": "Baltimore Ravens",
+"venues": {
+"3814": 3
+}
+},
+"7": {
+"name": "Denver Broncos",
+"venues": {
+"3937": 4
+}
+},
+"6": {
+"name": "Dallas Cowboys",
+"venues": {
+"3687": 3
+}
+},
+"22": {
+"name": "Arizona Cardinals",
+"venues": {
+"3970": 3
+}
+},
+"25": {
+"name": "San Francisco 49ers",
+"venues": {
+"4738": 4
+}
+},
+"14": {
+"name": "Los Angeles Rams",
+"venues": {
+"7065": 4
+}
+},
+"9": {
+"name": "Green Bay Packers",
+"venues": {
+"3798": 4
+}
+},
+"5": {
+"name": "Cleveland Browns",
+"venues": {
+"3679": 3
+}
+},
+"15": {
+"name": "Miami Dolphins",
+"venues": {
+"3948": 3
+}
+},
+"28": {
+"name": "Washington Commanders",
+"venues": {
+"3719": 3
+}
+},
+"18": {
+"name": "New Orleans Saints",
+"venues": {
+"3493": 3
+}
+}
+},
+"venue_names": {
+"3673": "Lumen Field",
+"3874": "Paycor Stadium",
+"3727": "Ford Field",
+"3810": "Nissan Stadium",
+"3812": "Lucas Oil Stadium",
+"3752": "Acrisure Stadium",
+"3628": "Bank of America Stadium",
+"3712": "EverBank Stadium",
+"3891": "Reliant Stadium",
+"6501": "Allegiant Stadium",
+"5239": "U.S. Bank Stadium",
+"3806": "Lincoln Financial Field",
+"7065": "SoFi Stadium",
+"3839": "MetLife Stadium",
+"3622": "Arrowhead Stadium",
+"11938": "Highmark Stadium",
+"5348": "Mercedes-Benz Stadium",
+"3933": "Soldier Field",
+"3738": "Gillette Stadium",
+"3886": "Raymond James Stadium",
+"3814": "M&T Bank Stadium",
+"3937": "Empower Field at Mile High",
+"3687": "AT&T Stadium",
+"3970": "State Farm Stadium",
+"4738": "Levi's Stadium",
+"3798": "Lambeau Field",
+"3679": "Huntington Bank Field",
+"3948": "Hard Rock Stadium",
+"3719": "Northwest Stadium",
+"3493": "Caesars Superdome"
+}
+},
+"baseball_mlb": {
+"teams": {
+"7": {
+"name": "Kansas City Royals",
+"venues": {
+"7": 7
+}
+},
+"30": {
+"name": "Tampa Bay Rays",
+"venues": {
+"31": 13
+}
+},
+"20": {
+"name": "Washington Nationals",
+"venues": {
+"89": 12
+}
+},
+"15": {
+"name": "Atlanta Braves",
+"venues": {
+"218": 14
+}
+},
+"24": {
+"name": "St. Louis Cardinals",
+"venues": {
+"87": 15
+}
+},
+"25": {
+"name": "San Diego Padres",
+"venues": {
+"85": 10
+}
+},
+"26": {
+"name": "San Francisco Giants",
+"venues": {
+"43": 16
+}
+},
+"19": {
+"name": "Los Angeles Dodgers",
+"venues": {
+"19": 13
+}
+},
+"1": {
+"name": "Baltimore Orioles",
+"venues": {
+"1": 9
+}
+},
+"6": {
+"name": "Detroit Tigers",
+"venues": {
+"45": 16
+}
+},
+"23": {
+"name": "Pittsburgh Pirates",
+"venues": {
+"47": 13
+}
+},
+"28": {
+"name": "Miami Marlins",
+"venues": {
+"4223": 12
+}
+},
+"21": {
+"name": "New York Mets",
+"venues": {
+"209": 12
+}
+},
+"17": {
+"name": "Cincinnati Reds",
+"venues": {
+"83": 9
+}
+},
+"4": {
+"name": "Chicago White Sox",
+"venues": {
+"4": 12
+}
+},
+"9": {
+"name": "Minnesota Twins",
+"venues": {
+"210": 14
+}
+},
+"13": {
+"name": "Texas Rangers",
+"venues": {
+"231": 12
+}
+},
+"14": {
+"name": "Toronto Blue Jays",
+"venues": {
+"14": 14
+}
+},
+"3": {
+"name": "Los Angeles Angels",
+"venues": {
+"3": 13
+}
+},
+"29": {
+"name": "Arizona Diamondbacks",
+"venues": {
+"30": 9
+}
+},
+"11": {
+"name": "Athletics",
+"venues": {
+"7109": 9
+}
+},
+"10": {
+"name": "New York Yankees",
+"venues": {
+"208": 11
+}
+},
+"16": {
+"name": "Chicago Cubs",
+"venues": {
+"16": 9
+}
+},
+"5": {
+"name": "Cleveland Guardians",
+"venues": {
+"5": 11
+}
+},
+"18": {
+"name": "Houston Astros",
+"venues": {
+"44": 9
+}
+},
+"2": {
+"name": "Boston Red Sox",
+"venues": {
+"2": 11
+}
+},
+"8": {
+"name": "Milwaukee Brewers",
+"venues": {
+"4242": 9
+}
+},
+"27": {
+"name": "Colorado Rockies",
+"venues": {
+"27": 6
+}
+},
+"12": {
+"name": "Seattle Mariners",
+"venues": {
+"41": 6
+}
+},
+"22": {
+"name": "Philadelphia Phillies",
+"venues": {
+"84": 8
+}
+}
+},
+"venue_names": {
+"7": "Kauffman Stadium",
+"31": "Tropicana Field",
+"89": "Nationals Park",
+"218": "Truist Park",
+"87": "Busch Stadium",
+"85": "Petco Park",
+"43": "Oracle Park",
+"19": "Dodger Stadium",
+"1": "Oriole Park at Camden Yards",
+"45": "Comerica Park",
+"47": "PNC Park",
+"4223": "loanDepot park",
+"209": "Citi Field",
+"83": "Great American Ball Park",
+"4": "Rate Field",
+"210": "Target Field",
+"231": "Globe Life Field",
+"14": "Rogers Centre",
+"3": "Angel Stadium",
+"30": "Chase Field",
+"7109": "Sutter Health Park",
+"208": "Yankee Stadium",
+"16": "Wrigley Field",
+"5": "Progressive Field",
+"44": "Daikin Park",
+"2": "Fenway Park",
+"4242": "American Family Field",
+"27": "Coors Field",
+"41": "T-Mobile Park",
+"84": "Citizens Bank Park"
+}
+},
+"basketball_nba": {
+"teams": {
+"8": {
+"name": "Detroit Pistons",
+"venues": {
+"5404": 1
+}
+},
+"18": {
+"name": "New York Knicks",
+"venues": {
+"1830": 3
+}
+},
+"24": {
+"name": "San Antonio Spurs",
+"venues": {
+"780": 2,
+"7317": 1
+}
+},
+"19": {
+"name": "Orlando Magic",
+"venues": {
+"3432": 2
+}
+},
+"27": {
+"name": "Washington Wizards",
+"venues": {
+"1823": 2
+}
+},
+"14": {
+"name": "Miami Heat",
+"venues": {
+"3438": 3
+}
+},
+"17": {
+"name": "Brooklyn Nets",
+"venues": {
+"3559": 2
+}
+},
+"28": {
+"name": "Toronto Raptors",
+"venues": {
+"1838": 1
+}
+},
+"29": {
+"name": "Memphis Grizzlies",
+"venues": {
+"1392": 1
+}
+},
+"3": {
+"name": "New Orleans Pelicans",
+"venues": {
+"985": 1
+}
+},
+"10": {
+"name": "Houston Rockets",
+"venues": {
+"1394": 2
+}
+},
+"13": {
+"name": "Los Angeles Lakers",
+"venues": {
+"1841": 3
+}
+},
+"22": {
+"name": "Portland Trail Blazers",
+"venues": {
+"3423": 1
+}
+},
+"12": {
+"name": "LA Clippers",
+"venues": {
+"10642": 1
+}
+},
+"20": {
+"name": "Philadelphia 76ers",
+"venues": {
+"1845": 3
+}
+},
+"25": {
+"name": "Oklahoma City Thunder",
+"venues": {
+"2559": 3
+}
+},
+"15": {
+"name": "Milwaukee Bucks",
+"venues": {
+"5777": 2
+}
+},
+"2": {
+"name": "Boston Celtics",
+"venues": {
+"1824": 3
+}
+},
+"30": {
+"name": "Charlotte Hornets",
+"venues": {
+"1893": 3
+}
+},
+"11": {
+"name": "Indiana Pacers",
+"venues": {
+"2183": 1
+}
+},
+"26": {
+"name": "Utah Jazz",
+"venues": {
+"3093": 3
+}
+},
+"9": {
+"name": "Golden State Warriors",
+"venues": {
+"6270": 1
+}
+},
+"23": {
+"name": "Sacramento Kings",
+"venues": {
+"5310": 2
+}
+},
+"5": {
+"name": "Cleveland Cavaliers",
+"venues": {
+"3417": 2
+}
+},
+"4": {
+"name": "Chicago Bulls",
+"venues": {
+"1847": 1
+}
+},
+"6": {
+"name": "Dallas Mavericks",
+"venues": {
+"516": 1
+}
+},
+"1": {
+"name": "Atlanta Hawks",
+"venues": {
+"1827": 1
+}
+},
+"7": {
+"name": "Denver Nuggets",
+"venues": {
+"892": 2
+}
+},
+"21": {
+"name": "Phoenix Suns",
+"venues": {
+"1949": 1
+}
+},
+"16": {
+"name": "Minnesota Timberwolves",
+"venues": {
+"2029": 1
+}
+}
+},
+"venue_names": {
+"5404": "Little Caesars Arena",
+"1830": "Madison Square Garden",
+"780": "Frost Bank Center",
+"3432": "Kia Center",
+"1823": "Capital One Arena",
+"3438": "Kaseya Center",
+"3559": "Barclays Center",
+"1838": "Scotiabank Arena",
+"1392": "FedExForum",
+"985": "Smoothie King Center",
+"1394": "Toyota Center (Houston)",
+"1841": "crypto.com Arena",
+"3423": "Moda Center",
+"10642": "Intuit Dome",
+"1845": "Xfinity Mobile Arena",
+"2559": "Paycom Center",
+"5777": "Fiserv Forum",
+"1824": "TD Garden",
+"1893": "Spectrum Center",
+"2183": "Gainbridge Fieldhouse",
+"7317": "Moody Center",
+"3093": "Delta Center",
+"6270": "Chase Center",
+"5310": "Golden 1 Center",
+"3417": "Rocket Arena",
+"1847": "United Center",
+"516": "American Airlines Center",
+"1827": "State Farm Arena",
+"892": "Ball Arena",
+"1949": "Mortgage Matchup Center",
+"2029": "Target Center"
+}
+},
+"icehockey_nhl": {
+"teams": {
+"23": {
+"name": "Washington Capitals",
+"venues": {
+"1823": 7
+}
+},
+"28": {
+"name": "Winnipeg Jets",
+"venues": {
+"1397": 5,
+"4461": 1
+}
+},
+"25": {
+"name": "Anaheim Ducks",
+"venues": {
+"1842": 4
+}
+},
+"14": {
+"name": "Ottawa Senators",
+"venues": {
+"1832": 7
+}
+},
+"1": {
+"name": "Boston Bruins",
+"venues": {
+"1824": 4
+}
+},
+"2": {
+"name": "Buffalo Sabres",
+"venues": {
+"1848": 4
+}
+},
+"10": {
+"name": "Montreal Canadiens",
+"venues": {
+"1831": 5
+}
+},
+"20": {
+"name": "Tampa Bay Lightning",
+"venues": {
+"1396": 3
+}
+},
+"7": {
+"name": "Carolina Hurricanes",
+"venues": {
+"999": 3
+}
+},
+"12": {
+"name": "New York Islanders",
+"venues": {
+"7226": 5
+}
+},
+"19": {
+"name": "St. Louis Blues",
+"venues": {
+"1839": 6
+}
+},
+"3": {
+"name": "Calgary Flames",
+"venues": {
+"1843": 6
+}
+},
+"37": {
+"name": "Vegas Golden Knights",
+"venues": {
+"5060": 6
+}
+},
+"5": {
+"name": "Detroit Red Wings",
+"venues": {
+"5404": 4
+}
+},
+"29": {
+"name": "Columbus Blue Jackets",
+"venues": {
+"1828": 5
+}
+},
+"11": {
+"name": "New Jersey Devils",
+"venues": {
+"1826": 6
+}
+},
+"18": {
+"name": "San Jose Sharks",
+"venues": {
+"1653": 3
+}
+},
+"26": {
+"name": "Florida Panthers",
+"venues": {
+"1840": 3
+}
+},
+"16": {
+"name": "Pittsburgh Penguins",
+"venues": {
+"1837": 3
+}
+},
+"4": {
+"name": "Chicago Blackhawks",
+"venues": {
+"1847": 7
+}
+},
+"17": {
+"name": "Colorado Avalanche",
+"venues": {
+"892": 4
+}
+},
+"13": {
+"name": "New York Rangers",
+"venues": {
+"1830": 4
+}
+},
+"15": {
+"name": "Philadelphia Flyers",
+"venues": {
+"1845": 6
+}
+},
+"30": {
+"name": "Minnesota Wild",
+"venues": {
+"1835": 3
+}
+},
+"9": {
+"name": "Dallas Stars",
+"venues": {
+"516": 5
+}
+},
+"27": {
+"name": "Nashville Predators",
+"venues": {
+"1834": 5
+}
+},
+"129764": {
+"name": "Utah Mammoth",
+"venues": {
+"3093": 5
+}
+},
+"8": {
+"name": "Los Angeles Kings",
+"venues": {
+"1841": 2
+}
+},
+"21": {
+"name": "Toronto Maple Leafs",
+"venues": {
+"1838": 4
+}
+},
+"6": {
+"name": "Edmonton Oilers",
+"venues": {
+"5282": 5
+}
+},
+"124292": {
+"name": "Seattle Kraken",
+"venues": {
+"7224": 3
+}
+},
+"22": {
+"name": "Vancouver Canucks",
+"venues": {
+"1833": 3
+}
+}
+},
+"venue_names": {
+"1823": "Capital One Arena",
+"1397": "Canada Life Centre",
+"1842": "Honda Center",
+"1832": "Canadian Tire Centre",
+"1824": "TD Garden",
+"1848": "KeyBank Center",
+"1831": "Bell Centre",
+"1396": "Benchmark International Arena",
+"999": "Lenovo Center",
+"7226": "UBS Arena",
+"1839": "Enterprise Center",
+"1843": "Scotiabank Saddledome",
+"5060": "T-Mobile Arena",
+"5404": "Little Caesars Arena",
+"1828": "Nationwide Arena",
+"1826": "Prudential Center",
+"1653": "SAP Center at San Jose",
+"1840": "Amerant Bank Arena",
+"1837": "PPG Paints Arena",
+"1847": "United Center",
+"892": "Ball Arena",
+"1830": "Madison Square Garden",
+"1845": "Xfinity Mobile Arena",
+"1835": "Grand Casino Arena",
+"516": "American Airlines Center",
+"1834": "Bridgestone Arena",
+"3093": "Delta Center",
+"1841": "crypto.com Arena",
+"1838": "Scotiabank Arena",
+"5282": "Rogers Place",
+"7224": "Climate Pledge Arena",
+"1833": "Rogers Arena",
+"4461": "Princess Auto Stadium"
+}
+},
+"basketball_wnba": {
+"teams": {
+"3": {
+"name": "Dallas Wings",
+"venues": {
+"3416": 4
+}
+},
+"11": {
+"name": "Phoenix Mercury",
+"venues": {
+"1949": 4
+}
+},
+"20": {
+"name": "Atlanta Dream",
+"venues": {
+"6282": 3,
+"1827": 1
+}
+},
+"16": {
+"name": "Washington Mystics",
+"venues": {
+"5946": 3
+}
+},
+"129689": {
+"name": "Golden State Valkyries",
+"venues": {
+"6270": 5
+}
+},
+"6": {
+"name": "Los Angeles Sparks",
+"venues": {
+"1841": 5
+}
+},
+"9": {
+"name": "New York Liberty",
+"venues": {
+"3559": 4
+}
+},
+"14": {
+"name": "Seattle Storm",
+"venues": {
+"7224": 3
+}
+},
+"5": {
+"name": "Indiana Fever",
+"venues": {
+"2183": 4
+}
+},
+"8": {
+"name": "Minnesota Lynx",
+"venues": {
+"2029": 5
+}
+},
+"19": {
+"name": "Chicago Sky",
+"venues": {
+"5427": 3
+}
+},
+"132052": {
+"name": "Portland Fire",
+"venues": {
+"3423": 4
+}
+},
+"17": {
+"name": "Las Vegas Aces",
+"venues": {
+"4005": 4
+}
+},
+"131935": {
+"name": "Toronto Tempo",
+"venues": {
+"7546": 3
+}
+},
+"18": {
+"name": "Connecticut Sun",
+"venues": {
+"2160": 4
+}
+}
+},
+"venue_names": {
+"3416": "College Park Center",
+"1949": "Mortgage Matchup Center",
+"6282": "Gateway Center",
+"5946": "CareFirst Arena",
+"6270": "Chase Center",
+"1841": "crypto.com Arena",
+"3559": "Barclays Center",
+"7224": "Climate Pledge Arena",
+"2183": "Gainbridge Fieldhouse",
+"2029": "Target Center",
+"5427": "Wintrust Arena",
+"3423": "Moda Center",
+"4005": "Michelob ULTRA Arena",
+"7546": "Coca-Cola Coliseum",
+"2160": "Mohegan Sun Arena",
+"1827": "State Farm Arena"
+}
+},
+"soccer_usa_mls": {
+"teams": {
+"18418": {
+"name": "Atlanta United FC",
+"venues": {
+"7485": 7
+}
+},
+"9720": {
+"name": "CF Montréal",
+"venues": {
+"3278": 6
+}
+},
+"21300": {
+"name": "Charlotte FC",
+"venues": {
+"4418": 5
+}
+},
+"12011": {
+"name": "Orlando City SC",
+"venues": {
+"6971": 7
+}
+},
+"7318": {
+"name": "Toronto FC",
+"venues": {
+"10143": 7
+}
+},
+"6077": {
+"name": "Houston Dynamo FC",
+"venues": {
+"4791": 6
+}
+},
+"18986": {
+"name": "Nashville SC",
+"venues": {
+"8993": 6
+}
+},
+"184": {
+"name": "Colorado Rapids",
+"venues": {
+"2731": 7
+}
+},
+"4771": {
+"name": "Real Salt Lake",
+"venues": {
+"3714": 7
+}
+},
+"18966": {
+"name": "LAFC",
+"venues": {
+"7605": 5
+}
+},
+"191": {
+"name": "San Jose Earthquakes",
+"venues": {
+"6072": 5,
+"5960": 1
+}
+},
+"182": {
+"name": "Chicago Fire FC",
+"venues": {
+"1452": 6
+}
+},
+"17606": {
+"name": "New York City FC",
+"venues": {
+"4896": 3,
+"5146": 2
+}
+},
+"20906": {
+"name": "Austin FC",
+"venues": {
+"8673": 7
+}
+},
+"9726": {
+"name": "Seattle Sounders FC",
+"venues": {
+"4485": 8
+}
+},
+"183": {
+"name": "Columbus Crew",
+"venues": {
+"8689": 6
+}
+},
+"193": {
+"name": "D.C. United",
+"venues": {
+"7604": 6
+}
+},
+"18267": {
+"name": "FC Cincinnati",
+"venues": {
+"8674": 5
+}
+},
+"10739": {
+"name": "Philadelphia Union",
+"venues": {
+"4061": 6
+}
+},
+"190": {
+"name": "Red Bull New York",
+"venues": {
+"9606": 6
+}
+},
+"186": {
+"name": "Sporting Kansas City",
+"venues": {
+"6587": 6
+}
+},
+"17362": {
+"name": "Minnesota United FC",
+"venues": {
+"6538": 6
+}
+},
+"187": {
+"name": "LA Galaxy",
+"venues": {
+"1423": 6
+}
+},
+"9723": {
+"name": "Portland Timbers",
+"venues": {
+"4383": 6
+}
+},
+"9727": {
+"name": "Vancouver Whitecaps",
+"venues": {
+"4370": 6
+}
+},
+"20232": {
+"name": "Inter Miami CF",
+"venues": {
+"10661": 7
+}
+},
+"21812": {
+"name": "St. Louis CITY SC",
+"venues": {
+"10421": 6
+}
+},
+"22529": {
+"name": "San Diego FC",
+"venues": {
+"9195": 5
+}
+},
+"189": {
+"name": "New England Revolution",
+"venues": {
+"10660": 4
+}
+},
+"185": {
+"name": "FC Dallas",
+"venues": {
+"7474": 5
+}
+}
+},
+"venue_names": {
+"7485": "Mercedes-Benz Stadium",
+"3278": "Stade Saputo",
+"4418": "Bank of America Stadium",
+"6971": "Inter&Co Stadium",
+"10143": "BMO Field",
+"4791": "Shell Energy Stadium",
+"8993": "GEODIS Park",
+"2731": "Dick's Sporting Goods Park",
+"3714": "America First Field",
+"7605": "BMO Stadium",
+"6072": "PayPal Park",
+"1452": "Soldier Field",
+"4896": "Yankee Stadium",
+"8673": "Q2 Stadium",
+"4485": "Lumen Field",
+"8689": "ScottsMiracle-Gro Field",
+"7604": "Audi Field",
+"8674": "TQL Stadium",
+"4061": "Subaru Park",
+"9606": "Sports Illustrated Stadium",
+"6587": "Sporting Park",
+"6538": "Allianz Field",
+"1423": "Dignity Health Sports Park",
+"4383": "Providence Park",
+"4370": "BC Place",
+"10661": "Nu Stadium",
+"10421": "Energizer Park",
+"9195": "Snapdragon Stadium",
+"10660": "Gillette Stadium",
+"7474": "Toyota Stadium",
+"5146": "Citi Field",
+"5960": "Levi's Stadium"
+}
+},
+"soccer_epl": {
+"teams": {
+"359": {
+"name": "Arsenal",
+"venues": {
+"2267": 4
+}
+},
+"306": {
+"name": "Hull City",
+"venues": {
+"3670": 4
+}
+},
+"368": {
+"name": "Everton",
+"venues": {
+"10318": 4
+}
+},
+"373": {
+"name": "Ipswich Town",
+"venues": {
+"257": 4
+}
+},
+"393": {
+"name": "Nottingham Forest",
+"venues": {
+"131": 4
+}
+},
+"337": {
+"name": "Brentford",
+"venues": {
+"9658": 4
+}
+},
+"331": {
+"name": "Brighton & Hove Albion",
+"venues": {
+"10378": 4
+}
+},
+"382": {
+"name": "Manchester City",
+"venues": {
+"4036": 4
+}
+},
+"361": {
+"name": "Newcastle United",
+"venues": {
+"152": 4
+}
+},
+"370": {
+"name": "Fulham",
+"venues": {
+"279": 4
+}
+},
+"384": {
+"name": "Crystal Palace",
+"venues": {
+"135": 4
+}
+},
+"364": {
+"name": "Liverpool",
+"venues": {
+"192": 4
+}
+},
+"349": {
+"name": "AFC Bournemouth",
+"venues": {
+"6020": 4
+}
+},
+"388": {
+"name": "Coventry City",
+"venues": {
+"1680": 4
+}
+},
+"367": {
+"name": "Tottenham Hotspur",
+"venues": {
+"7827": 4
+}
+},
+"363": {
+"name": "Chelsea",
+"venues": {
+"249": 4
+}
+},
+"357": {
+"name": "Leeds United",
+"venues": {
+"190": 4
+}
+},
+"366": {
+"name": "Sunderland",
+"venues": {
+"194": 4
+}
+},
+"360": {
+"name": "Manchester United",
+"venues": {
+"250": 4
+}
+},
+"362": {
+"name": "Aston Villa",
+"venues": {
+"307": 4
+}
+}
+},
+"venue_names": {
+"2267": "Emirates Stadium",
+"3670": "The MKM Stadium",
+"10318": "Hill Dickinson Stadium",
+"257": "Portman Road",
+"131": "The City Ground",
+"9658": "Gtech Community Stadium",
+"10378": "American Express Stadium",
+"4036": "Etihad Stadium",
+"152": "St. James' Park",
+"279": "Craven Cottage",
+"135": "Selhurst Park",
+"192": "Anfield",
+"6020": "Vitality Stadium",
+"1680": "Coventry Building Society Arena",
+"7827": "Tottenham Hotspur Stadium",
+"249": "Stamford Bridge",
+"190": "Elland Road",
+"194": "Stadium of Light",
+"250": "Old Trafford",
+"307": "Villa Park"
+}
+},
+"soccer_mexico_ligamx": {
+"teams": {
+"218": {
+"name": "Cruz Azul",
+"venues": {
+"1672": 6
+}
+},
+"227": {
+"name": "América",
+"venues": {
+"1672": 6
+}
+},
+"226": {
+"name": "Atlante",
+"venues": {
+"1672": 6
+}
+}
+},
+"venue_names": {
+"1672": "Estadio Banorte"
+}
+},
+"soccer_conmebol_copa_libertadores": {
+"teams": {
+"2687": {
+"name": "The Strongest",
+"venues": {
+"1913": 1
+}
+},
+"5488": {
+"name": "Independiente Santa Fe",
+"venues": {
+"10553": 3
+}
+},
+"2681": {
+"name": "Bolívar",
+"venues": {
+"1913": 2,
+"5108": 1
+}
+},
+"4816": {
+"name": "Liga de Quito",
+"venues": {
+"5510": 3
+}
+}
+},
+"venue_names": {
+"1913": "Estadio Hernando Siles",
+"10553": "Estadio Nemesio Camacho El Campín",
+"5510": "Rodrigo Paz Delgado",
+"5108": "Estadio Ramón Tahuichi"
+}
+},
+"soccer_conmebol_copa_sudamericana": {
+"teams": {
+"5484": {
+"name": "Millonarios",
+"venues": {
+"10553": 3
+}
+}
+},
+"venue_names": {
+"10553": "Estadio Nemesio Camacho El Campín"
+}
+}
+}
+}

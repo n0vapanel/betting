@@ -1,0 +1,75 @@
+[
+ {
+  "active": true,
+  "bestAsk": 0.5,
+  "bestBid": 0.056,
+  "closed": false,
+  "endDate": "2027-01-27T04:59:00Z",
+  "events": [
+   {
+    "slug": "pro-football-cardinals-vspt-rams-season-series-winner",
+    "title": "Pro Football: Cardinals vs. Rams Season Series Winner"
+   }
+  ],
+  "groupItemTitle": "Cardinals",
+  "id": "3025982",
+  "lastTradePrice": 0.5,
+  "liquidityNum": 955.567,
+  "outcomePrices": "[\"0.278\", \"0.722\"]",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "question": "Will the Cardinals win the season series against the Rams during the 2026-27 NFL regular season?",
+  "slug": "will-the-cardinals-win-the-season-series-against-the-rams-during-the-2026-27-nfl-regular-season-20260717194042759",
+  "sportsMarketType": "moneyline",
+  "spread": 0.444,
+  "volumeNum": 550.524069
+ },
+ {
+  "active": true,
+  "bestAsk": 0.82,
+  "bestBid": 0.37,
+  "closed": false,
+  "endDate": "2027-01-27T04:59:00Z",
+  "events": [
+   {
+    "slug": "pro-football-cardinals-vspt-rams-season-series-winner",
+    "title": "Pro Football: Cardinals vs. Rams Season Series Winner"
+   }
+  ],
+  "groupItemTitle": "Tie",
+  "id": "3025984",
+  "lastTradePrice": 0.44,
+  "liquidityNum": 438.2956,
+  "outcomePrices": "[\"0.595\", \"0.405\"]",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "question": "Will the season series between the Cardinals and Rams end in a tie during the 2026-27 NFL regular season?",
+  "slug": "will-the-season-series-between-the-cardinals-and-rams-end-in-a-tie-during-the-2026-27-nfl-regular-season-20260717194042761",
+  "sportsMarketType": "moneyline",
+  "spread": 0.45,
+  "volumeNum": 2081.644993
+ },
+ {
+  "active": true,
+  "bestAsk": 0.2,
+  "bestBid": 0.11,
+  "closed": false,
+  "endDate": "2026-11-02T04:59:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-26",
+    "slug": "atp-tournament-winner-2026-135031",
+    "startTime": "2026-10-26T12:30:00Z",
+    "title": "ATP Tennis: Basel, Switzerland Winner"
+   }
+  ],
+  "gameStartTime": "2026-10-26 12:30:00+00",
+  "groupItemTitle": "Ben Shelton",
+  "id": "6220241",
+  "liquidityNum": 688.47,
+  "outcomePrices": "[\"0.155\", \"0.845\"]",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "question": "Will Ben Shelton win the 2026 Basel, Switzerland?",
+  "slug": "atp-tournament-winner-2026-135031-competitor-808628",
+  "sportsMarketType": "moneyline",
+  "spread": 0.09
+ }
+]

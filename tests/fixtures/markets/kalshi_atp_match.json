@@ -1,0 +1,103 @@
+{
+ "cursor": "",
+ "events": [
+  {
+   "event_ticker": "KXATPMATCH-26OCT25COBDIM",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-25T12:00:00Z",
+     "last_price_dollars": "0.6600",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-25T12:00:00Z",
+     "status": "active",
+     "ticker": "KXATPMATCH-26OCT25COBDIM-COB",
+     "title": "Flavio Cobolli wins",
+     "volume_fp": "42571.91",
+     "yes_ask_dollars": "0.6600",
+     "yes_bid_dollars": "0.6500",
+     "yes_sub_title": "Flavio Cobolli"
+    },
+    {
+     "expected_expiration_time": "2026-10-25T12:00:00Z",
+     "last_price_dollars": "0.3500",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-25T12:00:00Z",
+     "status": "active",
+     "ticker": "KXATPMATCH-26OCT25COBDIM-DIM",
+     "title": "Grigor Dimitrov wins",
+     "volume_fp": "10987.08",
+     "yes_ask_dollars": "0.3500",
+     "yes_bid_dollars": "0.3400",
+     "yes_sub_title": "Grigor Dimitrov"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXATPMATCH",
+   "sub_title": "Cobolli vs Dimitrov (Oct 25)",
+   "title": "Cobolli vs Dimitrov"
+  },
+  {
+   "event_ticker": "KXATPMATCH-26OCT25KHAALC",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-25T12:00:00Z",
+     "last_price_dollars": "0.2000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-25T12:00:00Z",
+     "status": "active",
+     "ticker": "KXATPMATCH-26OCT25KHAALC-KHA",
+     "title": "Karen Khachanov wins",
+     "volume_fp": "2120.21",
+     "yes_ask_dollars": "0.2000",
+     "yes_bid_dollars": "0.1800",
+     "yes_sub_title": "Karen Khachanov"
+    },
+    {
+     "expected_expiration_time": "2026-10-25T12:00:00Z",
+     "last_price_dollars": "0.8200",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-25T12:00:00Z",
+     "status": "active",
+     "ticker": "KXATPMATCH-26OCT25KHAALC-ALC",
+     "title": "Carlos Alcaraz wins",
+     "volume_fp": "7741.77",
+     "yes_ask_dollars": "0.8200",
+     "yes_bid_dollars": "0.8000",
+     "yes_sub_title": "Carlos Alcaraz"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXATPMATCH",
+   "sub_title": "Khachanov vs Alcaraz (Oct 25)",
+   "title": "Khachanov vs Alcaraz"
+  }
+ ],
+ "milestones": [
+  {
+   "details": {
+    "main_game_event_ticker": "KXATPMATCH-26OCT25COBDIM",
+    "status": "not_started"
+   },
+   "id": "0dc0f83f-3251-488e-9238-ec602020e2a2",
+   "primary_event_tickers": [
+    "KXATPMATCH-26OCT25COBDIM"
+   ],
+   "start_date": "2026-10-27T19:00:00Z",
+   "title": "Cobolli vs Dimitrov",
+   "type": "tennis_tournament_singles"
+  },
+  {
+   "details": {
+    "main_game_event_ticker": "KXATPMATCH-26OCT25KHAALC",
+    "status": "not_started"
+   },
+   "id": "d49f111a-c673-433a-b8a5-f0b31f59c8dc",
+   "primary_event_tickers": [
+    "KXATPMATCH-26OCT25KHAALC"
+   ],
+   "start_date": "2026-10-27T13:40:00Z",
+   "title": "Khachanov vs Alcaraz",
+   "type": "tennis_tournament_singles"
+  }
+ ]
+}

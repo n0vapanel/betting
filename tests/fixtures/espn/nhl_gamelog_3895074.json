@@ -1,0 +1,167 @@
+{
+ "labels": [
+  "G",
+  "A",
+  "PTS",
+  "+/-",
+  "PIM",
+  "S",
+  "SPCT",
+  "PPG",
+  "PPA",
+  "SHG",
+  "SHA",
+  "GWG",
+  "TOI/G",
+  "PROD"
+ ],
+ "names": [
+  "goals",
+  "assists",
+  "points",
+  "plusMinus",
+  "penaltyMinutes",
+  "shotsTotal",
+  "shootingPct",
+  "powerPlayGoals",
+  "powerPlayAssists",
+  "shortHandedGoals",
+  "shortHandedAssists",
+  "gameWinningGoals",
+  "timeOnIcePerGame",
+  "production"
+ ],
+ "displayNames": [
+  "Goals",
+  "Assists",
+  "Points",
+  "Plus/Minus Rating",
+  "Penalty Minutes",
+  "Shots",
+  "Shooting Percentage",
+  "Power Play Goals",
+  "Power Play Assists",
+  "Short Handed Goals",
+  "Short Handed Assists",
+  "Game-Winning Goals",
+  "Time On Ice Per Game",
+  "Production"
+ ],
+ "filters": [
+  {
+   "name": "season",
+   "value": "2027",
+   "options": [
+    {
+     "value": "2027",
+     "displayValue": "2026-27"
+    }
+   ]
+  }
+ ],
+ "seasonTypes": [
+  {
+   "displayName": "2026-27 Regular Season",
+   "categories": [
+    {
+     "displayName": "October",
+     "type": "event",
+     "events": [
+      {
+       "eventId": "401892574",
+       "stats": [
+        "0",
+        "2",
+        "2",
+        "-2",
+        "0",
+        "3",
+        "0.0",
+        "0",
+        "1",
+        "0",
+        "0",
+        "0",
+        "22:27",
+        "11:13"
+       ]
+      },
+      {
+       "eventId": "401892561",
+       "stats": [
+        "2",
+        "3",
+        "5",
+        "1",
+        "0",
+        "3",
+        "66.7",
+        "0",
+        "3",
+        "0",
+        "0",
+        "0",
+        "25:02",
+        "5:00"
+       ]
+      },
+      {
+       "eventId": "401892546",
+       "stats": [
+        "0",
+        "3",
+        "3",
+        "-2",
+        "0",
+        "4",
+        "0.0",
+        "0",
+        "3",
+        "0",
+        "0",
+        "0",
+        "25:31",
+        "8:30"
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "events": {
+  "401892574": {
+   "id": "401892574",
+   "atVs": "vs",
+   "gameDate": "2026-10-24T23:00:00.000+00:00",
+   "score": "7-2",
+   "gameResult": "L",
+   "opponent": {
+    "abbreviation": "TOR",
+    "displayName": "Toronto Maple Leafs"
+   }
+  },
+  "401892561": {
+   "id": "401892561",
+   "atVs": "vs",
+   "gameDate": "2026-10-23T01:00:00.000+00:00",
+   "score": "6-5 SO",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "CAR",
+    "displayName": "Carolina Hurricanes"
+   }
+  },
+  "401892546": {
+   "id": "401892546",
+   "atVs": "vs",
+   "gameDate": "2026-10-21T01:00:00.000+00:00",
+   "score": "4-3 OT",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "MIN",
+    "displayName": "Minnesota Wild"
+   }
+  }
+ }
+}

@@ -1,0 +1,238 @@
+{
+ "labels": [
+  "MIN",
+  "FG",
+  "FG%",
+  "3PT",
+  "3P%",
+  "FT",
+  "FT%",
+  "REB",
+  "AST",
+  "BLK",
+  "STL",
+  "PF",
+  "TO",
+  "PTS"
+ ],
+ "names": [
+  "minutes",
+  "fieldGoalsMade-fieldGoalsAttempted",
+  "fieldGoalPct",
+  "threePointFieldGoalsMade-threePointFieldGoalsAttempted",
+  "threePointPct",
+  "freeThrowsMade-freeThrowsAttempted",
+  "freeThrowPct",
+  "totalRebounds",
+  "assists",
+  "blocks",
+  "steals",
+  "fouls",
+  "turnovers",
+  "points"
+ ],
+ "displayNames": [
+  "Minutes",
+  "Field Goals Made-Attempted",
+  "Field Goal Percentage",
+  "3-Point Field Goals Made-Attempted",
+  "3-Point Field Goal Percentage",
+  "Free Throws Made-Attempted",
+  "Free Throw Percentage",
+  "Rebounds",
+  "Assists",
+  "Blocks",
+  "Steals",
+  "Fouls",
+  "Turnovers",
+  "Points"
+ ],
+ "filters": [
+  {
+   "name": "season",
+   "value": "2027",
+   "options": [
+    {
+     "value": "2027",
+     "displayValue": "2026-27"
+    }
+   ]
+  }
+ ],
+ "seasonTypes": [
+  {
+   "displayName": "2026-27 Regular Season",
+   "categories": [
+    {
+     "displayName": "october",
+     "type": "event",
+     "events": [
+      {
+       "eventId": "401909866",
+       "stats": [
+        "33",
+        "8-15",
+        "53.3",
+        "0-3",
+        "0.0",
+        "2-6",
+        "33.3",
+        "2",
+        "5",
+        "0",
+        "2",
+        "1",
+        "3",
+        "18"
+       ]
+      },
+      {
+       "eventId": "401909093",
+       "stats": [
+        "33",
+        "5-14",
+        "35.7",
+        "1-4",
+        "25.0",
+        "6-7",
+        "85.7",
+        "10",
+        "5",
+        "1",
+        "3",
+        "3",
+        "5",
+        "17"
+       ]
+      },
+      {
+       "eventId": "401909089",
+       "stats": [
+        "34",
+        "5-13",
+        "38.5",
+        "0-3",
+        "0.0",
+        "4-6",
+        "66.7",
+        "9",
+        "7",
+        "1",
+        "1",
+        "4",
+        "1",
+        "14"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "displayName": "2026-27 Preseason",
+   "categories": [
+    {
+     "displayName": "Preseason",
+     "type": "event",
+     "events": [
+      {
+       "eventId": "401898407",
+       "stats": [
+        "25",
+        "4-9",
+        "44.4",
+        "0-2",
+        "0.0",
+        "0-3",
+        "0.0",
+        "8",
+        "7",
+        "0",
+        "1",
+        "1",
+        "4",
+        "8"
+       ]
+      },
+      {
+       "eventId": "401901823",
+       "stats": [
+        "18",
+        "1-1",
+        "100.0",
+        "0-0",
+        "0.0",
+        "8-8",
+        "100.0",
+        "4",
+        "5",
+        "0",
+        "1",
+        "1",
+        "2",
+        "10"
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "events": {
+  "401909093": {
+   "id": "401909093",
+   "atVs": "vs",
+   "gameDate": "2026-10-22T23:00:00.000+00:00",
+   "score": "114-106",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "CLE",
+    "displayName": "Cleveland Cavaliers"
+   }
+  },
+  "401909089": {
+   "id": "401909089",
+   "atVs": "@",
+   "gameDate": "2026-10-20T23:00:00.000+00:00",
+   "score": "106-100",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "NY",
+    "displayName": "New York Knicks"
+   }
+  },
+  "401898407": {
+   "id": "401898407",
+   "atVs": "vs",
+   "gameDate": "2026-10-16T23:00:00.000+00:00",
+   "score": "125-120 OT",
+   "gameResult": "L",
+   "opponent": {
+    "abbreviation": "BOS",
+    "displayName": "Boston Celtics"
+   }
+  },
+  "401901823": {
+   "id": "401901823",
+   "atVs": "@",
+   "gameDate": "2026-10-08T23:30:00.000+00:00",
+   "score": "114-108",
+   "gameResult": "L",
+   "opponent": {
+    "abbreviation": "BKN",
+    "displayName": "Brooklyn Nets"
+   }
+  },
+  "401909866": {
+   "id": "401909866",
+   "atVs": "vs",
+   "gameDate": "2026-10-25T23:30:00.000+00:00",
+   "score": "106-93",
+   "gameResult": "L",
+   "opponent": {
+    "abbreviation": "DET",
+    "displayName": "Detroit Pistons"
+   }
+  }
+ }
+}
