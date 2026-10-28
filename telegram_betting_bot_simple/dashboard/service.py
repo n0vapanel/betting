@@ -1305,7 +1305,7 @@ class DashboardService:
                         ))
         if league in AI_LEAGUES:
             note = ("Built from the AI's chances and the best price at one bookmaker per bet. The AI leans on the "
-                    "bookmakers, so expect small negative value: these are for fun, not tips. " + bets.VIG_NOTE)
+                    "bookmakers, so expect small negative value. " + bets.VIG_NOTE)
         else:
             note = ("No AI model for this league yet, so these use the bookmakers' own chances: "
                     "expect slightly negative value on all of them. " + bets.VIG_NOTE)

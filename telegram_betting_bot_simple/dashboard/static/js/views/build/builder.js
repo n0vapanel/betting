@@ -5,9 +5,11 @@
 //   GET  /api/builder/presets       {presets: {safe, risky, crazy: controls}, described, markets: {key: {title,
 //                                    available, reason}}, defaults: {preset, books, scope_fields, saved, ...}}
 //   POST /api/builder/run           {controls, stake?} -> the engine's Result: tickets (priced at the stake, each
-//                                    leg with why, risk, swaps), near_misses, blocked, stats, notes, ideas, target,
-//                                    unpriced. Shared by everyone asking the same thing for a minute: no fetch.
-//   POST /api/builder/price         {legs: [ref], stake?, books?} -> a ticket re-priced after a Swap (no rerun)
+//                                    leg with why, risk, swaps; each ticket with fit, relaxed and option), options,
+//                                    near_misses, blocked, stats, notes, ideas, target, unpriced. Shared by everyone
+//                                    asking the same thing for a minute: no fetch.
+//   POST /api/builder/price         {legs: [ref], stake?, books?, target_odds?, target_chance?, tolerance_pct?} -> a
+//                                    ticket re-priced after a Swap (no rerun), with its fit to the run's targets
 //   PUT  /api/me {builder}          the person's last controls (also kept on this device: prefs "builder")
 //   POST /api/tickets/analyse       "Explain with AI" (the slip's analysis, paid from the AI allowance)
 // Every route here runs the gates and the picks pause; on a break or in the pause the controls are off up
@@ -23,6 +25,10 @@
 // the preset the controls came from relabels the run Custom, as engine/presets.py label_for does.
 // Swap: a leg's alternatives were worked out by the server with the other legs fixed, so after one swap only
 // that leg's alternatives (and going back) stay on offer until the next build.
+// Closest effort (v3): "Chance you want" and the Closest effort switch are controls like the rest (saved with them;
+// the switch keeps the preset's name). With it on, a run that can't meet the ask exactly shows the closest tickets,
+// each with its option chip, fit line and "Relaxed: …" line, never the "No ticket fits" card; Strict shows that card
+// with a one-tap "Show the closest instead".
 
 import { api, prefs, isQuiet } from "../../api.js";
 import {
@@ -106,7 +112,7 @@ export function mountBuilder(root, { params, refresh }) {
   const view = () => ({
     c: s.c, ui: s.ui, presets: setup.presets, described: setup.described, markets: setup.markets, books: setup.books,
     counts: counts(), label: labelFor(s.c, setup.presets, scope()), changed: changedFields(s.c, setup.presets, scope()),
-    errors: s.errors,
+    errors: s.errors, chanceCustom: s.chanceCustom,
   });
 
   function saveLocal() {
@@ -401,7 +407,9 @@ export function mountBuilder(root, { params, refresh }) {
       return;
     }
     setError(r.field, "");
-    apply(r.controls || null, r.ui || null, container, { field: r.field });
+    if (r.chanceCustom !== undefined) s.chanceCustom = r.chanceCustom;
+    // The chance list opens or closes its Custom box: that container is drawn again (the list keeps the focus)
+    apply(r.controls || null, r.ui || null, r.field === "target_chance" ? null : container, { field: r.field });
   }
 
   function onControlClick(event) {
@@ -454,6 +462,7 @@ export function mountBuilder(root, { params, refresh }) {
     s.c = withPreset(name, s.c, setup.presets, scope());
     s.errors = {};
     s.formError = "";
+    s.chanceCustom = false; // presets set no target chance
     // A target from the stake belongs to the old controls
     s.ui = { ...s.ui, back: null };
     dirty = true;
@@ -581,7 +590,9 @@ export function mountBuilder(root, { params, refresh }) {
     drawResults();
     const n = (run.data.tickets || []).length;
     const say = $("[data-bd-say]");
-    if (say) say.textContent = n ? `${n} ticket${n === 1 ? "" : "s"} built, ${run.data.label || "Custom"}.` : `No ticket fits: ${run.data.blocked?.message || "see the rules to relax"}`;
+    const closest = run.data.controls?.best_effort === true;
+    if (say) say.textContent = n ? `${n} ticket${n === 1 ? "" : "s"} built, ${run.data.label || "Custom"}${(run.data.options || []).length ? ": the closest options" : ""}.`
+      : closest ? `Nothing to build from: ${run.data.blocked?.message || "no game in scope has prices"}` : `No ticket fits: ${run.data.blocked?.message || "see the rules to relax"}`;
     if (phone && show) reveal($("[data-bd-out]"));
   }
 
@@ -622,6 +633,11 @@ export function mountBuilder(root, { params, refresh }) {
       body.target_odds = run.data.target.odds;
       if (run.data.target.tolerance_pct != null) body.tolerance_pct = run.data.target.tolerance_pct;
     }
+    // The run's target chance too: the server says how close the swapped ticket gets (its fit line)
+    if (ran.target_chance != null) {
+      body.target_chance = ran.target_chance;
+      if (body.tolerance_pct == null && ran.tolerance_pct != null) body.tolerance_pct = ran.tolerance_pct;
+    }
     card.repricing = true;
     try {
       const priced = await api("/api/builder/price", { method: "POST", body, signal });
@@ -659,6 +675,9 @@ export function mountBuilder(root, { params, refresh }) {
     });
     return {
       ...priced, legs, refs: priced.refs || legs.map((l) => l.ref), label: "Custom",
+      // The run's option and relaxed rules stay with the ticket (its swaps keep the rules the run used); the fit is
+      // the server's for the new legs
+      option: base.option || null, relaxed: base.relaxed || [], fit: priced.fit ?? null,
       joint: priced.joint || { chance: priced.chance?.ai ?? option.joint, one_in: priced.chance?.ai_one_in, fair_odds: null },
       reach_target: priced.reach_target || (run.data.target ? null : { chance: priced.chance?.ai ?? option.joint, one_in: priced.chance?.ai_one_in }),
       notes: Array.isArray(priced.notes) ? priced.notes : priced.model_priced ? ["Priced at fair odds; check your bookmaker's price."] : [],
@@ -824,6 +843,12 @@ export function mountBuilder(root, { params, refresh }) {
         root.querySelector(".bd-controls")?.scrollIntoView({ block: "start", behavior: "smooth" });
         root.querySelector(".bd-controls summary")?.focus({ preventScroll: true });
       }
+      return;
+    }
+    if (t.closest("[data-bd-closest]")) {
+      // Strict found nothing: closest effort back on, and build again
+      apply({ best_effort: true }, null, null, { field: "best_effort" });
+      runBuild();
       return;
     }
     if (t.closest("[data-bd-age]")) openOnboarding();

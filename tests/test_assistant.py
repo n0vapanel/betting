@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import json
+import re
 import sqlite3
 import threading
 import time
@@ -235,7 +236,8 @@ def test_a_build_runs_the_tool_loop_and_cards_come_from_the_tool_results(store, 
     # Toolbox.run validates every input instead
     assert all("strict" not in tool and tool["input_schema"]["additionalProperties"] is False
                for tool in first["tools"])
-    assert len(first["tools"]) == 15  # the twelve tools, pasted_slip_analyse, markets_consensus and game_context
+    # the twelve tools, pasted_slip_analyse, markets_consensus, game_context and brain_top_picks
+    assert len(first["tools"]) == 16
     result = second["messages"][-1]["content"][0]
     assert result["type"] == "tool_result" and result["tool_use_id"] == "toolu_1" and not result["is_error"]
     assert "ceiling_one_in" in result["content"]
@@ -299,8 +301,11 @@ def test_an_invented_number_is_sent_back_once_then_replaced_by_a_template(store,
     assert retry[-1]["role"] == "user" and "$47.50" in retry[-1]["content"]
     assert retry[-2]["role"] == "assistant"
     priced = lab.price(UID, {"type": "single", "stake": "10", "legs": [ref]})
-    assert out["reply"]["text"].startswith("Single: New York Knicks to win:")
-    assert f"1 in {priced['chance']['ai_one_in']}" in out["reply"]["text"]
+    assert out["reply"]["text"].startswith("New York Knicks to win at ")  # the template leads with the pick
+    # A better-than-even chance is a percentage ("1 in 1" says nothing), a longer one "1 in X"
+    chance = priced["chance"]
+    assert (f"1 in {chance['ai_one_in']}" if chance["ai_one_in"] >= 2 else f"{chance['ai'] * 100:.0f}% of the time") \
+        in out["reply"]["text"]
     assert "$47.50" not in out["reply"]["text"]
     assert out["reply"]["cards"][0]["ticket"]["max_payout"] == priced["max_payout"]  # the card is still shown
     assert store.messages(UID, out["thread_id"])[-1]["content"]["checked"] is False
@@ -1021,17 +1026,18 @@ def test_the_assistant_s_leagues_are_its_own_list_not_every_scoreboard() -> None
     assert set(POPULAR_LEAGUES) <= set(LEAGUE_KEYS) and len(LEAGUE_KEYS) == 15
     assert "soccer_efl_champ" in LEAGUES and "soccer_efl_champ" not in LEAGUE_KEYS
     # About 16.6 KB with Stage 3's Builder controls on ticket_build (15.9 KB before), 17.7 KB with Stage 4's
-    # game_context; 27 KB with every league
-    assert len(json.dumps(TOOLS)) < 18_000
+    # game_context, 19.1 KB with closest effort's target_chance and best_effort and brain_top_picks; 28 KB with
+    # every league
+    assert len(json.dumps(TOOLS)) < 19_500
     assert "soccer_efl_champ" not in assistant_module.ROUTER_PROMPT
 
 
 def test_tools_take_refs_never_prices_or_probabilities() -> None:
     for tool in TOOLS:
-        # A rollover's daily odds and the Builder's controls (target odds, leg odds range, minimum chance per leg) are
-        # the user's own settings, never a price or a chance for a leg
-        names = _inputs(tool["input_schema"]) - {"min_odds", "target_odds", "leg_odds_min", "leg_odds_max",
-                                                 "min_chance"}
+        # A rollover's daily odds and the Builder's controls (target odds, the chance wanted for the whole ticket,
+        # leg odds range, minimum chance per leg) are the user's own settings, never a price or a chance for a leg
+        names = _inputs(tool["input_schema"]) - {"min_odds", "target_odds", "target_chance", "leg_odds_min",
+                                                 "leg_odds_max", "min_chance"}
         assert not [n for n in names if any(w in n for w in ("price", "prob", "odds", "chance", "payout"))], tool["name"]
         schema = json.dumps(tool["input_schema"])
         assert "minimum" not in schema and "maximum" not in schema  # ranges are checked in code
@@ -1372,15 +1378,19 @@ def test_with_the_real_lab_the_chat_prices_and_proposes_and_the_analysis_is_expl
     explanation = analysis["explanation"]
     assert explanation["source"] == "template" and [leg["index"] for leg in explanation["per_leg"]] == [0, 1]
     assert explanation["per_leg"][0]["text"].startswith("New York Knicks to win at 1.36")
-    assert "The weakest leg is" in explanation["case_against"]
+    # The analyst's order: the picks, the odds and the chance, then the weakest leg; the case against is one line
+    assert explanation["verdict"].startswith("New York Knicks to win and ")
+    assert "The weakest leg is" in explanation["verdict"]
+    assert explanation["case_against"].startswith("The bookmaker keeps about ")
+    assert len(re.findall(r"[.!?](?:\s|$)", explanation["case_against"])) == 1  # one sentence
 
 
 def test_the_template_never_reports_a_negative_cut() -> None:
     sheet = {"ticket": {"book_cut": -0.03, "chance": {"ai": 0.3, "ai_one_in": 3}, "expected": {"ai": "0.50"},
                         "total_stake": "10.00", "legs": []}}
-    verdict = template_explanation(sheet)["verdict"]
-    assert "keeps" not in verdict and "beat the bookmakers' consensus" in verdict
-    assert "On average you make about $0.50 on your $10.00" in verdict
+    against = template_explanation(sheet)["case_against"]
+    assert "keeps" not in against and "beat the bookmakers' consensus" in against
+    assert "on average you make about $0.50 on your $10.00" in against
 
 
 def test_the_real_lab_shows_why_there_is_no_ai_explanation(service, store) -> None:

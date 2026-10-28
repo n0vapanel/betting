@@ -354,12 +354,13 @@ def _controls(legs: int, low: float, high: float, tickets: int) -> builder.Contr
     """The builder's controls for one ticket size: the odds window [low, high] as its ticket-odds band (no target,
     so no closeness term), one leg per game, no Whelan cap, no caution (the chances are already cautious), any board
     market and any price age. _search runs it with builder.RETURN_ONLY, so the builder ranks by the cautious
-    expected return alone."""
+    expected return alone. Strict (no closest effort): this module reads only the builder's ranked tickets and its
+    counts of what landed in the window, never loosened rules."""
     # Every price is above 1, so a window starting below 1 starts at 1 for the builder
     return builder.Controls(legs=legs, legs_max=legs, odds_min=max(low, 1.0), odds_max=high, caution_pp=0.0,
                             whelan=False,
                             max_per_game=1, max_per_team=builder.MAX_LEGS, markets=set(builder.MARKETS),
-                            max_price_age_s=builder.MAX_AGE_S, tickets=tickets)
+                            max_price_age_s=builder.MAX_AGE_S, tickets=tickets, best_effort=False)
 
 
 def _search(pool: Sequence[_Option], target: float, low: float, high: float, max_legs: int,

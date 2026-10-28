@@ -18,8 +18,11 @@ chance is more than 8 points from the books'. So Safe on the Build screen refuse
 A Custom run is the person's own rules: these don't apply, and the ticket still shows its expected result and cut.
 
 Editing any control that shapes the tickets relabels the run "Custom" (``label_for``). The scope (leagues, time
-and kick-off windows, started games), the allowed books, the number of tickets, the time zone and the
-correlation ideas don't change the risk, so they keep the preset's name.
+and kick-off windows, started games), the allowed books, the number of tickets, the time zone, the
+correlation ideas and the closest-effort switch (``best_effort``: strict or not changes no rule a ticket that
+meets them is held to; a ticket closest effort loosened a rule for says so in its ``relaxed``) don't change the
+risk, so they keep the preset's name. A target chance (``target_chance``), like a target odds, makes it Custom;
+the presets set none and leave closest effort on.
 """
 
 from __future__ import annotations
@@ -60,7 +63,7 @@ WEIGHTS: Dict[Optional[str], Weights] = {
 
 # The fields that don't change the risk: changing them keeps the preset's name
 SCOPE_FIELDS: Tuple[str, ...] = ("leagues", "window", "kickoff", "exclude_started", "books", "tickets", "preset",
-                                 "tz", "prefer_correlation")
+                                 "tz", "prefer_correlation", "best_effort")
 PRESET_FIELDS: Tuple[str, ...] = tuple(f.name for f in dataclasses.fields(Controls) if f.name not in SCOPE_FIELDS)
 
 

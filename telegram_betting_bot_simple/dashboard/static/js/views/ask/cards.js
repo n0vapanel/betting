@@ -1,14 +1,21 @@
-// Ask AI's cards: the tickets, rollover plans and players a reply carries (a pasted slip's card is
-// ask/pasted.js).
+// Ask AI's cards: the tickets, rollover plans, players and likeliest winners a reply carries (a pasted slip's
+// card is ask/pasted.js).
 //
 // The server builds every card in code from its tool results (ai/tools.py: ticket_card, plan_card,
-// player_card), so each number here is the brain's: these functions only lay them out. A ticket card's
-// "Add to slip" adds its legs only when the person taps it; "Tweak" asks the AI for a change.
+// player_card, builder_card, picks_card), so each number here is the brain's: these functions only lay them out. A
+// ticket card's "Add to slip" adds its legs only when the person taps it; "Tweak" asks the AI for a change.
+//
+// Closest effort (v3): a Builder ticket an option picked is titled by it ("Likeliest at your odds"), and shows its
+// fit line ("3.52x · 27% (you asked 3.5x · 80%)") and a muted "Relaxed: …" line (card.option, card.fit,
+// card.relaxed). brain_top_picks' card (type "picks") is the likeliest winners, ranked, each with its chance,
+// price, book, a short why and its own "Add to slip".
 
 import { esc, pct, chanceText, money, signedMoney, priceText, shortName, timeLabel, ago, badge, injuryBadge, notice, explain } from "../../ui.js";
 import { slip } from "../../app.js";
 import { icon } from "../../icons.js";
 import { pastedCardHtml } from "./pasted.js";
+import { optionOf, fitParts, relaxedText } from "../build/builder/fit.js";
+import { unitsFor } from "../context/units.js";
 
 // --- tickets: legs and bodies -------------------------------------------------------------------------
 
@@ -197,13 +204,18 @@ export function ticketCardHtml(card, key, { stale = "" } = {}) {
   const notesByIndex = new Map((card.notes || []).map((n) => [n.index, n.notes || []]));
   const problem = blocked(ticket);
   const source = card.proposal ? SOURCES.slip_propose : SOURCES[card.source] || "Ticket";
+  // Closest effort: the option that picked it (its title when the server named it so, else a chip above)
+  const option = optionOf(card.option || ticket.option);
+  const titled = option && card.title === option.label;
   return `<article class="card ask-card ask-ticket" data-card-key="${esc(key)}" aria-label="${esc(`Ticket: ${card.title || kindLine(ticket)}`)}">
+    ${option && !titled ? `<div class="ask-opts"><span class="ask-opt k-${esc(option.key || "other")}">${icon(option.iconName, { size: 14 })}${esc(option.label)}</span></div>` : ""}
     <header class="ask-card-head">
       <div class="grow"><span class="eyebrow">${esc(source)}</span>
-        <h3>${esc(card.title || kindLine(ticket))}</h3>
+        <h3${titled ? ` class="ask-opt-title k-${esc(option.key || "other")}"` : ""}>${titled ? icon(option.iconName, { size: 16 }) : ""}${esc(card.title || kindLine(ticket))}</h3>
         <span class="muted small">${esc(kindLine(ticket))}</span></div>
       ${tierBadge(ticket.tier)}
     </header>
+    ${fitHtml(card.fit !== undefined ? card.fit : ticket.fit, card.relaxed !== undefined ? card.relaxed : ticket.relaxed)}
     ${legsHtml(ticket, notesByIndex, Boolean(card.builder))}
     ${(ticket.reasons || []).map((r) => notice(r, "danger")).join("")}
     ${summaryHtml(ticket)}
@@ -219,6 +231,78 @@ export function ticketCardHtml(card, key, { stale = "" } = {}) {
   </article>`;
 }
 
+/** "3.52x · 27% (you asked 3.5x · 80%)" and the muted "Relaxed: …" line (closest effort), or "". */
+function fitHtml(fit, relaxed) {
+  const parts = fitParts(fit);
+  const words = relaxedText(relaxed);
+  return `${parts ? `<p class="ask-fit">${icon("target", { size: 14 })}<span><b class="num">${esc(parts.got)}</b> <span class="muted">(you asked ${esc(parts.asked)})</span></span>${parts.onTarget ? badge("On target", "good", "check") : ""}</p>` : ""}
+    ${words ? `<p class="ask-relaxed">${icon("sliders", { size: 14 })}<span>${esc(words)}</span></p>` : ""}`;
+}
+
+// --- the likeliest winners (brain_top_picks) --------------------------------------------------------------
+
+const PICK_SOURCES = { blend: "Markets say", books: "books, margin out", model: "goals model", adjusted: "books, adjusted" };
+
+/** A pick as a slip leg ({ref, label, game, ...}), or null when the app's slip can't take it. */
+export function pickLeg(pick) {
+  const ref = pick?.ref || pick?.refs?.[0];
+  if (!ref?.league || ref.id == null || !["h2h", "spreads", "totals"].includes(ref.market)) return null;
+  const price = Number(pick.price);
+  return {
+    ref: { league: ref.league, id: String(ref.id), market: ref.market, side: ref.side, point: ref.point ?? null },
+    label: pick.label, game: pick.game, start: pick.start, league: ref.league,
+    price: Number.isFinite(price) ? price : undefined,
+  };
+}
+
+/** An edge in points with its sign: "+1.2 pts", "−2.1 pts" (the server's share). */
+function edgePts(edge) {
+  const v = Number(edge) * 100;
+  if (edge == null || !Number.isFinite(v)) return "";
+  const text = Math.abs(v) < 0.05 ? "0.0" : Math.abs(v).toFixed(1);
+  return `${v > 0.04 ? "+" : v < -0.04 ? "−" : ""}${text} pts`;
+}
+
+function pickButton(pick, key, i) {
+  const leg = pickLeg(pick);
+  const label = String(pick?.label || "this pick");
+  if (!leg) return `<button type="button" class="btn btn-secondary small" disabled>${icon("plus", { size: 16 })}Add to slip</button>`;
+  const on = slip.has(leg.ref);
+  return on
+    ? `<button type="button" class="btn btn-secondary small" data-pick-add="${esc(key)}:${i}" aria-pressed="true" aria-label="${esc(`${label}: in your slip. Tap to take it out`)}">${icon("check", { size: 16 })}In your slip</button>`
+    : `<button type="button" class="btn btn-primary small" data-pick-add="${esc(key)}:${i}" aria-pressed="false" aria-label="${esc(`Add ${label} to your slip`)}">${icon("plus", { size: 16 })}Add to slip</button>`;
+}
+
+/** The likeliest winners: ranked, each with its chance, price, book, a short why and "Add to slip". */
+export function picksCardHtml(card, key, { stale = "" } = {}) {
+  const picks = (card.picks || []).filter((p) => p && typeof p === "object");
+  return `<article class="card ask-card ask-picks" data-card-key="${esc(key)}" aria-label="${esc(card.title || "Most likely winners")}">
+    <header class="ask-card-head"><div class="grow"><span class="eyebrow">The brain's likeliest winners</span>
+      <h3>${esc(card.title || "Most likely winners")}</h3>
+      <span class="muted small">Highest chance first, one pick a game</span></div></header>
+    <ol class="ask-pick-list">${picks.map((pick, i) => {
+      const league = pick.ref?.league || pick.league;
+      const why = ((pick.why_units && pick.why_units[unitsFor(league)]) || pick.why || []);
+      const lines = (Array.isArray(why) ? why : [why]).filter(Boolean).slice(0, 2);
+      const source = PICK_SOURCES[pick.chance_source] || "";
+      const edge = edgePts(pick.edge);
+      const price = Number(pick.price);
+      return `<li class="ask-pick">
+        <span class="ask-pick-rank" aria-label="${esc(`Number ${pick.rank || i + 1}`)}">${esc(pick.rank || i + 1)}</span>
+        <div class="ask-pick-body">
+          <div class="row-between"><b class="ask-leg-label">${esc(pick.label)}</b><b class="num ask-leg-odds">${esc(Number.isFinite(price) ? priceText({ decimal: price }) : "–")}</b></div>
+          <div class="muted small">${esc(gameText(pick.game, league))}${pick.start ? ` · ${esc(timeLabel(pick.start))}` : ""}${pick.book ? ` · ${esc(pick.book)}` : ""}</div>
+          <div class="small ask-pick-chance">Wins <b class="num">${esc(pct(pick.chance))}</b>${source ? ` <span class="muted">${esc(source)}</span>` : ""}${edge ? ` · edge <b class="num">${esc(edge)}</b>` : ""}</div>
+          ${lines.length ? `<p class="small ask-pick-why">${lines.map(esc).join(" · ")}</p>` : ""}
+        </div>
+        <div class="ask-pick-add" data-pick-slot="${esc(key)}:${i}">${pickButton(pick, key, i)}</div>
+      </li>`;
+    }).join("")}</ol>
+    ${stale ? `<p class="ask-stale">${icon("clock", { size: 14 })}${esc(stale)}</p>` : ""}
+    <p class="small muted">Chances are the brain's; prices are the best at bookmakers you can bet at, as last saved. Check the price where you bet.</p>
+  </article>`;
+}
+
 /** Refresh the Add buttons of the cards on screen after the slip changed. */
 export function syncCardButtons(root, findCard) {
   for (const box of root.querySelectorAll("[data-card-actions]")) {
@@ -226,6 +310,14 @@ export function syncCardButtons(root, findCard) {
     if (!card?.ticket) continue;
     const first = box.querySelector("[data-card-add]");
     if (first) first.outerHTML = addButton(ticketLegs(card.ticket, card.refs), box.dataset.cardActions, "data-card-add", { ticket: card.ticket, disabled: Boolean(blocked(card.ticket)) });
+  }
+  for (const slot of root.querySelectorAll("[data-pick-slot]")) {
+    const [mi, ci, pi] = slot.dataset.pickSlot.split(":");
+    const pick = findCard(`${mi}:${ci}`)?.picks?.[Number(pi)];
+    if (!pick) continue;
+    const had = slot.contains(document.activeElement);
+    slot.innerHTML = pickButton(pick, `${mi}:${ci}`, Number(pi));
+    if (had) slot.querySelector("button")?.focus({ preventScroll: true });
   }
   for (const button of root.querySelectorAll("[data-alt-add]")) {
     const [mi, ci, ai] = button.dataset.altAdd.split(":");
@@ -342,9 +434,10 @@ export function playerCardHtml(card) {
   </article>`;
 }
 
-/** Any card by its type ("ticket", "plan", "player", "pasted"); unknown types show their title only. */
+/** Any card by its type ("ticket", "plan", "player", "pasted", "picks"); unknown types show their title only. */
 export function cardHtml(card, key, options = {}) {
   if (card?.type === "ticket" && card.ticket) return ticketCardHtml(card, key, options);
+  if (card?.type === "picks" && Array.isArray(card.picks)) return picksCardHtml(card, key, options);
   if (card?.type === "pasted" && card.pasted) return pastedCardHtml(card, key, options);
   if (card?.type === "plan" && card.compare) return planCardHtml(card);
   if (card?.type === "player") return playerCardHtml(card);

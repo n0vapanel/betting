@@ -193,13 +193,15 @@ BOARD_MARKETS = {"h2h", "spreads", "totals"}
 SEARCH_TICKETS = builder.MAX_TICKETS  # tickets asked of the builder per bookmaker, before the tier's own checks
 
 
-def tier_controls(tier: Tier) -> builder.Controls:
+def tier_controls(tier: Tier, best_effort: bool = False) -> builder.Controls:
     """The builder's controls for a tier: its preset (engine/presets.py, the tier's windows, leg floors, Whelan cap
     and value rules; still labelled the tier), searching every board market at any start time for as many tickets
     as the builder gives. These legs carry no price age (the board is the latest), so the preset's price-age rule
-    never removes one."""
+    never removes one. Strict (the tier's own tickets, as the AI record logs them) unless ``best_effort``: closest
+    effort, for a level nothing fits exactly (closest_tier)."""
     from .presets import preset
-    return replace(preset(tier.key), markets=set(BOARD_MARKETS), tickets=SEARCH_TICKETS, window=None)
+    return replace(preset(tier.key), markets=set(BOARD_MARKETS), tickets=SEARCH_TICKETS, window=None,
+                   best_effort=best_effort)
 
 
 def _as_candidate(leg: Candidate, now: datetime.datetime, only: Optional[str] = None) -> builder.Candidate:
@@ -271,13 +273,19 @@ def price_book(book: str) -> bool:
     return is_price_book(book)
 
 
+def _eligible(tier: Tier, candidates: Sequence[Candidate]) -> List[Candidate]:
+    """The legs a tier may use: the AI's chance at least MIN_LEG and not below the market's, with prices, and for
+    Safe no more than SAFE_MAX_GAP from the market."""
+    return [leg for leg in candidates
+            if leg.probability >= MIN_LEG and leg.prices and (leg.fair is None or leg.probability >= leg.fair - 0.01)
+            and (tier.key != "safe" or abs(leg.gap or 0.0) <= SAFE_MAX_GAP)]
+
+
 def build_tier(tier: Tier, candidates: Sequence[Candidate], count: int = 3,
                now: Optional[datetime.datetime] = None) -> List[Ticket]:
     """Up to ``count`` tickets for one tier, best first, sharing at most one leg with each other: the builder's
     tickets under the tier's preset, each at the one bookmaker that offers all its legs at the best price."""
-    legs = [leg for leg in candidates
-            if leg.probability >= MIN_LEG and leg.prices and (leg.fair is None or leg.probability >= leg.fair - 0.01)
-            and (tier.key != "safe" or abs(leg.gap or 0.0) <= SAFE_MAX_GAP)]
+    legs = _eligible(tier, candidates)
     # Only books a person can bet at (_search): Pinnacle and the exchanges anchor the consensus, never a ticket
     best: Dict[frozenset, Ticket] = {}
     for ticket in _search(tier, legs, now):
@@ -298,6 +306,43 @@ def build_tier(tier: Tier, candidates: Sequence[Candidate], count: int = 3,
         if len(chosen) == count:
             break
     return chosen
+
+
+def closest_tier(tier: Tier, candidates: Sequence[Candidate], count: int = 3,
+                 now: Optional[datetime.datetime] = None) -> List[Tuple[Ticket, List[str]]]:
+    """Closest effort for a level nothing fits exactly: the builder under the tier's preset with best_effort on (it
+    loosens the most binding rule a step at a time until a ticket comes out), from the same legs as the tier's own
+    search, each ticket placed at the one bookmaker that offers all its legs at the best price, with the rules that
+    were relaxed for it in the builder's words ("per-leg chance lowered from 72% to 67%"). Up to ``count``."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    by_key: Dict[str, Candidate] = {}
+    candidates_ = []
+    for leg in _eligible(tier, candidates):
+        if any(price_book(book) for book in leg.prices):
+            candidate = _as_candidate(leg, now)
+            by_key[candidate.key] = leg
+            candidates_.append(candidate)
+    if not candidates_:
+        return []
+    controls = replace(tier_controls(tier, best_effort=True), tickets=max(1, min(count, builder.MAX_TICKETS)))
+    out: List[Tuple[Ticket, List[str]]] = []
+    for ticket in builder.build(candidates_, controls, now, weights=builder.RETURN_ONLY).tickets:
+        chosen = [by_key.get(view.get("key")) for view in ticket.get("legs") or []]
+        if not chosen or any(leg is None for leg in chosen):
+            continue
+        books = set.intersection(*({b for b in leg.prices if price_book(b)} for leg in chosen))
+        if not books:
+            continue
+        placed = max((Ticket(chosen, book) for book in books), key=lambda t: (t.decimal, t.book))
+        words = []
+        for entry in ticket.get("relaxed") or []:
+            text = entry.get("words") if isinstance(entry, dict) else None
+            if text and text not in words:
+                words.append(text)
+        out.append((placed, words))
+        if len(out) == count:
+            break
+    return out
 
 
 def _american(decimal: float) -> str:
@@ -360,18 +405,24 @@ VIG_NOTE = ("Each extra leg adds the bookmaker's cut again: on NBA moneylines ab
 
 
 def build_all(candidates: Sequence[Candidate], count: int = 3, value_proven: bool = False,
-              now: Optional[datetime.datetime] = None) -> Dict[str, Dict[str, Any]]:
-    """Each tier's tickets (build_tier) as the app and the bot show them, and as the AI record logs them."""
+              now: Optional[datetime.datetime] = None, best_effort: bool = True) -> Dict[str, Dict[str, Any]]:
+    """Each tier's tickets (build_tier) as the app and the bot show them, and as the AI record logs them ("bets":
+    only tickets that fit the tier). With ``best_effort`` a tier nothing fits gets its closest tickets instead
+    ("closest", closest_tier: each view labelled "Closest to <tier>" with the rules relaxed, in words); they are
+    never logged as the tier's own."""
     out = {}
     for tier in TIERS:
         tickets = build_tier(tier, candidates, count, now)
+        closest = closest_tier(tier, candidates, count, now) if best_effort and not tickets else []
         out[tier.key] = {
             "title": tier.title,
             "rule": tier.subtitle,
             "detail": (f"AI chance {tier.p_low:.0%}{'+' if tier.p_high > 1 else f'-{tier.p_high:.0%}'}, "
                        f"up to {tier.max_legs} legs, paying {tier.odds_low:.2f}x-{tier.odds_high:g}x."),
             "bets": [ticket_view(tier, ticket, value_proven) for ticket in tickets],
-            "empty": None if tickets else "Nothing fits this level right now: the AI lays off.",
+            "closest": [{**ticket_view(tier, ticket, value_proven), "label": f"Closest to {tier.title}",
+                         "relaxed": words} for ticket, words in closest],
+            "empty": None if tickets else "Nothing fits this level right now.",
         }
     return out
 

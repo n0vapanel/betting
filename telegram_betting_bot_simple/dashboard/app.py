@@ -276,7 +276,12 @@ class BuilderControls(BaseModel):
     exclude_started: Optional[bool] = None
     legs: Optional[int] = Field(None, ge=1, le=12)
     target_odds: Optional[float] = Field(None, ge=1.01, le=1_000_000)
+    # The chance the whole ticket wins that the person wants (0.8 for 80%): with target_odds, labelled options
+    target_chance: Optional[float] = Field(None, ge=0.01, le=0.99)
     tolerance_pct: Optional[float] = Field(None, ge=0, le=90)
+    # Closest effort (the default): when nothing meets every rule, the closest tickets with the rules relaxed named;
+    # false is strict, only exactly what was asked
+    best_effort: Optional[bool] = None
     leg_odds_min: Optional[float] = Field(None, ge=1.01, le=1000)
     leg_odds_max: Optional[float] = Field(None, ge=1.01, le=1000)
     min_chance: Optional[float] = Field(None, ge=0, le=1)
@@ -324,6 +329,7 @@ class BuilderPriceBody(BaseModel):
     stake: Optional[Money] = None
     books: Optional[List[BookKey]] = Field(None, min_length=1, max_length=20)
     target_odds: Optional[float] = Field(None, ge=1.01, le=1_000_000)
+    target_chance: Optional[float] = Field(None, ge=0.01, le=0.99)  # with a target, the answer's ``fit``
     tolerance_pct: Optional[float] = Field(None, ge=0, le=90)
 
 
@@ -1079,7 +1085,10 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     def builder_run(body: BuilderRunBody, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
         """Build up to 5 tickets that share no leg (engine/builder.py) from what is already in hand: the slate, the
         saved odds boards and "Markets say". Nothing is fetched; leagues without prices are named, and the slate's
-        throttled background loader is asked for their odds. 400 with the reason during a break or the pause."""
+        throttled background loader is asked for their odds. With closest effort (the default) a request that can't
+        be met exactly gets the closest tickets: each carries ``fit`` (how close it gets) and ``relaxed`` (the rules
+        loosened, in words), and ``options`` labels them when both target odds and a target chance were given. 400
+        with the reason during a break or the pause."""
         return lab_call(lambda: lab.builder_run(uid, body.model_dump(mode="json", exclude_unset=True,
                                                                      by_alias=True)))
 

@@ -66,6 +66,49 @@ target is out of reach, fewer legs or a higher one when even the shortest legs p
 when one ruled out every combination that could land, a wider tolerance when none lands. Near misses are the
 legs closest to passing (at most 2 a game, up to 12), with leagues that have no prices loaded on top.
 
+Closest effort (``best_effort``, on by default; v3 "best effort"). The Builder always builds: asked for something it
+can't meet exactly, it returns the closest tickets it can make, each saying how close it gets.
+
+- What a run aims for: with ``target_odds`` only, odds inside the window as above; with ``target_chance`` only (the
+  chance the whole ticket wins: every leg winning), the highest odds whose chance is at least the target (with the
+  person's rules, never the number of legs, loosened round by round until a ticket reaches it), else the highest
+  chance there is (with the rules those rounds loosened); with both, tickets that meet both (a normal run), else up to
+  three labelled options: ``your_odds`` (inside the odds window, the highest chance), ``your_chance`` (the chance
+  target at the highest odds, its rules loosened as for a target chance alone, else the highest chance there is)
+  and ``closest`` (the smallest d = |ln(odds / target)| / ln(1 + tolerance) + |chance - target chance| / 0.10 of
+  any ticket the rules never loosened allow: "Best balance"). Each option
+  loosens the person's rules only as far as it needs. Options that pick the same ticket are merged under the
+  first label. A target replaces the preset's own odds and chance band.
+- When the person's rules give fewer tickets than asked (or none), the rules are loosened in rounds, one step of
+  the most binding rule at a time (from the run's own counts: what each rule removed, why a round's bounds failed,
+  and which rule ruled out the combinations a search landed in the window, which binds before more legs), in
+  this order: the
+  per-leg chance floors (5 points a step, down to none), the leg-odds band (25% wider a step, twice, then
+  dropped), the minimum edge, the joint chance band (no target), the value rules (the Whelan cap, Safe's 3-leg
+  rule, the expected-result floor, the cap on the bookmaker's cut), the odds window (tolerance 10, 20, 35, 60%;
+  a preset's band 10, 20, 35, 60% wider) and last, for an exact number of legs, 1 then 2 legs either way. The
+  rounds stop at the first one that finds tickets; a round whose bounds show it can't land a ticket (the longest
+  legs can't reach the window, the likeliest can't reach the chance floor) is recorded without a search. If
+  nothing is found at all while some leg passes the rules never loosened, a last round drops every rule closest
+  effort may loosen and the window and takes the nearest odds there are: at the number of legs asked first, then 1
+  and 2 either way, then any number up to it, so a run never ends empty while a leg is eligible.
+- The work is bounded (RELAX_BUDGET combinations, deterministic, unlike a clock), shared out so one objective can't
+  starve the next (with both targets: a third for tickets that meet both, then half of what is left for each
+  option): once what is left is less than the last try cost, the next round that would search isn't searched and
+  the rounds end. The tries that must run still do (each option's try at the person's own rules, the target chance's
+  search at the rules its rounds reached, the last round), and once the budget is spent the searches that top their
+  tickets up are narrow ones (a smaller pool and beam).
+- Never loosened: started games, the price-age limit, price books only, one leg per game, the team and league
+  caps, the markets chosen, the leagues, time and kick-off windows, the excluded flags (disagreement, thin, low
+  confidence, fair odds) and Safe's limit on the gap to the books.
+- Every ticket carries ``fit`` (its odds and chance against the targets; None without a target) and ``relaxed``
+  ([{rule, from, to, words}]: only the rules this ticket needed loosened, at the tightest step that admits it,
+  e.g. "per-leg chance lowered from 72% to 52%"; its swaps stay within those steps); the result carries
+  ``options`` and, in ``stats["relaxation"]``, every step taken (Best balance's search too, objective
+  "closest"). ``best_effort`` False (strict) runs exactly as before closest effort existed.
+
+``top_picks`` ranks single legs by the brain's chance (the likeliest winners, one a game).
+
 This module imports engine.bets and engine.tickets inside functions only, so engine/bets.py and
 engine/target.py may import it at module level.
 """
@@ -81,7 +124,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from .consensus import SHARP_BOOKS
 
@@ -114,6 +157,10 @@ BEAM_WIDTH = 200
 BEAM_BUCKETS = 20  # the beam keeps its partial tickets spread across this many odds buckets
 PER_GAME_POOL = 3  # best legs a game may put in a pool
 HEAP_KEEP = 400  # best tickets kept for picking diverse ones
+# Closest effort's top-ups once its budget is spent search a narrower pool and beam (about a tenth of the work)
+NARROW_POOL = 20
+NARROW_BEAM_POOL = 30
+NARROW_WIDTH = 50
 MAX_TICKETS = 5
 MAX_SWAPS = 3
 MAX_NEAR_MISSES = 12  # legs; leagues with no prices loaded come on top
@@ -129,6 +176,45 @@ MAX_TARGET_ODDS = 1_000_000.0
 MAX_AGE_S = 7 * 24 * 3600
 _EPS = 1e-9
 _TINY = 1e-9
+
+# Closest effort (see the module docstring)
+OPTION_KEYS: Tuple[str, ...] = ("your_odds", "your_chance", "closest")
+OPTION_LABELS: Dict[str, str] = {"your_odds": "Likeliest at your odds", "your_chance": "Closest to your chance",
+                                 "closest": "Best balance"}
+RELAX_ORDER: Tuple[str, ...] = ("floors", "leg_odds", "min_edge", "joint", "value", "window", "legs")
+# The rule groups alone (1-5): what a search for the target chance loosens before it settles for the highest chance
+RULE_GROUPS: Tuple[str, ...] = RELAX_ORDER[:5]
+FLOOR_STEP = 0.05  # the per-leg chance floors drop 5 points a round
+LEG_BAND_STEP = 1.25  # the leg-odds band widens 25% a round ...
+LEG_BAND_STEPS = 2  # ... twice, then it is dropped
+TOLERANCE_STEPS: Tuple[float, ...] = (10.0, 20.0, 35.0, 60.0)  # the odds window around a target, in %
+BAND_STEPS: Tuple[float, ...] = (1.10, 1.20, 1.35, 1.60)  # a preset's ticket-odds band, widened alike
+LEG_STEPS = 2  # an exact number of legs: 1, then 2 either way
+CHANCE_UNIT = 0.10  # closest: 10 points of chance weigh as much as the tolerance on the odds
+MIN_CLOSE_TOL = 0.01  # closest's odds term with a 0% tolerance: as if it were 1%
+TIE = 0.001  # breaks ties in the odds and chance objectives
+# The work closest effort may do in all, in combinations tried (deterministic, unlike a clock): a round that would
+# search isn't searched when what is left is less than the last try cost; the tries that must run still do (narrow
+# top-ups once it's spent)
+RELAX_BUDGET = 300_000
+# Closest effort's searches of 1 to 3 legs see a wider pool than POOL_K: as many legs as keep C(K, n) within about
+# C(40, 4), the exhaustive search's own work at 4 legs (447 legs for pairs, 85 for trebles); the run at the person's
+# own rules keeps POOL_K
+WIDE_COMBOS = 100_000
+MAX_ROUNDS = 64
+VALUE_RULE_KEYS: Dict[str, str] = {"three_leg": "three_leg_min", "min_ev": "min_ev", "book_cut": "max_book_cut"}
+# Why a round found too little (_feasible's reasons), by what can mend it: more legs, and longer ones (a lower chance
+# floor or a higher leg-odds cap: the legs it adds are less likely, so longer), or shorter, likelier ones (a lower
+# leg-odds minimum)
+MORE_LEGS: Set[str] = {"legs", "games", "reach", "value"}
+SHORTER_LEGS: Set[str] = {"legs", "games", "floor", "chance", "joint_min", "value"}
+# Which way each stepped rule loosens (a ticket's relaxed "to"): +1 higher is looser, -1 lower is looser (odds_band:
+# wider); the rest are only ever dropped
+LOOSER: Dict[str, int] = {"min_chance": -1, "multi_leg_min": -1, "leg_odds_min": -1, "leg_odds_max": 1,
+                          "tolerance_pct": 1, "odds_band": 0, "legs": 0}
+# Ticket rules that rule out combinations already inside the window: when a search shows them, they bind before the
+# rules that only let more legs in
+INSIDE_RULES: Tuple[str, ...] = ("joint_min", "joint_max", "whelan", "three_leg", "min_ev", "book_cut")
 
 _LEAGUE = re.compile(r"[a-z0-9_]{1,64}")
 _HHMM = re.compile(r"([01]\d|2[0-3]):([0-5]\d)")
@@ -219,6 +305,12 @@ def age_text(seconds: Union[int, float]) -> str:
     return f"{hours} h" if rest == 0 else f"{hours} h {rest} min"
 
 
+def _a_pct(p: float) -> str:
+    """A chance with its article: "an 80%", "an 11%", "a 70%"."""
+    text = _pct(p)
+    return ("an " if re.match(r"8|1[18](?![0-9])", text) else "a ") + text
+
+
 def _pct(p: float) -> str:
     """A chance in words: whole percents, one decimal below 10%, two significant figures below 1%."""
     if p >= 0.1 or p <= 0:
@@ -290,6 +382,12 @@ class Controls:
     joint band is on the chance the ticket wins money (a pushed leg drops out at 1). The old tiers' rules on a
     ticket's value (presets.VALUE_RULES: the expected-value floor, the cap on the books' cut, Safe's 3-leg floor
     and its limit on the gap to the books) apply while a run is exactly a preset.
+
+    ``target_chance`` (0.01-0.99) is the chance the whole ticket wins (every leg) that the person wants; with or
+    without ``target_odds`` it changes what a run aims for (see the module docstring), and like a target odds it
+    replaces the preset's band. ``best_effort`` (closest effort, on by default) returns the closest tickets when the
+    rules give fewer than asked; False is strict: only exactly what was asked, as before closest effort. It doesn't
+    change the risk of a ticket that meets the rules, so it keeps the preset's name (presets.SCOPE_FIELDS).
     """
 
     leagues: Optional[List[str]] = None  # None = every league
@@ -298,7 +396,9 @@ class Controls:
     exclude_started: bool = True
     legs: Optional[int] = None  # None = Auto (1 to legs_max)
     target_odds: Optional[float] = None
+    target_chance: Optional[float] = None  # the chance the whole ticket wins, e.g. 0.8
     tolerance_pct: float = 10.0
+    best_effort: bool = True  # closest effort: the closest tickets when nothing fits exactly; False = strict
     leg_odds_min: Optional[float] = None
     leg_odds_max: Optional[float] = None
     min_chance: Optional[float] = None
@@ -350,7 +450,9 @@ class Controls:
         self.exclude_started = _flag(self.exclude_started, "exclude_started")
         self.legs = _integer(self.legs, "legs", 1, MAX_LEGS)
         self.target_odds = _number(self.target_odds, "target_odds", 1.01, MAX_TARGET_ODDS)
+        self.target_chance = _number(self.target_chance, "target_chance (a share: 0.8 for 80%)", 0.01, 0.99)
         self.tolerance_pct = _number(self.tolerance_pct, "tolerance_pct", 0.0, 90.0, optional=False)
+        self.best_effort = _flag(self.best_effort, "best_effort")
         self.leg_odds_min = _number(self.leg_odds_min, "leg_odds_min", 1.0, 1000.0)
         self.leg_odds_max = _number(self.leg_odds_max, "leg_odds_max", 1.01, 1000.0)
         if self.leg_odds_min is not None and self.leg_odds_max is not None and self.leg_odds_min > self.leg_odds_max:
@@ -705,6 +807,15 @@ class _Context:
     min_ev: Optional[float] = None  # presets.VALUE_RULES while the run is exactly a preset
     max_book_cut: Optional[float] = None
     three_leg_min: Optional[float] = None
+    # Closest effort: what the search aims for ("weights": the preset's score, as before; "odds": the highest odds;
+    # "chance": the highest chance; "closest": the smallest distance to both targets; "near": the odds nearest the
+    # target), a floor on the joint chance (every leg wins; -inf for none) and closest's scales
+    objective: str = "weights"
+    log_cmin: float = -math.inf
+    target_chance: Optional[float] = None
+    close_tol: float = math.log(1.1)
+    wide: bool = False  # closest effort's searches: a wider exhaustive pool for 1 to 3 legs (WIDE_COMBOS)
+    narrow: bool = False  # closest effort's top-ups once its budget is spent (NARROW_POOL, NARROW_WIDTH)
 
     def whelan_max(self, geometric_mean: float) -> int:
         """engine/bets.py's whelan_max_legs, from thresholds read once per build."""
@@ -721,8 +832,23 @@ class _Context:
         return abs(gap) / span
 
     def score(self, n: int, ld: float, lc: float, lf: float) -> float:
-        w = self.weights
-        return -w.target * self.close(ld) + w.ret * lf + w.chance * lc - LEG_PENALTY * n
+        objective = self.objective
+        if objective == "weights":
+            w = self.weights
+            return -w.target * self.close(ld) + w.ret * lf + w.chance * lc - LEG_PENALTY * n
+        if objective == "odds":
+            return ld + TIE * lc - LEG_PENALTY * n
+        if objective == "chance":
+            return lc + TIE * ld - LEG_PENALTY * n
+        if objective == "near":
+            return -abs(ld - (self.log_target or 0.0)) + TIE * lc - LEG_PENALTY * n
+        return -self.distance(ld, lc) - LEG_PENALTY * n
+
+    def distance(self, ld: float, lc: float) -> float:
+        """closest's d: the odds' distance from the target in tolerances plus the chance's in 10-point units."""
+        odds = abs(ld - self.log_target) / self.close_tol if self.log_target is not None else 0.0
+        chance = abs(math.exp(lc) - self.target_chance) / CHANCE_UNIT if self.target_chance is not None else 0.0
+        return odds + chance
 
     def wins_money(self, lc: float, legs: Sequence["_Leg"]) -> float:
         """The chance the ticket pays more than the stake: no leg loses and not every leg pushes (a pushed leg drops
@@ -739,6 +865,8 @@ class _Context:
             return "odds_low"
         if ld > self.log_hi + _EPS:
             return "odds_high"
+        if lc < self.log_cmin - _EPS:
+            return "target_chance"
         if self.log_jmin > -math.inf or self.joint_max is not None:
             wins = self.wins_money(lc, legs)
             if self.log_jmin > -math.inf and math.log(max(wins, _TINY)) < self.log_jmin - _EPS:
@@ -762,7 +890,8 @@ class _Context:
 SCOPE_RULES = ("league", "market", "window", "kickoff", "started", "no_chance")
 QUALITY_RULES = ("books", "max_price_age", "leg_odds_min", "leg_odds_max", "min_chance", "min_edge", "max_gap",
                  "disagree", "thin", "low_conf", "model_price")
-TICKET_RULES = ("odds_low", "odds_high", "joint_min", "joint_max", "whelan", "caps", "three_leg", "min_ev", "book_cut")
+TICKET_RULES = ("odds_low", "odds_high", "joint_min", "joint_max", "whelan", "caps", "three_leg", "min_ev", "book_cut",
+                "target_chance")
 
 
 def _local_minutes(moment: datetime.datetime, zone: datetime.tzinfo) -> int:
@@ -780,7 +909,8 @@ def _hhmm(text: Optional[str]) -> Optional[int]:
 class _Rules:
     """Every candidate rule of one set of controls, with the words for each."""
 
-    def __init__(self, controls: Controls, label: str, now: datetime.datetime) -> None:
+    def __init__(self, controls: Controls, label: str, now: datetime.datetime,
+                 value_off: Iterable[str] = ()) -> None:
         self.controls, self.label, self.now = controls, label, now
         self.zone = _zone(controls.tz)
         self.leagues = set(controls.leagues) if controls.leagues else None
@@ -793,6 +923,8 @@ class _Rules:
         safe = label == "Safe"
         from .presets import value_rules
         self.value = value_rules(label)  # the old tier's rules on a ticket's value, while the run is that preset
+        for rule in value_off:  # closest effort dropped these (never Safe's gap to the books)
+            self.value.pop(VALUE_RULE_KEYS[rule], None)
         self.max_gap: Optional[float] = self.value.get("max_gap")
         self.exclude_low_conf = controls.exclude_low_conf or safe
         self.exclude_model_price = controls.exclude_model_price or safe
@@ -950,6 +1082,7 @@ class _Rules:
             "three_leg": f"every leg {_pct(self.value.get('three_leg_min') or 0)}+ on a 3-leg ticket ({self.label})",
             "min_ev": f"expected result {(self.value.get('min_ev') or 0) * 100:+.0f}% or better ({self.label})",
             "book_cut": f"bookmaker's cut up to {_pct(self.value.get('max_book_cut') or 0)} ({self.label})",
+            "target_chance": f"{_a_pct(c.target_chance or 0)}+ chance for the whole ticket",
         }
         if rule in ("odds_low", "odds_high"):
             return _window_words(c)
@@ -971,11 +1104,19 @@ def _caps_words(controls: Controls) -> str:
 
 
 def _window(controls: Controls) -> Tuple[float, float]:
-    """The ticket's odds window: target +/- tolerance, else the preset's band, else anything."""
+    """The ticket's odds window: target +/- tolerance, else the preset's band, else anything. A target chance
+    alone replaces the band too: it sets the ticket, at any odds."""
     if controls.target_odds is not None:
         tol = controls.tolerance_pct / 100.0
         return controls.target_odds * (1 - tol), controls.target_odds * (1 + tol)
+    if controls.target_chance is not None:
+        return 1.0, math.inf
     return (controls.odds_min or 1.0), (controls.odds_max or math.inf)
+
+
+def _targeted(controls: Controls) -> bool:
+    """Whether the person gave a target (odds or chance): then the preset's band doesn't apply."""
+    return controls.target_odds is not None or controls.target_chance is not None
 
 
 def _window_words(controls: Controls) -> str:
@@ -1004,6 +1145,9 @@ class Result:
     ideas: List[Dict[str, Any]] = field(default_factory=list)
     target: Optional[Dict[str, Any]] = None
     stake: str = "10.00"
+    # Closest effort's labelled options when both targets were given and no ticket meets both: [{key, label,
+    # ticket_index}] (key "your_odds", "your_chance" or "closest"); empty otherwise
+    options: List[Dict[str, Any]] = field(default_factory=list)
     # The first search's best tickets (score, leg keys), best first: for engine/target.py and engine/bets.py, which
     # pick by their own rules; not part of the JSON
     ranked: List[Tuple[float, Tuple[str, ...]]] = field(default_factory=list, repr=False)
@@ -1012,7 +1156,7 @@ class Result:
         return {"label": self.label, "preset": self.controls.preset, "controls": self.controls.to_dict(),
                 "tickets": self.tickets, "near_misses": self.near_misses, "blocked": self.blocked,
                 "stats": self.stats, "notes": self.notes, "ideas": self.ideas, "target": self.target,
-                "stake": self.stake}
+                "stake": self.stake, "options": self.options}
 
 
 # --- the search ---------------------------------------------------------------------------------------
@@ -1064,8 +1208,23 @@ def _pool(legs: Sequence[_Leg], ctx: _Context, size: int, sizes: Set[int], near:
     n_max = max(sizes)
     top = max(leg.ld for leg in legs)
     fits = [leg for leg in legs if leg.ld <= ctx.log_hi + _EPS and leg.ld + top * (n_max - 1) >= ctx.log_lo - _EPS]
+    if ctx.log_cmin > -math.inf:  # a chance floor: a leg less likely than the floor is in no ticket that meets it
+        fits = [leg for leg in fits if leg.lc >= ctx.log_cmin - _EPS]
     if len(fits) <= size:
         return sorted(fits, key=lambda leg: (-leg.q, leg.key)), False  # everything fits: the search sees every leg
+    if ctx.objective == "odds" and ctx.log_cmin > -math.inf:
+        # The highest odds at a chance floor: half the pool the best value whatever the price, half the legs whose
+        # chance is nearest a per-leg share of the floor (so the pool's legs can multiply to it)
+        shares = [ctx.log_cmin / n for n in sorted(sizes)]
+
+        def share_gap(leg: _Leg) -> float:
+            return min(abs(leg.lc - share) / max(abs(share), _TINY) for share in shares)
+
+        nearest = sorted(fits, key=lambda leg: (share_gap(leg), -leg.le, leg.key))
+        if near:
+            return _take(nearest, size, []), True
+        out = _take(sorted(fits, key=lambda leg: (-leg.le, leg.key)), size - size // 2, [])
+        return _take(nearest, size, out), True
     ideals = _ideals(ctx, sizes)
 
     def distance(leg: _Leg) -> float:
@@ -1137,7 +1296,7 @@ def _exhaustive(pool: List[_Leg], sizes: Set[int], ctx: _Context, found: _Found)
     count = len(pool)
     n_max = max(sizes)
     top = max(leg.ld for leg in pool)
-    log_lo, log_hi, log_jmin = ctx.log_lo, ctx.log_hi, ctx.log_jmin
+    log_lo, log_hi, log_jmin, log_cmin = ctx.log_lo, ctx.log_hi, ctx.log_jmin, ctx.log_cmin
     team_count: Dict[int, int] = {}
     league_count: Dict[int, int] = {}
     chosen: List[_Leg] = []
@@ -1162,10 +1321,13 @@ def _exhaustive(pool: List[_Leg], sizes: Set[int], ctx: _Context, found: _Found)
             if nlw < log_jmin - _EPS:
                 rejected["joint_min"] += could
                 continue
+            nlc = lc + leg.lc
+            if nlc < log_cmin - _EPS:  # more legs only lower the chance
+                rejected["target_chance"] += could
+                continue
             if not _caps_ok(leg, team_count, league_count, ctx):
                 rejected["caps"] += could
                 continue
-            nlc = lc + leg.lc
             nlf = lf + leg.lf
             chosen.append(leg)
             for t in leg.teams:
@@ -1213,6 +1375,7 @@ def _beam(pool: List[_Leg], sizes: Set[int], ctx: _Context, found: _Found) -> No
     TB = [sum(1 << t for t in set(teams)) for teams in TEAMS]
     ld_min, ld_max = min(LD), max(LD)
     log_jmin = ctx.log_jmin - _EPS
+    log_cmin = ctx.log_cmin - _EPS
     w_ret, w_chance = ctx.weights.ret, ctx.weights.chance
     # With a target every finished ticket lands near the same odds, so the joint chance's taste for short prices
     # cancels out there: partial tickets are ranked whatever their price (as _pool ranks legs), else the beam drifts
@@ -1220,11 +1383,12 @@ def _beam(pool: List[_Leg], sizes: Set[int], ctx: _Context, found: _Found) -> No
     w_price = w_chance if ctx.log_target is not None else 0.0
     team_cap, league_cap = ctx.team_cap, ctx.league_cap
     single_team = team_cap == 1
-    per_bucket = max(1, BEAM_WIDTH // BEAM_BUCKETS)
+    width = NARROW_WIDTH if ctx.narrow else BEAM_WIDTH
+    per_bucket = max(1, width // BEAM_BUCKETS)
     # A state: (log odds, log chance, log chance of not losing, log cautious return, games, teams mask, team list,
     # league list, legs mask, leg indexes)
     states: List[Tuple[Any, ...]] = [(0.0, 0.0, 0.0, 0.0, 0, 0, (), (), 0, ())]
-    tried = too_low = too_high = joint_cut = caps_cut = 0
+    tried = too_low = too_high = joint_cut = caps_cut = chance_cut = 0
     for depth in range(1, n_max + 1):
         remaining = n_max - depth
         high = ctx.log_hi + _EPS - (remaining * ld_min if fixed else 0.0)  # the shortest legs left still fit
@@ -1246,6 +1410,10 @@ def _beam(pool: List[_Leg], sizes: Set[int], ctx: _Context, found: _Found) -> No
                 if nlw < log_jmin:
                     joint_cut += 1
                     continue
+                nlc = lc + LC[j]
+                if nlc < log_cmin:
+                    chance_cut += 1
+                    continue
                 if single_team:
                     if tmask & TB[j]:
                         caps_cut += 1
@@ -1257,7 +1425,6 @@ def _beam(pool: List[_Leg], sizes: Set[int], ctx: _Context, found: _Found) -> No
                     caps_cut += 1
                     continue
                 tried += 1
-                nlc = lc + LC[j]
                 nlf = lf + LF[j]
                 nq = w_ret * nlf + w_chance * nlc + w_price * nld
                 nmask = mask | (1 << j)
@@ -1291,11 +1458,11 @@ def _beam(pool: List[_Leg], sizes: Set[int], ctx: _Context, found: _Found) -> No
             if taken.get(bucket, 0) < per_bucket:
                 taken[bucket] = taken.get(bucket, 0) + 1
                 keep.append(item)
-                if len(keep) == BEAM_WIDTH:
+                if len(keep) == width:
                     break
             else:
                 rest.append(item)
-        keep += rest[: max(0, BEAM_WIDTH - len(keep))]
+        keep += rest[: max(0, width - len(keep))]
         next_states = []
         for nmask, (nq, nld, nlc, nlw, nlf, si, j) in keep:
             ld, lc, lw, lf, games, tmask, teams, leagues, mask, legs = states[si]
@@ -1304,7 +1471,8 @@ def _beam(pool: List[_Leg], sizes: Set[int], ctx: _Context, found: _Found) -> No
                                 leagues + (LG[j],) if league_cap is not None else leagues, nmask, legs + (j,)))
         states = next_states
     ctx.tried += tried
-    for rule, cut in (("odds_low", too_low), ("odds_high", too_high), ("joint_min", joint_cut), ("caps", caps_cut)):
+    for rule, cut in (("odds_low", too_low), ("odds_high", too_high), ("joint_min", joint_cut), ("caps", caps_cut),
+                      ("target_chance", chance_cut)):
         ctx.rejected[rule] += cut
 
 
@@ -1316,25 +1484,38 @@ def _search(legs: Sequence[_Leg], ctx: _Context) -> List[Tuple[float, Tuple[_Leg
     found = _Found()
     small = {n for n in ctx.sizes if n <= EXHAUSTIVE_MAX}
     large = {n for n in ctx.sizes if n > EXHAUSTIVE_MAX}
+    size = NARROW_POOL if ctx.narrow else _pool_size(max(small)) if ctx.wide and small else POOL_K
+    beam_pool = NARROW_BEAM_POOL if ctx.narrow else BEAM_POOL
     multi = [leg for leg in legs if leg.multi_ok]
     cut = False
     for near in (False, True):
         if near:
-            if not cut or found.heap or not _ideals(ctx, ctx.sizes):
+            if not cut or found.heap or not (_ideals(ctx, ctx.sizes)
+                                             or (ctx.objective == "odds" and ctx.log_cmin > -math.inf)):
                 break
             first = dict(ctx.rejected)
             ctx.rejected = {rule: 0 for rule in first}
         if small:
-            pool, left_out = _pool(legs, ctx, POOL_K, small, near)
+            pool, left_out = _pool(legs, ctx, size, small, near)
             _exhaustive(pool, small, ctx, found)
             cut = cut or left_out
         if large:
-            pool, left_out = _pool(multi, ctx, BEAM_POOL, large, near)
+            pool, left_out = _pool(multi, ctx, beam_pool, large, near)
             _beam(pool, large, ctx, found)
             cut = cut or left_out
         if near:
             ctx.rejected = {rule: max(count, first.get(rule, 0)) for rule, count in ctx.rejected.items()}
     return found.ranked()
+
+
+def _pool_size(n: int) -> int:
+    """The widest pool whose n-leg combinations stay within WIDE_COMBOS (never below POOL_K)."""
+    k = POOL_K
+    if n <= 1:
+        return WIDE_COMBOS
+    while math.comb(k + 1, n) <= WIDE_COMBOS:
+        k += 1
+    return k
 
 
 def _disjoint(ranked: Sequence[Tuple[float, Tuple[_Leg, ...]]], used: Set[str], want: int
@@ -1402,8 +1583,9 @@ def _why_units(cand: Candidate) -> Dict[str, Any]:
 
 
 def _swaps(legs: Tuple[_Leg, ...], index: int, passing: Sequence[_Leg], taken: Set[str], ctx: _Context,
-           base_score: float) -> List[Dict[str, Any]]:
-    """Up to MAX_SWAPS legs that can replace legs[index] and keep every rule (and no leg of another ticket)."""
+           base_score: float, keep: Optional[Callable[[Sequence[_Leg]], bool]] = None) -> List[Dict[str, Any]]:
+    """Up to MAX_SWAPS legs that can replace legs[index] and keep every rule (and no leg of another ticket); with
+    ``keep``, only those whose ticket it keeps (closest effort's: no rule loosened further than the ticket says)."""
     n = len(legs)
     others = [leg for i, leg in enumerate(legs) if i != index]
     ld = sum(leg.ld for leg in others)
@@ -1430,14 +1612,27 @@ def _swaps(legs: Tuple[_Leg, ...], index: int, passing: Sequence[_Leg], taken: S
             continue
         options.append((ctx.score(n, nld, nlc, nlf), leg, nld, nlc))
     options.sort(key=lambda item: (-item[0], item[1].key))
+    if keep is not None:
+        kept = []
+        for item in options:
+            if keep(others + [item[1]]):
+                kept.append(item)
+                if len(kept) == MAX_SWAPS:
+                    break
+        options = kept
     return [_swap_view(leg, math.exp(nld), math.exp(nlc), score, base_score)
             for score, leg, nld, nlc in options[:MAX_SWAPS]]
 
 
 def _ticket(rank: int, score: float, legs: Tuple[_Leg, ...], ctx: _Context, label: str, stake: Decimal,
-            now: datetime.datetime, passing: Sequence[_Leg], taken: Set[str]) -> Dict[str, Any]:
+            now: datetime.datetime, passing: Sequence[_Leg], taken: Set[str],
+            asked: Optional[Controls] = None, keep: Optional[Callable[[Sequence[_Leg]], bool]] = None
+            ) -> Dict[str, Any]:
+    """One finished ticket. ``ctx`` and ``passing`` are the search's (closest effort's loosened rules: its swaps keep
+    them, and ``keep`` holds them to the ticket's own relaxed words); ``asked`` is the person's own controls (the
+    target, the tolerance and the leg count they asked for)."""
     from .tickets import price_ticket
-    controls = ctx.controls
+    controls = asked or ctx.controls
     legs = tuple(sorted(legs, key=lambda leg: (leg.cand.start, leg.key)))
     n = len(legs)
     priced = price_ticket([_ticket_leg(leg) for leg in legs], "single" if n == 1 else "multi", stake, now=now)
@@ -1452,7 +1647,7 @@ def _ticket(rank: int, score: float, legs: Tuple[_Leg, ...], ctx: _Context, labe
     notes = ticket_notes([(leg.cand.label, leg.cand.flags, leg.book) for leg in legs], profit, label == "Crazy",
                          lose=lose)
     worth = ctx.whelan_max(joint ** (1 / n)) if n >= 2 and joint > 0 else n
-    if controls.legs is not None and controls.whelan and n > worth:
+    if controls.legs is not None and controls.whelan and n > worth and n == controls.legs:
         notes.append(f"You asked for {n} legs: more than are worth combining at these chances ({worth} at most), "
                      "so the Whelan cap was lifted for this run.")
     views = []
@@ -1464,7 +1659,7 @@ def _ticket(rank: int, score: float, legs: Tuple[_Leg, ...], ctx: _Context, labe
                       "flags": sorted(cand.flags), "teams": list(cand.teams), "why": cand.why[:3],
                       "risk": _leg_risk(cand), "model_price": "model_price" in cand.flags,
                       "inputs": {"chance": cand.chance, "fair": cand.fair, "push": cand.push},
-                      "swaps": _swaps(legs, i, passing, taken, ctx, score),
+                      "swaps": _swaps(legs, i, passing, taken, ctx, score, keep),
                       **({"adjusted": dict(cand.adjusted)} if cand.adjusted else {}), **_why_units(cand)})
     return {
         **priced,
@@ -1604,6 +1799,8 @@ def _blocked(rules: _Rules, removed: Dict[str, int], passing: Sequence[_Leg], ct
     games = len({leg.gbit for leg in passing})
     near = (f" near {controls.target_odds:,.1f}x" if controls.target_odds is not None
             else "" if (low <= 1.0 and math.isinf(high)) else f" at {_window_words(controls)}")
+    if controls.target_chance is not None:
+        near += f" at {_a_pct(controls.target_chance)}+ chance"
     shape = f"{controls.legs}-leg ticket" if controls.legs else "ticket"
     leg_rules = sorted(((rule, count) for rule, count in removed.items() if count and rule in QUALITY_RULES),
                        key=lambda item: (-item[1], QUALITY_RULES.index(item[0])))
@@ -1688,7 +1885,7 @@ def _blocked(rules: _Rules, removed: Dict[str, int], passing: Sequence[_Leg], ct
             elif rule == "joint_min":
                 message += f" At these odds the honest chance is about {_pct(1 / max(low, 1.0001))} at best."
             relax = [rules.rule_label(rule) for rule, _ in inside_rules[:2]]
-            if rule in ("joint_min", "whelan", "caps", "three_leg", "book_cut", "min_ev"):
+            if rule in ("joint_min", "whelan", "caps", "three_leg", "book_cut", "min_ev", "target_chance"):
                 relax.append(fewer_legs if controls.legs is not None else None)
             if rule == "joint_min" and not target:
                 relax.append(lower)
@@ -1753,33 +1950,61 @@ def _ideas(passing: Sequence[_Leg]) -> List[Dict[str, Any]]:
     return ideas[:MAX_IDEAS]
 
 
-# --- build ---------------------------------------------------------------------------------------------
+# --- one set of rules over the candidates -------------------------------------------------------------
 
-def build(candidates: Iterable[Candidate], controls: Controls, now: Optional[datetime.datetime] = None, *,
-          stake: Any = None, unpriced: Optional[Mapping[str, str]] = None, weights: Optional[Weights] = None
-          ) -> Result:
-    """Tickets for these controls from these candidates (see the module docstring).
+@dataclass
+class _Mode:
+    """What one search aims for. The run at the person's own rules is "weights" (the preset's score, as before
+    closest effort); closest effort's objectives change the score, the chance floor and the odds window (see the
+    module docstring). ``kind`` is the rules a ticket of this search is held to for its relaxed words: "plain" (the
+    odds window too), "chance" or "closest" (no window: they aim at the chance, or at both targets at once)."""
 
-    ``stake`` prices the finalists (10 when None). ``unpriced`` maps a league in scope that has no prices
-    loaded to the words for it ("No prices loaded for EPL; asked for them in the background"); each becomes a
-    near miss (on top of the up to MAX_NEAR_MISSES legs). ``weights`` replaces the preset's ranking weights
-    (engine/target.py and engine/bets.py rank by the cautious expected return alone: RETURN_ONLY); the result's
-    ``ranked`` then holds the first search's best tickets as leg keys, best first, for a caller to pick from by
-    its own rules. Raises ValueError only for a bad stake.
-    """
+    objective: str = "weights"
+    weights: Optional[Weights] = None  # the pool's and the beam's order; None: the run's own
+    chance_floor: Optional[float] = None  # the joint chance (every leg wins) a ticket must reach
+    window: bool = True  # False: any odds
+    bounds: Optional[Tuple[float, float]] = None  # an odds window of its own (closest)
+    kind: str = "plain"
+
+
+# The objectives' orders for the pool and the beam (each objective scores tickets its own way)
+ODDS_RANK = Weights(target=0.0, ret=1.0, chance=0.0)  # the highest odds at a chance floor: legs by value
+CHANCE_RANK = Weights(target=0.0, ret=0.0, chance=1.0)  # the highest chance: the likeliest legs
+NEAR_RANK = Weights(target=0.01, ret=0.0, chance=1.0)  # inside the odds window, the highest chance
+
+
+@dataclass
+class _Prep:
+    """One set of rules applied to the candidates: the legs that pass and the search's context, with what each
+    rule removed (``removed``: the first rule a leg failed; ``failing``: every quality rule it failed) and the legs
+    that pass but sit below the multi-leg floor (``multi_short``). The near misses only for the person's own run."""
+
+    rules: _Rules
+    ctx: _Context
+    passing: List[_Leg]
+    removed: Dict[str, int]
+    failing: Dict[str, int]
+    multi_short: int
+    misses: List[Tuple[int, float, float, str, Dict[str, Any]]]
+    lone: Dict[str, Tuple[float, float]]
+
+
+def _prepare(candidates: Sequence[Candidate], controls: Controls, label: str, now: datetime.datetime,
+             weights: Weights, mode: Optional["_Mode"] = None, loose: Optional["_Loosen"] = None,
+             misses: bool = False, books: Optional[Dict[str, bool]] = None) -> _Prep:
+    """The candidates through ``controls``' rules (closest effort's loosened ones with ``loose``), and the
+    search's context for ``mode``. ``misses`` keeps the near misses (the person's own run); ``books`` shares the
+    bookmakers' check between runs (the allowed books are never loosened)."""
     from .bets import WHELAN
-    from .presets import label_for, weights_for
-    started = time.perf_counter()
-    stake = _stake(stake)
-    now = _now(now)
-    candidates = list(candidates)
-    label = label_for(controls)
-    weights = weights or weights_for(controls)
-    rules = _Rules(controls, label, now)
+    mode = mode or _Mode()
+    rules = _Rules(controls, label, now, loose.value_off if loose is not None else ())
+    if books is not None:
+        rules._books = books
     caution = controls.caution_pp / 100.0
 
     removed: Dict[str, int] = {rule: 0 for rule in SCOPE_RULES + QUALITY_RULES}
-    misses: List[Tuple[int, float, float, str, Dict[str, Any]]] = []
+    failing: Dict[str, int] = {rule: 0 for rule in QUALITY_RULES}
+    near: List[Tuple[int, float, float, str, Dict[str, Any]]] = []
     lone: Dict[str, Tuple[float, float]] = {}  # leg rule -> (longest, shortest) price of the legs only it removed
     best: Dict[str, _Leg] = {}
     games: Dict[str, int] = {}
@@ -1796,12 +2021,15 @@ def build(candidates: Iterable[Candidate], controls: Controls, now: Optional[dat
         if failed:
             for name in failed[:1]:
                 removed[name] += 1
-            if len(failed) == 1:
-                far, short = lone.get(failed[0], (0.0, math.inf))
-                lone[failed[0]] = (max(far, float(price)), min(short, float(price)))
-            leg = _Leg(cand, price, book, caution, weights, controls.multi_leg_min)
-            distance = sum(rules.distance(name, cand, price) for name in failed)
-            misses.append((len(failed), distance, -leg.q, cand.key, _near_miss(cand, price, book, failed, rules)))
+            for name in failed:
+                failing[name] += 1
+            if misses:
+                if len(failed) == 1:
+                    far, short = lone.get(failed[0], (0.0, math.inf))
+                    lone[failed[0]] = (max(far, float(price)), min(short, float(price)))
+                leg = _Leg(cand, price, book, caution, weights, controls.multi_leg_min)
+                distance = sum(rules.distance(name, cand, price) for name in failed)
+                near.append((len(failed), distance, -leg.q, cand.key, _near_miss(cand, price, book, failed, rules)))
             continue
         leg = _Leg(cand, price, book, caution, weights, controls.multi_leg_min)
         kept = best.get(leg.key)
@@ -1813,43 +2041,947 @@ def build(candidates: Iterable[Candidate], controls: Controls, now: Optional[dat
         leg.teams = tuple(teams.setdefault(team.strip().lower(), len(teams)) for team in leg.cand.teams)
         leg.league = leagues.setdefault(leg.cand.league, len(leagues))
 
-    low, high = _window(controls)
-    sizes = {controls.legs} if controls.legs else set(range(1, controls.legs_max + 1))
+    if mode.bounds is not None:
+        low, high = mode.bounds
+    elif not mode.window or (loose is not None and loose.window_off):
+        low, high = 1.0, math.inf
+    else:
+        low, high = _window(controls)
+    sizes = set(loose.sizes) if loose is not None and loose.sizes else (
+        {controls.legs} if controls.legs else set(range(1, controls.legs_max + 1)))
+    targeted = _targeted(controls)
+    asked = loose.asked if loose is not None else controls
+    floor = mode.chance_floor
+    # The chance objectives aim at any odds: the target odds mustn't steer their pool or their beam to its price
+    aimed = controls.target_odds is not None and mode.objective not in ("odds", "chance")
     ctx = _Context(
         controls=controls, weights=weights, sizes=sizes,
         log_lo=math.log(max(low, 1.0)), log_hi=math.log(high) if math.isfinite(high) else math.inf,
-        log_target=math.log(controls.target_odds) if controls.target_odds is not None else None,
-        log_jmin=(math.log(controls.joint_min) if controls.joint_min and controls.target_odds is None else -math.inf),
-        joint_max=controls.joint_max if controls.target_odds is None else None,
+        log_target=math.log(controls.target_odds) if aimed else None,
+        log_jmin=(math.log(controls.joint_min) if controls.joint_min and not targeted else -math.inf),
+        joint_max=controls.joint_max if not targeted else None,
         whelan_on=controls.whelan and controls.legs is None, whelan_slack=controls.whelan_slack,
         team_cap=controls.max_per_team, league_cap=controls.max_per_league,
         rejected={rule: 0 for rule in TICKET_RULES}, whelan_thresholds=tuple(WHELAN),
         pushes=any(leg.push > 0 for leg in passing), min_ev=rules.value.get("min_ev"),
         max_book_cut=rules.value.get("max_book_cut"), three_leg_min=rules.value.get("three_leg_min"),
+        objective=mode.objective, log_cmin=math.log(floor) if floor else -math.inf,
+        target_chance=controls.target_chance,
+        close_tol=math.log(1.0 + max(asked.tolerance_pct / 100.0, MIN_CLOSE_TOL)),
+        wide=loose is not None,
     )
+    multi_short = sum(1 for leg in passing if not leg.multi_ok)
+    return _Prep(rules=rules, ctx=ctx, passing=passing, removed=removed, failing=failing, multi_short=multi_short,
+                 misses=near, lone=lone)
 
+
+def _choose(legs: Sequence[_Leg], ctx: _Context, want: int, used: Set[str], budget: Optional["_Budget"] = None
+            ) -> Tuple[List[Tuple[float, Tuple[_Leg, ...]]], List[Tuple[float, Tuple[str, ...]]]]:
+    """Up to ``want`` tickets that share no leg (with each other or ``used``, which gains theirs), best first, and
+    the first search's best tickets as leg keys (Result.ranked). With ``budget`` (closest effort's) each search's
+    combinations are spent from it, and once it is spent the searches that top the tickets up are narrow ones
+    (_Context.narrow)."""
     chosen: List[Tuple[float, Tuple[_Leg, ...]]] = []
-    used: Set[str] = set()
-    pool_legs = list(passing)
     first: List[Tuple[float, Tuple[str, ...]]] = []
-    for _ in range(controls.tickets):
+    pool_legs = [leg for leg in legs if leg.key not in used]
+    for _ in range(want):
+        tried = ctx.tried
         ranked = _search(pool_legs, ctx)
+        if budget is not None:
+            budget.spend(ctx.tried - tried)
         if not chosen and not first:
-            first = [(score, tuple(leg.key for leg in legs)) for score, legs in ranked]
-        more = _disjoint(ranked, used, controls.tickets - len(chosen))
+            first = [(score, tuple(leg.key for leg in found)) for score, found in ranked]
+        more = _disjoint(ranked, used, want - len(chosen))
         if not more:
+            if ctx.narrow and budget is not None:
+                budget.stop()  # a narrow search found no more: a full one might have
             break
         chosen += more
-        if len(chosen) >= controls.tickets:
+        if len(chosen) >= want:
             break
+        if budget is not None and budget.out:
+            ctx.narrow = True
         pool_legs = [leg for leg in pool_legs if leg.key not in used]
 
     # A search without the used legs can find a ticket better than one picked earlier (its pool had room for legs
     # the first pool left out), so rank them again
     chosen.sort(key=lambda item: (item[0], tuple(sorted(leg.key for leg in item[1]))), reverse=True)
-    taken = {leg.key for _, legs in chosen for leg in legs}
-    tickets = [_ticket(i + 1, score, legs, ctx, label, stake, now, passing, taken)
-               for i, (score, legs) in enumerate(chosen)]
+    return chosen, first
+
+
+def _feasible(legs: Sequence[_Leg], ctx: _Context) -> Tuple[bool, Set[str]]:
+    """Whether some ticket of these legs could land in the window and reach the chance floors, by bounds alone (the
+    longest legs one a game, the shortest, the likeliest): a necessary condition, so a search it lets through may
+    still find nothing. With the reasons it failed: "legs", "games", "reach", "floor", "chance", "joint_min" or
+    "value" (the window's low end and the chance floor together ask more than the legs' value can give)."""
+    if not legs:
+        return False, {"legs"}
+    reasons: Set[str] = set()
+    for n in sorted(ctx.sizes):
+        rows: Dict[int, List[float]] = {}
+        for leg in legs:
+            if n > 1 and not leg.multi_ok:
+                continue
+            row = rows.get(leg.gbit)
+            value = leg.ld + leg.lc
+            if row is None:
+                rows[leg.gbit] = [leg.ld, leg.ld, leg.lc, leg.lw, value]
+            else:
+                row[0] = max(row[0], leg.ld)
+                row[1] = min(row[1], leg.ld)
+                row[2] = max(row[2], leg.lc)
+                row[3] = max(row[3], leg.lw)
+                row[4] = max(row[4], value)
+        if len(rows) < n:
+            reasons.add("games")
+            continue
+        table = list(rows.values())
+
+        def top(i: int) -> float:
+            return sum(heapq.nlargest(n, (row[i] for row in table)))
+
+        failed = set()
+        if top(0) < ctx.log_lo - _EPS:
+            failed.add("reach")
+        if math.isfinite(ctx.log_hi) and sum(heapq.nsmallest(n, (row[1] for row in table))) > ctx.log_hi + _EPS:
+            failed.add("floor")
+        if ctx.log_cmin > -math.inf and top(2) < ctx.log_cmin - _EPS:
+            failed.add("chance")
+        if ctx.log_jmin > -math.inf and top(3) < ctx.log_jmin - _EPS:
+            failed.add("joint_min")
+        if ctx.log_cmin > -math.inf and ctx.log_lo > _EPS and top(4) < ctx.log_lo + ctx.log_cmin - _EPS:
+            failed.add("value")
+        if not failed:
+            return True, set()
+        reasons |= failed
+    return False, reasons
+
+
+# --- closest effort ----------------------------------------------------------------------------------------
+
+class _Budget:
+    """The combinations closest effort's searches may still try (RELAX_BUDGET), what the last try cost (``last``)
+    and whether the budget stopped any work (``cut``: a round not searched, a ticket not topped up). ``part`` gives
+    one objective a share of what is left, so the first can't starve the next; its spending counts here too."""
+
+    def __init__(self, combos: int, parent: Optional["_Budget"] = None) -> None:
+        self.left = combos
+        self.last = 0
+        self.cut = False
+        self.parent = parent
+
+    def spend(self, combos: int) -> None:
+        self.left -= combos
+        if self.parent is not None:
+            self.parent.spend(combos)
+
+    def stop(self) -> None:
+        """The budget stopped some work (here and in the budgets this is a share of)."""
+        self.cut = True
+        if self.parent is not None:
+            self.parent.stop()
+
+    def part(self, share: float) -> "_Budget":
+        return _Budget(int(max(self.left, 0) * share), parent=self)
+
+    @property
+    def out(self) -> bool:
+        return self.left <= 0
+
+    @property
+    def low(self) -> bool:
+        """No round starts: the budget is spent, or what is left is less than the last try cost (the next round
+        would likely go past it). The tries that must run (``force``) still do."""
+        return self.left <= 0 or self.left < self.last
+
+
+@dataclass
+class _Attempt:
+    """One try at a set of rules: what it found, whether it searched (else its bounds showed it couldn't land a
+    ticket: ``reasons``) and how many tickets it wanted."""
+
+    prep: _Prep
+    chosen: List[Tuple[float, Tuple[_Leg, ...]]]
+    searched: bool
+    reasons: Set[str]
+    mode: _Mode
+    want: int = 1
+
+    @property
+    def short(self) -> bool:
+        """It searched and found fewer tickets than it wanted."""
+        return self.searched and len(self.chosen) < self.want
+
+    @property
+    def inside(self) -> bool:
+        """It searched and a joint or value rule ruled out combinations that landed in the window."""
+        return self.searched and any(self.prep.ctx.rejected.get(rule) for rule in INSIDE_RULES)
+
+    def mends(self, reasons: Set[str], inside: bool = False) -> bool:
+        """Whether more legs of a kind could help: it found too few, or its bounds failed for one of ``reasons``.
+        Not while the search shows combinations in the window ruled out by a joint or value rule (those bind
+        first), unless the legs are of a kind that can mend them (``inside``: shorter, likelier legs)."""
+        if self.inside and not inside:
+            return False
+        return self.short or bool(self.reasons & reasons)
+
+
+@dataclass
+class _Find:
+    """A ticket found: its score and legs, the run that found it (its rules and context), the rules it is held to
+    for its relaxed words (_Mode.kind) and whether it came from loosened rules (else its relaxed words are none)."""
+
+    score: float
+    legs: Tuple[_Leg, ...]
+    prep: _Prep
+    kind: str
+    loosened: bool
+
+
+def _lower(value: float) -> Optional[float]:
+    """A chance floor one step lower (FLOOR_STEP); None once it reaches nothing."""
+    new = round(value - FLOOR_STEP, 4)
+    return None if new <= _EPS else new
+
+
+def _band_words(low: Optional[float], high: Optional[float]) -> str:
+    if low is None and high is None:
+        return "any odds"
+    if high is None:
+        return f"{_odds_text(low)}x+"
+    return f"{_odds_text(low or 1.0)}-{_odds_text(high)}x"
+
+
+def _words(rule: str, old: Any, new: Any, label: str, step: bool = False) -> str:
+    """A loosened rule in plain words: "per-leg chance lowered from 60% to 55%", "odds window widened to ±20%".
+    ``step`` words a round's step (the log), where the multi-leg floor is named apart from the per-leg one."""
+    multi = " in a multi" if step and rule == "multi_leg_min" else ""
+    if rule in ("min_chance", "multi_leg_min"):
+        if not new:
+            return f"per-leg chance floor{multi} ({_pct(old)}) dropped"
+        return f"per-leg chance{multi} lowered from {_pct(old)} to {_pct(new)}"
+    if rule == "leg_odds_min":
+        return (f"leg odds minimum ({old:.2f}) dropped" if new is None
+                else f"leg odds minimum lowered from {old:.2f} to {new:.2f}")
+    if rule == "leg_odds_max":
+        return (f"leg odds maximum ({old:.2f}) dropped" if new is None
+                else f"leg odds maximum raised from {old:.2f} to {new:.2f}")
+    if rule == "min_edge":
+        return f"minimum edge ({old * 100:+.1f} pts) dropped"
+    if rule == "joint_min":
+        return f"joint chance floor ({_pct(old)}+) dropped"
+    if rule == "joint_max":
+        return f"joint chance cap (under {_pct(old)}) dropped"
+    if rule == "whelan":
+        return "the Whelan leg cap lifted"
+    if rule == "three_leg":
+        return f"{label}'s 3-leg rule (every leg {_pct(old)}+) dropped"
+    if rule == "min_ev":
+        return f"{label}'s expected-result floor ({old * 100:+.0f}%) dropped"
+    if rule == "book_cut":
+        return f"{label}'s cap on the bookmaker's cut ({_pct(old)}) dropped"
+    if rule == "tolerance_pct":
+        return "odds window dropped: the nearest odds there are" if new is None else f"odds window widened to ±{new:g}%"
+    if rule == "odds_band":
+        if new is None or not any(value is not None for value in new):
+            return "ticket odds band dropped"
+        return f"ticket odds band widened to {_band_words(*new)}"
+    if rule == "legs":
+        shown = " or ".join(str(n) for n in new) if isinstance(new, (list, tuple)) else str(new)
+        before = " or ".join(str(n) for n in old) if isinstance(old, (list, tuple)) else str(old)
+        return f"legs changed from {before} to {shown}"
+    return rule
+
+
+class _Loosen:
+    """The person's rules as closest effort has loosened them so far, one step at a time (RELAX_ORDER)."""
+
+    def __init__(self, asked: Controls, label: str) -> None:
+        from .presets import value_rules
+        self.asked, self.label = asked, label
+        self.controls = asked
+        self.values = value_rules(label)
+        self.value_off: Set[str] = set()
+        self.sizes: Optional[Set[int]] = None
+        self.window_off = False
+        self.leg_steps = [0, 0]  # how often leg_odds_min and leg_odds_max were widened
+        self.band_steps = 0
+        self.legs_steps = 0
+        self.stopped = False  # the budget ended the rounds before a round that would search (_effort)
+
+    def base_sizes(self) -> Set[int]:
+        asked = self.asked
+        return {asked.legs} if asked.legs else set(range(1, asked.legs_max + 1))
+
+    def current_sizes(self) -> Set[int]:
+        return set(self.sizes) if self.sizes else self.base_sizes()
+
+    @property
+    def changed(self) -> bool:
+        return (self.controls is not self.asked or bool(self.value_off) or self.sizes is not None
+                or self.window_off)
+
+    def _change(self, rule: str, old: Any, new: Any) -> Dict[str, Any]:
+        return {"rule": rule, "from": old, "to": new, "words": _words(rule, old, new, self.label, step=True)}
+
+    def _set(self, changes: Sequence[Dict[str, Any]]) -> None:
+        fields = {}
+        for change in changes:
+            rule, new = change["rule"], change["to"]
+            if rule == "odds_band":
+                fields["odds_min"], fields["odds_max"] = (new or [None, None])
+            elif rule == "whelan":
+                fields["whelan"] = bool(new)
+            elif rule in ("three_leg", "min_ev", "book_cut"):
+                self.value_off.add(rule)
+            elif rule == "legs":
+                self.sizes = set(new) if isinstance(new, (list, tuple)) else {new}
+            elif rule == "tolerance_pct" and new is None:
+                self.window_off = True
+            else:
+                fields[rule] = new
+        if fields:
+            self.controls = self.controls.replace(**fields)
+
+    # One step of each group (RELAX_ORDER), or [] when that group doesn't bind or is spent -------------------
+    def _floors(self, attempt: _Attempt) -> List[Dict[str, Any]]:
+        # A lower floor lets in less likely (so longer) legs: no help when the odds are too high or the chance low
+        if not attempt.mends(MORE_LEGS):
+            return []
+        c = self.controls
+        out = []
+        if c.min_chance and attempt.prep.failing.get("min_chance"):
+            out.append(self._change("min_chance", c.min_chance, _lower(c.min_chance)))
+        if c.multi_leg_min and max(self.current_sizes()) >= 2 and attempt.prep.multi_short:
+            out.append(self._change("multi_leg_min", c.multi_leg_min, _lower(c.multi_leg_min)))
+        return out
+
+    def _leg_odds(self, attempt: _Attempt) -> List[Dict[str, Any]]:
+        c, asked = self.controls, self.asked
+        out = []
+        if c.leg_odds_min is not None and attempt.prep.failing.get("leg_odds_min") \
+                and attempt.mends(SHORTER_LEGS, inside=True):
+            self.leg_steps[0] += 1
+            k = self.leg_steps[0]
+            new = round(asked.leg_odds_min / LEG_BAND_STEP ** k, 4) if k <= LEG_BAND_STEPS else None
+            out.append(self._change("leg_odds_min", c.leg_odds_min, None if new is None or new < 1.01 else new))
+        if c.leg_odds_max is not None and attempt.prep.failing.get("leg_odds_max") and attempt.mends(MORE_LEGS):
+            self.leg_steps[1] += 1
+            k = self.leg_steps[1]
+            new = round(asked.leg_odds_max * LEG_BAND_STEP ** k, 4) if k <= LEG_BAND_STEPS else None
+            out.append(self._change("leg_odds_max", c.leg_odds_max, None if new is None or new > 1000 else new))
+        return out
+
+    def _min_edge(self, attempt: _Attempt) -> List[Dict[str, Any]]:
+        c = self.controls
+        if c.min_edge is not None and attempt.prep.failing.get("min_edge") and attempt.mends(MORE_LEGS | SHORTER_LEGS):
+            return [self._change("min_edge", c.min_edge, None)]
+        return []
+
+    def _joint(self, attempt: _Attempt) -> List[Dict[str, Any]]:
+        c = self.controls
+        if _targeted(self.asked):
+            return []  # a target replaces the band
+        rejected = attempt.prep.ctx.rejected
+        out = []
+        if c.joint_min and (rejected.get("joint_min") or "joint_min" in attempt.reasons):
+            out.append(self._change("joint_min", c.joint_min, None))
+        if c.joint_max is not None and rejected.get("joint_max"):
+            out.append(self._change("joint_max", c.joint_max, None))
+        return out
+
+    def _value(self, attempt: _Attempt) -> List[Dict[str, Any]]:
+        c = self.controls
+        rejected = attempt.prep.ctx.rejected
+        out = []
+        if c.whelan and c.legs is None and rejected.get("whelan"):
+            out.append(self._change("whelan", True, False))
+        for rule, key in VALUE_RULE_KEYS.items():
+            if rule not in self.value_off and self.values.get(key) is not None and rejected.get(rule):
+                out.append(self._change(rule, self.values[key], None))
+        return out
+
+    def _window(self, attempt: _Attempt) -> List[Dict[str, Any]]:
+        if self.window_off:
+            return []
+        rejected = attempt.prep.ctx.rejected
+        if not (attempt.reasons & {"reach", "floor", "value"} or rejected.get("odds_low") or rejected.get("odds_high")
+                or attempt.short):
+            return []
+        c, asked = self.controls, self.asked
+        if asked.target_odds is not None:
+            step = next((t for t in TOLERANCE_STEPS if t > c.tolerance_pct + 1e-9), None)
+            return [] if step is None else [self._change("tolerance_pct", c.tolerance_pct, step)]
+        if _targeted(asked) or (asked.odds_min is None and asked.odds_max is None):
+            return []
+        if c.odds_min is None and c.odds_max is None:
+            return []
+        self.band_steps += 1
+        k = self.band_steps
+        if k > len(BAND_STEPS):
+            return [self._change("odds_band", [c.odds_min, c.odds_max], [None, None])]
+        factor = BAND_STEPS[k - 1]
+        low = round(asked.odds_min / factor, 4) if asked.odds_min is not None else None
+        high = round(min(asked.odds_max * factor, MAX_TARGET_ODDS), 4) if asked.odds_max is not None else None
+        return [self._change("odds_band", [c.odds_min, c.odds_max], [None if low is not None and low <= 1.0 else low,
+                                                                       high])]
+
+    def _legs(self, attempt: _Attempt) -> List[Dict[str, Any]]:
+        asked = self.asked
+        if asked.legs is None or self.legs_steps >= LEG_STEPS:
+            return []
+        self.legs_steps += 1
+        k = self.legs_steps
+        sizes = sorted(n for n in (asked.legs - k, asked.legs + k) if 1 <= n <= MAX_LEGS)
+        old = sorted(self.current_sizes())
+        return [self._change("legs", old[0] if len(old) == 1 else old, sizes)]
+
+    def step(self, attempt: _Attempt, groups: Sequence[str]) -> List[Dict[str, Any]]:
+        """Loosen the most binding rule one step: the first group in RELAX_ORDER (of ``groups``) whose counts in
+        ``attempt`` show it binding (it removed legs, or ruled out tickets); when none does, the odds window, then
+        the number of legs. The changes made, or [] when nothing is left to loosen."""
+        for group in RELAX_ORDER:
+            if group not in groups or group in ("window", "legs"):
+                continue
+            changes = getattr(self, "_" + group)(attempt)
+            if changes:
+                self._set(changes)
+                return changes
+        for group in ("window", "legs"):
+            if group in groups:
+                changes = getattr(self, "_" + group)(attempt)
+                if changes:
+                    self._set(changes)
+                    return changes
+        return []
+
+    def fallback(self, window: bool) -> List[Dict[str, Any]]:
+        """The last round, when no round found a ticket: every rule closest effort may loosen goes, and the odds
+        window too (``window``: the nearest odds there are). The leg counts stay as they are (``resize``)."""
+        c = self.controls
+        changes = []
+        for rule in ("min_chance", "multi_leg_min", "leg_odds_min", "leg_odds_max", "min_edge"):
+            if getattr(c, rule) is not None and (getattr(c, rule) or rule == "min_edge"):
+                changes.append(self._change(rule, getattr(c, rule), None))
+        if not _targeted(self.asked):
+            for rule in ("joint_min", "joint_max"):
+                if getattr(c, rule):
+                    changes.append(self._change(rule, getattr(c, rule), None))
+        if c.whelan and c.legs is None:
+            changes.append(self._change("whelan", True, False))
+        for rule, key in VALUE_RULE_KEYS.items():
+            if rule not in self.value_off and self.values.get(key) is not None:
+                changes.append(self._change(rule, self.values[key], None))
+        if window and not self.window_off:
+            if self.asked.target_odds is not None:
+                changes.append(self._change("tolerance_pct", c.tolerance_pct, None))
+            elif not _targeted(self.asked) and (c.odds_min is not None or c.odds_max is not None):
+                changes.append(self._change("odds_band", [c.odds_min, c.odds_max], [None, None]))
+        self._set(changes)
+        return changes
+
+    def resize(self, sizes: Set[int]) -> List[Dict[str, Any]]:
+        """The leg counts set to ``sizes`` (the last round's: the asked ones first, then 1 and 2 either way, then
+        any up to the asked number); the change made, or [] when they already are."""
+        if sizes == self.current_sizes():
+            return []
+        old, new = sorted(self.current_sizes()), sorted(sizes)
+        change = self._change("legs", old[0] if len(old) == 1 else old, new[0] if len(new) == 1 else new)
+        self._set([change])
+        if sizes == self.base_sizes():
+            self.sizes = None
+        return [change]
+
+    def last_sizes(self) -> List[Set[int]]:
+        """The leg counts the last round tries in turn: the asked ones, then (an exact number of legs) 1 and 2
+        either way, then any number up to the asked one; each only if it adds a count not tried yet."""
+        stages = [self.base_sizes()]
+        n = self.asked.legs
+        if n is not None:
+            stages += [{m for m in (n - k, n + k) if 1 <= m <= MAX_LEGS} for k in range(1, LEG_STEPS + 1)]
+            stages.append(set(range(1, n + 1)))
+        out: List[Set[int]] = []
+        tried: Set[int] = set()
+        for sizes in stages:
+            if sizes and not sizes <= tried:
+                out.append(sizes)
+                tried |= sizes
+        return out
+
+    def union(self, other: "_Loosen") -> "_Loosen":
+        """The looser of two sets of loosened rules, rule by rule (closest searches where either option went)."""
+        out = _Loosen(self.asked, self.label)
+        a, b = self.controls, other.controls
+
+        def low(x: Optional[float], y: Optional[float]) -> Optional[float]:
+            return None if not x or not y else min(x, y)
+
+        def high(x: Optional[float], y: Optional[float]) -> Optional[float]:
+            return None if x is None or y is None else max(x, y)
+
+        fields = {"min_chance": low(a.min_chance, b.min_chance), "multi_leg_min": low(a.multi_leg_min, b.multi_leg_min),
+                  "leg_odds_min": None if a.leg_odds_min is None or b.leg_odds_min is None
+                  else min(a.leg_odds_min, b.leg_odds_min),
+                  "leg_odds_max": high(a.leg_odds_max, b.leg_odds_max),
+                  "min_edge": None if a.min_edge is None or b.min_edge is None else min(a.min_edge, b.min_edge),
+                  "joint_min": low(a.joint_min, b.joint_min), "joint_max": high(a.joint_max, b.joint_max),
+                  "whelan": a.whelan and b.whelan, "tolerance_pct": max(a.tolerance_pct, b.tolerance_pct)}
+        out.controls = self.asked.replace(**fields)
+        out.value_off = self.value_off | other.value_off
+        out.window_off = self.window_off or other.window_off
+        sizes = self.current_sizes() | other.current_sizes()
+        out.sizes = None if sizes == out.base_sizes() else sizes
+        return out
+
+
+def _attempt(candidates: Sequence[Candidate], loose: _Loosen, label: str, now: datetime.datetime, weights: Weights,
+             mode: _Mode, want: int, used: Set[str], budget: _Budget, books: Optional[Dict[str, bool]],
+             force: bool = False) -> _Attempt:
+    """One search at the loosened rules, unless its bounds show it can't land a ticket (or the budget is too low for
+    it, _Budget.low, and it isn't ``force``d: a try that must run, such as the one at the person's own rules or the
+    last round)."""
+    prep = _prepare(candidates, loose.controls, label, now, mode.weights or weights, mode, loose, books=books)
+    legs = [leg for leg in prep.passing if leg.key not in used]
+    ok, reasons = _feasible(legs, prep.ctx)
+    if not ok or (budget.low and not force):
+        if ok:
+            budget.stop()
+        return _Attempt(prep, [], False, reasons if not ok else {"budget"}, mode, want)
+    chosen, _ = _choose(legs, prep.ctx, want, set(used), budget)
+    budget.last = prep.ctx.tried
+    return _Attempt(prep, chosen, True, reasons, mode, want)
+
+
+def _try(candidates: Sequence[Candidate], loose: _Loosen, label: str, now: datetime.datetime, weights: Weights,
+         modes: Sequence[_Mode], want: int, used: Set[str], budget: _Budget, books: Optional[Dict[str, bool]],
+         force: bool = False) -> _Attempt:
+    """Each mode in turn (e.g. the chance floor, then the highest chance there is) until one finds tickets."""
+    attempt = None
+    for mode in modes:
+        attempt = _attempt(candidates, loose, label, now, weights, mode, want, used, budget, books, force)
+        if attempt.chosen:
+            return attempt
+    return attempt  # type: ignore[return-value]
+
+
+def _effort(candidates: Sequence[Candidate], asked: Controls, label: str, now: datetime.datetime, weights: Weights,
+            modes: Sequence[_Mode], want: int, used: Set[str], budget: _Budget, books: Optional[Dict[str, bool]],
+            log: List[Dict[str, Any]], name: str, groups: Sequence[str], first: _Attempt,
+            fallback: Optional[Sequence[_Mode]] = None, window: bool = True
+            ) -> Tuple[Optional[_Attempt], _Loosen]:
+    """Closest effort for one objective: from ``first`` (the try at the person's own rules), loosen the most
+    binding rule one step a round (``groups``, in RELAX_ORDER) until a round finds tickets. A round whose bounds
+    show it can't land a ticket costs nothing; the first that would search once the budget is too low for it
+    (_Budget.low) isn't searched and ends the rounds (``loose.stopped``). With ``fallback`` (the modes to try then), a
+    last round with every loosenable rule off when none finds tickets: at the asked number of legs first, then 1 and
+    2 either way, then any number up to it (_Loosen.last_sizes). Every round goes in ``log``."""
+    loose = _Loosen(asked, label)
+    attempt = first
+    rounds = 0
+    done = sum(1 for entry in log if entry["objective"] == name)  # an objective's second go numbers on from its first
+    while rounds < MAX_ROUNDS:
+        changes = loose.step(attempt, groups)
+        if not changes:
+            break
+        rounds += 1
+        attempt = _try(candidates, loose, label, now, weights, modes, want, used, budget, books)
+        log.append({"objective": name, "round": done + rounds, "changes": changes, "searched": attempt.searched,
+                    "found": len(attempt.chosen)})
+        if attempt.chosen:
+            return attempt, loose
+        if not attempt.searched and "budget" in attempt.reasons:
+            loose.stopped = True
+            break
+    if fallback:
+        dropped = loose.fallback(window)
+        for i, sizes in enumerate(loose.last_sizes()):
+            changes = (dropped if i == 0 else []) + loose.resize(sizes)
+            rounds += 1
+            attempt = _try(candidates, loose, label, now, weights, fallback, want, used, budget, books, force=True)
+            log.append({"objective": name, "round": done + rounds, "changes": changes, "searched": attempt.searched,
+                        "found": len(attempt.chosen), "last": True})
+            if attempt.chosen:
+                return attempt, loose
+    return None, loose
+
+
+def _strict_mode(controls: Controls) -> _Mode:
+    """What the run at the person's own rules aims for: as before closest effort without a target chance; with
+    one alone, the highest odds at that chance; with both, the window and the chance together."""
+    if controls.target_chance is None:
+        return _Mode()
+    if controls.target_odds is None:
+        return _Mode(objective="odds", weights=ODDS_RANK, chance_floor=controls.target_chance, kind="chance")
+    return _Mode(chance_floor=controls.target_chance)
+
+
+def _closest_effort(candidates: Sequence[Candidate], asked: Controls, label: str, now: datetime.datetime,
+                    weights: Weights, prep: _Prep, finds: List[_Find], log: List[Dict[str, Any]], budget: _Budget
+                    ) -> Tuple[List[_Find], List[Dict[str, Any]]]:
+    """The person's run gave fewer tickets than asked: the closest tickets there are (the module docstring), after
+    the ones found, and the labelled options when both targets were given and no ticket meets both."""
+    books = prep.rules._books
+    want = asked.tickets - len(finds)
+    used = {leg.key for find in finds for leg in find.legs}
+    strict = _strict_mode(asked)
+    # The person's own run, with what its bounds say about the legs left (why it found too few)
+    reasons = _feasible([leg for leg in prep.passing if leg.key not in used], prep.ctx)[1]
+    first = _Attempt(prep, [], True, reasons, strict, want)
+    tc, to = asked.target_chance, asked.target_odds
+    common = (candidates, asked, label, now, weights)
+
+    def found(attempt: Optional[_Attempt], kind: str, loosened: bool = True) -> List[_Find]:
+        if attempt is None:
+            return []
+        return [_Find(score, legs, attempt.prep, kind, loosened) for score, legs in attempt.chosen]
+
+    if tc is not None and to is not None:
+        # Both targets: tickets that meet both with rules 1-5 loosened (a normal run), else the labelled options.
+        # When even every one of those rules off leaves no ticket that could meet both, no round is tried
+        ceiling = _Loosen(asked, label)
+        ceiling.fallback(window=False)
+        top = _prepare(candidates, ceiling.controls, label, now, weights, strict, ceiling, books=books)
+        if _feasible([leg for leg in top.passing if leg.key not in used], top.ctx)[0]:
+            attempt, _ = _effort(*common, (strict,), want, used, budget.part(1 / 3), books, log, "both", RULE_GROUPS,
+                                 first)
+            finds = finds + found(attempt, "plain")
+        if finds:
+            return finds, []
+        return _options(candidates, asked, label, now, weights, books, budget, log)
+    if tc is not None:
+        chance = _Mode(objective="chance", weights=CHANCE_RANK, kind="chance")
+        groups = tuple(group for group in RELAX_ORDER if group != "window")
+        if finds:  # some reach the chance: more that do, with rules loosened
+            attempt, _ = _effort(*common, (strict,), want, used, budget, books, log, "your_chance", groups, first)
+            return finds + found(attempt, "chance"), []
+        # None reaches it: the rules loosened until one does, else the highest chance there is (_reach_chance)
+        attempt, _, loosened = _reach_chance(candidates, asked, label, now, weights, strict, chance, want, used,
+                                             budget, books, log, first)
+        return found(attempt, "chance", loosened), []
+    near = _Mode(objective="near") if to is not None else strict
+    attempt, _ = _effort(*common, (strict,), want, used, budget, books, log, "plain", RELAX_ORDER, first,
+                         fallback=None if finds else (near,))
+    return finds + found(attempt, "plain"), []
+
+
+def _reach_chance(candidates: Sequence[Candidate], asked: Controls, label: str, now: datetime.datetime,
+                  weights: Weights, floor: _Mode, chance: _Mode, want: int, used: Set[str], budget: _Budget,
+                  books: Optional[Dict[str, bool]], log: List[Dict[str, Any]], first: _Attempt
+                  ) -> Tuple[Optional[_Attempt], _Loosen, bool]:
+    """A target chance no ticket reaches at the person's rules (``first``: that try, in the ``floor`` mode): the rules
+    (never the number of legs asked) loosened one step a round until a ticket reaches it; else the highest chance
+    there is with the rules loosened as far as those rounds went (only the rules that kept likelier legs or tickets
+    out loosen: the leg-odds band, the minimum edge, the value rules; each ticket's relaxed words name only what it
+    needs); else, when no ticket of the asked size passes even those, the highest chance with the rules and then the
+    number of legs loosened, and the last round. The attempt (None if nothing at all), its rules and whether they
+    were loosened."""
+    common = (candidates, asked, label, now, weights)
+    attempt, loose = _effort(*common, (floor,), want, used, budget, books, log, "your_chance", RULE_GROUPS, first)
+    if attempt is not None:
+        return attempt, loose, True
+    if loose.stopped:  # the budget stopped the rounds at a round that would search: that one search still runs
+        attempt = _try(candidates, loose, label, now, weights, (floor,), want, used, budget, books, force=True)
+        if attempt.chosen:
+            return attempt, loose, True
+    likeliest = _try(candidates, loose, label, now, weights, (chance,), want, used, budget, books, force=True)
+    if likeliest.chosen:
+        return likeliest, loose, loose.changed
+    groups = tuple(group for group in RELAX_ORDER if group != "window")
+    attempt, loose = _effort(*common, (chance,), want, used, budget, books, log, "your_chance", groups, likeliest,
+                             (chance,), False)
+    return attempt, loose, True
+
+
+def _options(candidates: Sequence[Candidate], asked: Controls, label: str, now: datetime.datetime, weights: Weights,
+             books: Optional[Dict[str, bool]], budget: _Budget, log: List[Dict[str, Any]]
+             ) -> Tuple[List[_Find], List[Dict[str, Any]]]:
+    """Both targets and no ticket meets both: up to three labelled options (OPTION_KEYS), each the best for its own
+    aim with the rules loosened only as far as it needed, the same ticket picked twice kept once under its first
+    label."""
+    tc, to = asked.target_chance, asked.target_odds
+    common = (candidates, asked, label, now, weights)
+    picks: List[Tuple[str, _Find]] = []
+    looses: List[_Loosen] = []
+    # Each option's rounds have their own share of what is left of the budget (the first can't starve the second)
+    odds_budget = budget.part(1 / 2)
+
+    # Likeliest at your odds: inside the odds window (widened if need be), the highest chance. Its try at the person's
+    # own rules always runs (one search), then its rounds
+    near = _Mode(weights=NEAR_RANK)
+    start = _try(candidates, _Loosen(asked, label), label, now, weights, (near,), 1, set(), odds_budget, books,
+                 force=True)
+    if start.chosen:
+        picks.append(("your_odds", _Find(*start.chosen[0], start.prep, "plain", False)))
+    else:
+        attempt, loose = _effort(*common, (near,), 1, set(), odds_budget, books, log, "your_odds", RELAX_ORDER, start,
+                                 (_Mode(objective="near", weights=NEAR_RANK),), True)
+        if attempt is not None:
+            picks.append(("your_odds", _Find(*attempt.chosen[0], attempt.prep, "plain", True)))
+            looses.append(loose)
+    # Closest to your chance: the chance at the highest odds, with the rules (never the number of legs) loosened as
+    # far as that needs; else the highest chance there is (any odds: _reach_chance)
+    floor = _Mode(objective="odds", weights=ODDS_RANK, chance_floor=tc, window=False, kind="chance")
+    chance = _Mode(objective="chance", weights=CHANCE_RANK, window=False, kind="chance")
+    chance_budget = budget.part(1)
+    start = _try(candidates, _Loosen(asked, label), label, now, weights, (floor,), 1, set(), chance_budget, books,
+                 force=True)
+    if start.chosen:
+        picks.append(("your_chance", _Find(*start.chosen[0], start.prep, "chance", False)))
+    else:
+        attempt, loose, loosened = _reach_chance(candidates, asked, label, now, weights, floor, chance, 1, set(),
+                                                 chance_budget, books, log, start)
+        if attempt is not None and attempt.chosen:
+            picks.append(("your_chance", _Find(*attempt.chosen[0], attempt.prep, "chance", loosened)))
+            if loosened:
+                looses.append(loose)
+    if picks:
+        # The best balance: the smallest distance to both targets of any ticket there is, every rule closest effort
+        # may loosen off (but the window and the leg counts the options used; its relaxed words name only what it
+        # needed). No ticket further from the target odds than the options already found can be closer, which
+        # bounds the window
+        loose = _Loosen(asked, label)
+        for other in looses:
+            loose = loose.union(other)
+        changes = loose.fallback(window=False)
+        tol = max(asked.tolerance_pct / 100.0, MIN_CLOSE_TOL)
+
+        def distance(find: _Find) -> float:
+            """closest's d (as _Context.distance) for a ticket found by any objective."""
+            ld, lc = sum(leg.ld for leg in find.legs), sum(leg.lc for leg in find.legs)
+            return abs(ld - math.log(to)) / math.log(1.0 + tol) + abs(math.exp(lc) - tc) / CHANCE_UNIT
+
+        reach = min(distance(find) for _, find in picks)
+        span = math.exp(min(reach * math.log(1.0 + tol), math.log(MAX_TARGET_ODDS)))
+        bounds = (max(to / span, 1.0), min(to * span, MAX_TARGET_ODDS))
+        mode = _Mode(objective="closest", weights=NEAR_RANK, bounds=bounds, kind="closest")
+        attempt = _try(candidates, loose, label, now, weights, (mode,), 1, set(), budget, books, force=True)
+        log.append({"objective": "closest", "round": 1, "changes": changes, "searched": attempt.searched,
+                    "found": len(attempt.chosen), "last": True})
+        pool = [find for _, find in picks]
+        if attempt.chosen:
+            pool.append(_Find(*attempt.chosen[0], attempt.prep, "closest", loose.changed))
+        best = min(enumerate(pool), key=lambda item: (round(distance(item[1]), 9), item[0]))[1]
+        picks.append(("closest", best))
+
+    finds: List[_Find] = []
+    options: List[Dict[str, Any]] = []
+    seen: List[frozenset] = []
+    for key, find in picks:
+        keys = frozenset(leg.key for leg in find.legs)
+        if keys in seen:
+            continue  # the same ticket as an earlier option: merged, keeping the first label
+        seen.append(keys)
+        finds.append(find)
+        options.append({"key": key, "label": OPTION_LABELS[key], "ticket_index": len(finds) - 1})
+    return finds, options
+
+
+# --- what each ticket says about the ask ---------------------------------------------------------------
+
+def ticket_fit(odds: Any, chance: float, target_odds: Optional[float] = None, target_chance: Optional[float] = None,
+               tolerance_pct: float = 10.0) -> Optional[Dict[str, Any]]:
+    """How close a ticket gets to what was asked: {odds, chance, target_odds, target_chance, odds_gap_pct,
+    chance_gap_pp, meets: {odds, chance}}, or None when neither target was given.
+
+    ``odds`` is the ticket's odds (a Decimal product of its prices gives price_ticket's own two places; a float is
+    rounded half up), ``chance`` the chance every leg wins. ``odds_gap_pct`` is how far the odds are from the
+    target in % (signed), ``chance_gap_pp`` the chance's in points (signed); ``meets.odds`` is whether the odds are
+    inside the target +/- ``tolerance_pct``, ``meets.chance`` whether the chance is at least the target. A target not
+    given has None in its places."""
+    if target_odds is None and target_chance is None:
+        return None
+    exact = float(odds)
+    shown = Decimal(str(odds)) if not isinstance(odds, Decimal) else odds
+    chance = float(chance)
+    tol = float(tolerance_pct) / 100.0
+    return {
+        "odds": float(shown.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+        "chance": round(chance, 4),
+        "target_odds": target_odds,
+        "target_chance": target_chance,
+        "odds_gap_pct": None if target_odds is None else round((exact / target_odds - 1.0) * 100.0, 1),
+        "chance_gap_pp": None if target_chance is None else round((chance - target_chance) * 100.0, 1),
+        "meets": {
+            "odds": None if target_odds is None
+            else target_odds * (1 - tol) * (1 - 1e-9) <= exact <= target_odds * (1 + tol) * (1 + 1e-9),
+            "chance": None if target_chance is None else chance >= target_chance - 1e-9,
+        },
+    }
+
+
+def _fit(legs: Sequence[_Leg], asked: Controls) -> Optional[Dict[str, Any]]:
+    return ticket_fit(math.prod((leg.price for leg in legs), start=Decimal(1)), math.prod(leg.c for leg in legs),
+                      asked.target_odds, asked.target_chance, asked.tolerance_pct)
+
+
+def _relaxed(legs: Sequence[_Leg], asked: Controls, label: str, kind: str) -> List[Dict[str, Any]]:
+    """The rules this ticket breaks of the person's own, each at the tightest step of closest effort that admits it
+    ([{rule, from, to, words}]): a ticket whose weakest leg is 53% under a 72% floor says "per-leg chance lowered
+    from 72% to 52%" however far the round went. ``kind`` "plain" holds it to the odds window too (the chance and
+    closest objectives aim at any odds)."""
+    from .bets import WHELAN
+    from .presets import value_rules
+    out: List[Dict[str, Any]] = []
+
+    def add(rule: str, old: Any, new: Any) -> None:
+        out.append({"rule": rule, "from": old, "to": new, "words": _words(rule, old, new, label)})
+
+    n = len(legs)
+    chances = [leg.c for leg in legs]
+    prices = [leg.d for leg in legs]
+    # Per-leg chance: a multi's legs need the higher of the two floors
+    base = asked.min_chance or 0.0
+    multi = (asked.multi_leg_min or 0.0) if n >= 2 else 0.0
+    floor = max(base, multi)
+    weakest = min(chances)
+    if floor > 0 and weakest < floor - _EPS:
+        steps = math.ceil(round((floor - weakest) / FLOOR_STEP, 9))
+        to = round(floor - steps * FLOOR_STEP, 4)
+        add("multi_leg_min" if n >= 2 and multi >= base else "min_chance", floor, None if to <= _EPS else to)
+    # The leg-odds band, side by side
+    low = asked.leg_odds_min
+    if low is not None and min(prices) < low - _EPS:
+        to = next((step for step in (round(low / LEG_BAND_STEP ** k, 4) for k in range(1, LEG_BAND_STEPS + 1))
+                   if step >= 1.01 and step <= min(prices) + _EPS), None)
+        add("leg_odds_min", low, to)
+    high = asked.leg_odds_max
+    if high is not None and max(prices) > high + _EPS:
+        to = next((step for step in (round(high * LEG_BAND_STEP ** k, 4) for k in range(1, LEG_BAND_STEPS + 1))
+                   if step <= 1000 and step >= max(prices) - _EPS), None)
+        add("leg_odds_max", high, to)
+    if asked.min_edge is not None and any(leg.edge is None or leg.edge < asked.min_edge - _EPS for leg in legs):
+        add("min_edge", asked.min_edge, None)
+    joint = math.prod(chances)
+    if not _targeted(asked):
+        if any(leg.push > 0 for leg in legs):
+            wins = math.prod(leg.c + leg.push for leg in legs) - math.prod(leg.push for leg in legs)
+        else:
+            wins = joint
+        if asked.joint_min and wins < asked.joint_min - _EPS:
+            add("joint_min", asked.joint_min, None)
+        if asked.joint_max is not None and wins >= asked.joint_max - 1e-12:
+            add("joint_max", asked.joint_max, None)
+    # The value rules: the Whelan cap on Auto, and while the run is exactly a preset its old tier's rules
+    if asked.whelan and asked.legs is None and n >= 2 and joint > 0:
+        worth = 1 + sum(1 for threshold in WHELAN if joint ** (1 / n) > threshold)
+        if n > worth + asked.whelan_slack:
+            add("whelan", True, False)
+    value = value_rules(label)
+    three = value.get("three_leg_min")
+    if three is not None and n >= 3 and any(c < three - _EPS for c in chances):
+        add("three_leg", three, None)
+    floor_ev = value.get("min_ev")
+    if floor_ev is not None and math.exp(sum(leg.le for leg in legs)) - 1 < floor_ev - _EPS:
+        add("min_ev", floor_ev, None)
+    cut = value.get("max_book_cut")
+    if cut is not None and all(leg.lb is not None for leg in legs) \
+            and 1 - math.exp(sum(leg.lb for leg in legs)) > cut + _EPS:
+        add("book_cut", cut, None)
+    # The odds window: the target's tolerance, else the preset's band
+    odds = math.prod(prices)
+    if kind == "plain":
+        target = asked.target_odds
+        if target is not None:
+            def inside(pct: float) -> bool:
+                return target * (1 - pct / 100.0) * (1 - _EPS) <= odds <= target * (1 + pct / 100.0) * (1 + _EPS)
+
+            if not inside(asked.tolerance_pct):
+                add("tolerance_pct", asked.tolerance_pct,
+                    next((pct for pct in TOLERANCE_STEPS if pct > asked.tolerance_pct + 1e-9 and inside(pct)), None))
+        elif not _targeted(asked) and (asked.odds_min is not None or asked.odds_max is not None):
+            def banded(factor: float) -> Tuple[Optional[float], Optional[float]]:
+                lo = round(asked.odds_min / factor, 4) if asked.odds_min is not None else None
+                hi = round(min(asked.odds_max * factor, MAX_TARGET_ODDS), 4) if asked.odds_max is not None else None
+                return (None if lo is not None and lo <= 1.0 else lo), hi
+
+            def within(band: Tuple[Optional[float], Optional[float]]) -> bool:
+                return (band[0] is None or odds >= band[0] * (1 - _EPS)) and (band[1] is None
+                                                                             or odds <= band[1] * (1 + _EPS))
+
+            if not within((asked.odds_min, asked.odds_max)):
+                band = next((banded(f) for f in BAND_STEPS if within(banded(f))), None)
+                add("odds_band", [asked.odds_min, asked.odds_max], list(band) if band else [None, None])
+    if asked.legs is not None and n != asked.legs:
+        add("legs", asked.legs, n)
+    return out
+
+
+def _within(relaxed: Sequence[Mapping[str, Any]], words: Sequence[Mapping[str, Any]]) -> bool:
+    """Whether a ticket relaxed as ``relaxed`` (_relaxed) breaks the person's rules no further than one relaxed as
+    ``words``: every rule it loosens is one ``words`` loosens, at a step no looser."""
+    named = {entry["rule"]: entry["to"] for entry in words}
+    for entry in relaxed:
+        rule, new = entry["rule"], entry["to"]
+        if rule not in named:
+            return False
+        old = named[rule]
+        if new == old or old is None or rule not in LOOSER:
+            continue  # the same step, the rule dropped there, or a rule that is only ever dropped
+        if new is None:
+            return False
+        if rule == "odds_band":
+            if (old[0] is not None and (new[0] is None or new[0] < old[0])) or \
+                    (old[1] is not None and (new[1] is None or new[1] > old[1])):
+                return False
+        elif LOOSER[rule] * (new - old) > _EPS:
+            return False
+    return True
+
+
+def _keeper(asked: Controls, label: str, kind: str, words: List[Dict[str, Any]]
+            ) -> Callable[[Sequence[_Leg]], bool]:
+    """Whether a swapped ticket's legs break the person's rules no further than ``words`` (a ticket's relaxed)."""
+    return lambda legs: _within(_relaxed(legs, asked, label, kind), words)
+
+
+# --- build ---------------------------------------------------------------------------------------------
+
+def build(candidates: Iterable[Candidate], controls: Controls, now: Optional[datetime.datetime] = None, *,
+          stake: Any = None, unpriced: Optional[Mapping[str, str]] = None, weights: Optional[Weights] = None
+          ) -> Result:
+    """Tickets for these controls from these candidates (see the module docstring).
+
+    ``stake`` prices the finalists (10 when None). ``unpriced`` maps a league in scope that has no prices
+    loaded to the words for it ("No prices loaded for EPL; asked for them in the background"); each becomes a
+    near miss (on top of the up to MAX_NEAR_MISSES legs). ``weights`` replaces the preset's ranking weights
+    (engine/target.py and engine/bets.py rank by the cautious expected return alone: RETURN_ONLY); the result's
+    ``ranked`` then holds the first search's best tickets as leg keys, best first, for a caller to pick from by
+    its own rules. Raises ValueError only for a bad stake.
+
+    With ``controls.best_effort`` (the default) a run whose rules give fewer tickets than asked adds the closest
+    ones closest effort finds (the module docstring); the near misses, ``blocked``, ``ranked`` and the counts in
+    ``stats`` stay those of the person's own rules (``stats["relaxation"]`` holds every round of loosening).
+    """
+    from .presets import label_for, weights_for
+    started = time.perf_counter()
+    stake = _stake(stake)
+    now = _now(now)
+    candidates = list(candidates)
+    label = label_for(controls)
+    weights = weights or weights_for(controls)
+    mode = _strict_mode(controls)
+    prep = _prepare(candidates, controls, label, now, mode.weights or weights, mode, misses=True)
+    ctx, passing = prep.ctx, prep.passing
+    chosen, first = _choose(passing, ctx, controls.tickets, set())
+    finds = [_Find(score, legs, prep, mode.kind, False) for score, legs in chosen]
+    options: List[Dict[str, Any]] = []
+    log: List[Dict[str, Any]] = []
+    budget = _Budget(RELAX_BUDGET)
+    if controls.best_effort and len(finds) < controls.tickets:
+        finds, options = _closest_effort(candidates, controls, label, now, weights, prep, finds, log, budget)
+
+    taken = {leg.key for find in finds for leg in find.legs}
+    tickets = []
+    for i, find in enumerate(finds):
+        relaxed = _relaxed(find.legs, controls, label, find.kind) if find.loosened else []
+        # A loosened search's swaps keep its own rules, which may be looser than the ticket needed (Best balance and
+        # the last round have every floor off): a swap stays within the steps the ticket's words name
+        keep = _keeper(controls, label, find.kind, relaxed) if find.loosened else None
+        ticket = _ticket(i + 1, find.score, find.legs, find.prep.ctx, label, stake, now, find.prep.passing, taken,
+                         controls, keep)
+        ticket["fit"] = _fit(find.legs, controls)
+        ticket["relaxed"] = relaxed
+        tickets.append(ticket)
 
     # Leagues with no prices loaded come first (a whole league is missing; they don't take the legs' places), then
     # up to MAX_NEAR_MISSES legs that nearly made it: the closest to passing each rule that ruled legs out (so every
@@ -1859,9 +2991,10 @@ def build(candidates: Iterable[Candidate], controls: Controls, now: Optional[dat
         {"ref": None, "key": None, "label": league, "game": None, "price": None, "book": None, "chance": None,
          "rule": "no_prices", "rules": ["no_prices"], "reason": words, "text": words, "league": league}
         for league, words in sorted((unpriced or {}).items())]
+    misses = prep.misses
     misses.sort(key=lambda item: item[:4])
     picked: List[int] = []
-    listed: Set[str] = set(best)  # a pick that passed at another book is no near miss
+    listed: Set[str] = {leg.key for leg in passing}  # a pick that passed at another book is no near miss
     per_game: Dict[str, int] = {}
     for first_of_rule in (True, False):
         rules_shown: Set[str] = set()
@@ -1890,28 +3023,102 @@ def build(candidates: Iterable[Candidate], controls: Controls, now: Optional[dat
     if controls.target_odds is not None and (controls.joint_min or controls.joint_max or controls.odds_min
                                              or controls.odds_max):
         notes.append("The target sets the ticket's odds; the preset's own odds and chance band don't apply.")
+    elif controls.target_chance is not None and (controls.joint_min or controls.joint_max or controls.odds_min
+                                                 or controls.odds_max):
+        notes.append("The target chance sets the ticket; the preset's own odds and chance band don't apply.")
     if controls.prefer_correlation:
         notes.append("Positive correlation is for ideas only: no same-game ticket is built without a book's own "
                      "same-game price, which isn't loaded.")
-    if tickets and len(tickets) < controls.tickets:
+    if options:
+        notes.append("No one ticket meets both your odds and your chance: each option is the closest for its aim, "
+                     "with its real odds and chance.")
+    elif tickets and len(tickets) < controls.tickets and budget.cut:
+        notes.append(f"Only {len(tickets)} ticket{'s' if len(tickets) != 1 else ''} found within the search's time "
+                     f"limit (you asked for {controls.tickets}).")
+    elif tickets and len(tickets) < controls.tickets:
         notes.append(f"Only {len(tickets)} ticket{'s' if len(tickets) != 1 else ''} sharing no leg fit"
                      f"{'s' if len(tickets) == 1 else ''} the rules (you asked for {controls.tickets}).")
+    if not options and any(t["relaxed"] for t in tickets):
+        notes.append("Nothing met every rule exactly, so the closest tickets are shown, each with the rules it "
+                     "relaxed.")
+    if controls.target_chance is not None and controls.target_odds is None and tickets \
+            and not any(t["fit"]["meets"]["chance"] for t in tickets):
+        notes.append(f"No ticket reaches {_a_pct(controls.target_chance)} chance: these are the likeliest there are.")
     if any(t["model_priced"] for t in tickets):
         notes.append("Some legs are priced at fair odds by the goals model; check your bookmaker's price.")
 
     target = None
     if controls.target_odds is not None:
+        low, high = _window(controls)
         target = {"odds": controls.target_odds, "low": round(low, 4), "high": round(high, 4),
                   "tolerance_pct": controls.tolerance_pct}
-    blocked = None if tickets else _blocked(rules, removed, passing, ctx, len(candidates), unpriced or {}, lone)
+    blocked = None if tickets else _blocked(prep.rules, prep.removed, passing, ctx, len(candidates), unpriced or {},
+                                            prep.lone)
     stats = {"candidates": len(candidates), "passed": len(passing),
              "games": len({leg.gbit for leg in passing}), "combos": ctx.tried,
-             "removed": {rule: count for rule, count in removed.items() if count},
+             "removed": {rule: count for rule, count in prep.removed.items() if count},
              "rejected": {rule: count for rule, count in ctx.rejected.items() if count},
              "ms": round((time.perf_counter() - started) * 1000, 1)}
+    if log:
+        stats["relaxation"] = log
     return Result(label=label, controls=controls, tickets=tickets, near_misses=near_misses, blocked=blocked,
                   stats=stats, notes=notes, ideas=_ideas(passing) if controls.prefer_correlation else [],
-                  target=target, stake=str(stake.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)), ranked=first)
+                  target=target, stake=str(stake.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)), ranked=first,
+                  options=options)
+
+
+# --- the likeliest winners -----------------------------------------------------------------------------
+
+def top_picks(candidates: Iterable[Candidate], n: int = 10, markets: Iterable[str] = ("h2h",),
+              min_price: Optional[float] = None, *, now: Optional[datetime.datetime] = None,
+              max_price_age_s: Optional[int] = None) -> List[Dict[str, Any]]:
+    """The likeliest winners: single legs in ``markets`` by the brain's chance, highest first (ties by the edge
+    against the price), one a game, at most ``n``. Each pick is {ref, key, league, label, game, start, chance,
+    chance_source, price, book, edge, why}, priced at the best price book (never a SHARP_BOOKS book or an
+    exchange, never a leg the goals model prices at fair odds or a game under way); ``min_price`` leaves out
+    shorter prices. With ``now`` a game that has started is left out, with ``max_price_age_s`` an older price (the
+    caller's own checks may do both)."""
+    wanted = {str(market).strip().lower() for market in (markets or ("h2h",))}
+    when = _now(now) if now is not None else None
+    rows = []
+    books: Dict[str, bool] = {}
+    for cand in candidates:
+        if cand.market not in wanted or "live" in cand.flags or "model_price" in cand.flags or cand.chance <= 0.001:
+            continue
+        if max_price_age_s is not None and cand.price_age_s > max_price_age_s:
+            continue
+        if when is not None:
+            start = _parse_time(cand.start)
+            if start is None or start <= when:
+                continue
+        offers = dict(cand.prices or {})
+        offers.setdefault(cand.book, cand.price)
+        usable = []
+        for book, price in offers.items():
+            if book not in books:
+                books[book] = _price_book(book)
+            if books[book]:
+                usable.append((price, book))
+        if not usable:
+            continue
+        price, book = max(usable, key=lambda pair: (pair[0], pair[1] == cand.book, pair[1]))
+        if min_price is not None and float(price) < float(min_price) - _EPS:
+            continue
+        rows.append((cand, price, book, edge_of(cand.chance, cand.push, price)))
+    rows.sort(key=lambda row: (-row[0].chance, -row[3], row[0].key))
+    picks: List[Dict[str, Any]] = []
+    games: Set[str] = set()
+    for cand, price, book, edge in rows:
+        if len(picks) >= max(0, int(n)):
+            break
+        if cand.game_key in games:
+            continue
+        games.add(cand.game_key)
+        picks.append({"ref": dict(cand.ref), "key": cand.key, "league": cand.league, "label": cand.label,
+                      "game": cand.game, "start": cand.start, "chance": round(cand.chance, 4),
+                      "chance_source": cand.chance_source, "price": str(price), "book": book, "edge": round(edge, 4),
+                      "why": cand.why[:3], **_why_units(cand)})
+    return picks
 
 
 def market_catalog(soccer: bool = True) -> Dict[str, Dict[str, Any]]:

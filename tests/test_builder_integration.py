@@ -130,7 +130,8 @@ def test_a_run_carries_every_field_the_app_reads(world) -> None:
 
 def test_a_blocked_run_says_which_rules_and_how_many(world) -> None:
     client = world.client()
-    result = run(client, {"preset": "risky", "legs": 6, "target_odds": 20, "min_chance": 0.55})
+    # Strict (closest effort off): nothing fits, and blocked says why
+    result = run(client, {"preset": "risky", "legs": 6, "target_odds": 20, "min_chance": 0.55, "best_effort": False})
     assert not result["tickets"]
     blocked = result["blocked"]
     assert {"message", "rules", "scope", "ticket_rules", "passed", "relax"} <= set(blocked)
@@ -139,6 +140,11 @@ def test_a_blocked_run_says_which_rules_and_how_many(world) -> None:
     assert blocked["rules"][0] == {"rule": "min_chance", "label": "min chance 55%",
                                    "removed": result["stats"]["removed"]["min_chance"]}
     assert blocked["passed"]["games"] < 6 and "min chance 55%" in blocked["relax"]
+    # Closest effort (the default): the closest ticket, with the rule it loosened in words, and nothing blocked
+    closest = run(client, {"preset": "risky", "legs": 6, "target_odds": 20, "min_chance": 0.55})
+    assert closest["tickets"] and closest["blocked"] is None
+    assert all(t["relaxed"] and all(entry["words"] for entry in t["relaxed"]) for t in closest["tickets"])
+    assert any(entry["rule"] == "min_chance" for t in closest["tickets"] for entry in t["relaxed"])
 
 
 # --- a swap: the price route and the engine agree -----------------------------------------------------------------
@@ -240,7 +246,9 @@ def test_ask_ai_builds_with_the_controls_through_the_real_assistant(world) -> No
     if result["tickets"]:
         cards = reply["cards"]
         assert cards and all(card["builder"] and card["label"] == "Custom" for card in cards)
-        assert all(len(card["ticket"]["legs"]) == 5 for card in cards)
+        # Five legs, unless closest effort changed the count and says so
+        assert all(len(card["ticket"]["legs"]) == 5 or any(entry["rule"] == "legs" for entry in card["relaxed"])
+                   for card in cards)
         assert all({ref["league"] for ref in card["refs"]} <= {NBA, EPL} for card in cards)
         # The ticket's own notes ride in the ticket; a card's "notes" would be per-leg notes to the app
         assert all("notes" not in card and isinstance(card["ticket"]["notes"], list) for card in cards)

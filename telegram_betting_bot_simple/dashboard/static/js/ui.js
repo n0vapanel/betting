@@ -695,6 +695,20 @@ export const GLOSSARY = {
     example: "Target 20x at ±10%: tickets paying 18x to 22x qualify.",
     see: "#/build/builder",
   },
+  target_chance: {
+    title: "Chance you want",
+    short: "How often you want the whole ticket to win, like 80%: every leg has to win.",
+    body: "Set it alone and the Builder finds the highest odds that still win at least that often. Set it with the odds you want and it looks for tickets that do both; when none can, Closest effort shows the closest options, each with its real odds and chance: the likeliest at your odds, the closest to your chance and the best balance of the two. A higher chance means shorter odds: the chance and the payout pull against each other.",
+    example: "2 legs at about 3.5x with an 80% chance: no ticket does both, so you get, for example, 3.52x that wins about 27% of the time, and 1.24x that wins about 78%.",
+    see: "#/build/builder",
+  },
+  closest_effort: {
+    title: "Closest effort",
+    short: "When nothing fits your controls exactly, the Builder still builds the closest tickets and says what it relaxed.",
+    body: "It loosens one rule at a time, the one blocking the most first: the per-leg chance (5 points a step), each leg's odds range, the minimum edge, the ticket's chance band, the value rules, then the window around your odds (±10%, 20%, 35%, 60%), and last the number of legs. It stops as soon as tickets appear, and each ticket says what was relaxed and how close it gets to what you asked. It never relaxes started games, how old a price may be, your bookmakers, your markets or one leg per game. Switch it off for Strict: only exactly what you asked, or nothing.",
+    example: "Safe wants each leg of a multi at 72%+. A 2-leg ticket near 3.5x needs a leg nearer 53%, so the ticket says \"Relaxed: per-leg chance lowered from 72% to 52%\".",
+    see: "#/help/builder",
+  },
   edge: {
     title: "Edge",
     short: "A leg's chance minus the chance its price implies, in points: positive means the price pays more than the chance says it should.",

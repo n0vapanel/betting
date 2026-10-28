@@ -25,7 +25,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 import anthropic
 from pydantic import BaseModel, ValidationError
@@ -584,28 +584,28 @@ def one_in_text(n: Any) -> str:
 # --- explaining a ticket -----------------------------------------------------------------------
 
 EXPLAIN_PROMPT = """\
-You explain a betting ticket to the person who built it. Our code has already worked out every number \
-and gives you a JSON fact sheet: the priced ticket (each leg's odds, the AI's chance and the market's \
-chance, the ticket's chance as "1 in X", what the bookmaker keeps, the expected result in money and the \
-most likely outcome), notes on each leg (injuries, where the AI and the market disagree, analysts' \
-views, rest days) and alternatives the code worked out.
+You are the app's betting analyst, analysing a ticket for the person who built it. Our code has already \
+worked out every number and gives you a JSON fact sheet: the priced ticket (each leg's odds, the AI's chance \
+and the market's chance, the ticket's odds and its chance as "1 in X", what the bookmaker keeps, the expected \
+result in money and the most likely outcome), notes on each leg (injuries, where the AI and the market \
+disagree, analysts' views, rest days) and alternatives the code worked out.
 
 Write three things:
-- verdict: one or two plain sentences on what this ticket is: its chance as "1 in X" (with the \
-percentage if you like), what the bookmaker keeps, and the expected result in money. Use the fixed \
+- verdict: one or two plain sentences that lead with the picks and the ticket's odds and chance, once \
+("Knicks and Celtics at 3.52, wins about 1 in 3"), then the weakest leg and why, in a few words. Use the \
 chance words from the sheet (favourite, coin flip, underdog, long shot, lottery ticket).
-- per_leg: one entry per leg, by its index from the sheet: one or two sentences on that leg using \
-its notes.
-- case_against: the strongest honest reason not to place the ticket, in one or two sentences (the \
-weakest leg, the bookmaker's compounded cut, a note that worries you).
+- per_leg: one entry per leg, by its index from the sheet: one or two sentences on that leg using its notes.
+- case_against: one short line: the main risk (the weakest leg's note, the bookmaker's cut or a note that \
+worries you).
 
 Rules:
 - Every number you write must come from the fact sheet. You may round it or show a chance as a \
 percentage; never add, subtract, multiply or divide numbers, and never estimate one yourself.
-- Never use these words or ideas: lock, guaranteed, sure thing, risk-free, can't lose, win back, \
-chasing losses. Never call a ticket or a leg safe ("Safe" is only the name of a risk tier). Never \
-suggest a bigger stake or adding legs.
-- You explain; you don't tip. Plain English for a casual fan, no markdown, no emojis.
+- Never claim certainty (lock, guaranteed, sure thing, risk-free, can't lose), never say win back or \
+chasing losses, never call a ticket or a leg safe ("Safe" is only the name of a preset) and never suggest \
+a bigger stake or adding legs. "Most likely", "strongest" and "best pick" are fine.
+- No lectures or moralising: one plain line of numbers is the honesty. Short, confident and direct, plain \
+English for a casual fan, no markdown, no emojis.
 """
 
 EXPLAIN_SCHEMA: Dict[str, Any] = {
@@ -681,8 +681,93 @@ def leg_indexes(fact_sheet: Dict[str, Any]) -> List[int]:
     return indexes or sorted(_leg_notes(fact_sheet))
 
 
+MAX_PICKS_NAMED = 4  # picks named in a template's first sentence; the rest are counted ("and 3 more")
+
+
+def picks_text(labels: Sequence[Any], most: int = MAX_PICKS_NAMED) -> str:
+    """A ticket's picks in a few words: "Knicks to win, Over 221.5 and Heat +3.5" ("... and 3 more" past
+    ``most``)."""
+    names = [" ".join(str(label).split()) for label in labels if label]
+    if not names:
+        return ""
+    shown, rest = names[:most], len(names) - most
+    if rest > 0:
+        return ", ".join(shown) + f" and {rest} more"
+    return shown[0] if len(shown) == 1 else ", ".join(shown[:-1]) + f" and {shown[-1]}"
+
+
+_GAME_SIDES = re.compile(r"\s+(?:@|vs\.?|v)\s+", re.I)
+
+
+def short_game(game: Any) -> str:
+    """A game in a few words: "Utah Jazz @ Denver Nuggets" -> "Jazz @ Nuggets" (each side's last word; the full
+    names when those would read the same, or the game as given when it isn't "away @ home")."""
+    text = " ".join(str(game or "").split())
+    sides = _GAME_SIDES.split(text, maxsplit=1)
+    if len(sides) != 2 or not all(sides):
+        return text
+    joiner = _GAME_SIDES.search(text).group(0).strip()  # type: ignore[union-attr]
+    short = [side.split()[-1] for side in sides]
+    if short[0].lower() == short[1].lower():
+        short = sides
+    return f"{short[0]} {joiner} {short[1]}"
+
+
+def leg_name(leg: Mapping[str, Any]) -> str:
+    """A leg's label for a sentence, with its game in a few words when the label names neither team ("Under 230.5
+    (Jazz @ Nuggets)", "Draw (Arsenal @ Chelsea)"), so two totals can be told apart."""
+    label = " ".join(str(leg.get("label") or "").split())
+    game = " ".join(str(leg.get("game") or "").split())
+    sides = _GAME_SIDES.split(game, maxsplit=1)
+    if not label or len(sides) != 2 or not all(sides):
+        return label
+    low = label.lower()
+    if any(side.lower() in low or side.split()[-1].lower() in low for side in sides):
+        return label
+    return f"{label} ({short_game(game)})"
+
+
+def first_reason(why: Any) -> Optional[str]:
+    """A pick's reason in a few words: the first ``why`` entry that isn't its chance again ("Markets say 79% (Sharp
+    79% · US 79%)" repeats the number beside it), else that one."""
+    entries = [str(entry).strip() for entry in (why if isinstance(why, list) else [why] if why else [])
+               if isinstance(entry, str) and entry.strip()]
+    for entry in entries:
+        if not entry.lower().startswith(("markets say", "books say")):
+            return entry
+    return entries[0] if entries else None
+
+
+def _odds_of(value: Any) -> Optional[float]:
+    """Decimal odds as a number (from 3.52, "3.52" or {"decimal": 3.52}), or None."""
+    if isinstance(value, dict):
+        value = value.get("decimal")
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) and number > 1 else None
+
+
+def _chance_words(one_in: Any, p: Any) -> str:
+    """A ticket's chance as "1 in 3 (31%)" when it is under even, else "66% of the time": decided by the chance
+    itself, since "1 in X" is 1/p rounded (anything from about 40% to 66% is "1 in 2", which beside 66% reads as
+    50%)."""
+    number = isinstance(p, (int, float)) and not isinstance(p, bool)
+    if number and p >= 0.5:
+        return f"{pct(p)} of the time"
+    if isinstance(one_in, (int, float)) and not isinstance(one_in, bool) and one_in >= 2:
+        return f"{one_in_text(one_in)} ({pct(p)})" if number else one_in_text(one_in)
+    return f"{pct(p)} of the time"
+
+
 def template_explanation(fact_sheet: Dict[str, Any]) -> Dict[str, Any]:
-    """The same three texts written by code from the fact sheet (used when Claude's fail the checks)."""
+    """The same three texts written by code from the fact sheet (used when Claude's fail the checks), as the
+    analyst would put them: the verdict leads with the picks and the ticket's odds and chance, then the weakest
+    leg; the case against is one short line (a price at fair odds to check, else the bookmaker's cut and the
+    expected result)."""
     ticket = _ticket(fact_sheet)
     chance = ticket.get("chance") or {}
     expected = ticket.get("expected") or {}
@@ -694,27 +779,28 @@ def template_explanation(fact_sheet: Dict[str, Any]) -> Dict[str, Any]:
     only_fair = bool(fair) and len(fair) == len(legs)
     who = "the goals model" if only_fair else "the AI and the goals model" if fair else "the AI"
     parts = []
+    head = picks_text([leg_name(leg) for leg in legs])
+    odds = _odds_of(ticket.get("odds"))
+    if head and odds is not None:
+        head += f" at {odds:.2f}"
     if chance.get("ai_one_in") or chance.get("market_one_in"):
         views = []
         if chance.get("ai_one_in"):
-            views.append(f"about {one_in_text(chance['ai_one_in'])} ({pct(chance.get('ai'))}) by {who}")
+            views.append(f"about {_chance_words(chance['ai_one_in'], chance.get('ai'))} by {who}"
+                         + (" at fair odds" if fair else ""))
         if chance.get("market_one_in"):
-            views.append(f"{one_in_text(chance['market_one_in'])} ({pct(chance.get('market'))}) by the market")
-        label = f"{str(chance['label']).capitalize()}: " if chance.get("label") else ""
-        what = "a profit" if chance.get("headline") == "profit" else "every leg winning"
-        parts.append(f"{label}the chance of {what} is " + " and ".join(views) + ".")
-    cut = ticket.get("book_cut")
-    if cut is not None and cut >= 0:
-        parts.append(f"The bookmaker keeps about {pct(cut, 1)} of money staked on tickets like this.")
-    elif cut is not None:
-        parts.append("These best prices beat the bookmakers' consensus, so there is no cut on the market's view: "
-                     "check they are still on offer.")
-    basis = "ai" if expected.get("ai") is not None else "market"
-    if expected.get(basis) is not None and stake:
-        value = Decimal(str(expected[basis]))
-        word = "lose about {} of" if value < 0 else "make about {} on"
-        view = (f"{who}'s view" + (", at fair odds" if fair else "")) if basis == "ai" else "the market's view"
-        parts.append(f"On average you {word.format(money(abs(value)))} your {money(stake)} ({view}).")
+            views.append(f"{_chance_words(chance['market_one_in'], chance.get('market'))} by the market")
+        what = "makes a profit" if chance.get("headline") == "profit" else "wins"
+        label = f" ({chance['label']})" if chance.get("label") else ""
+        parts.append((f"{head}: " if head else "") + f"{what} " + " and ".join(views) + f"{label}.")
+    elif head:
+        parts.append(f"{head}.")
+    weakest = ticket.get("weakest_leg")
+    if len(legs) > 1 and isinstance(weakest, int) and not isinstance(weakest, bool) and 0 <= weakest < len(legs):
+        leg = legs[weakest]
+        p = leg.get("ai_prob") if leg.get("ai_prob") is not None else leg.get("market_prob")
+        parts.append(f"The weakest leg is {leg_name(leg) or 'one leg'}" + (f" at {pct(p)}" if p is not None else "")
+                     + ".")
     verdict = " ".join(parts) or "This ticket couldn't be priced, so there is nothing to explain yet."
 
     notes = _leg_notes(fact_sheet)
@@ -739,23 +825,96 @@ def template_explanation(fact_sheet: Dict[str, Any]) -> Dict[str, Any]:
             text += " " + notes[index][0].rstrip(".") + "."
         per_leg.append({"index": index, "text": text})
 
-    against = []
-    weakest = ticket.get("weakest_leg")
-    if isinstance(weakest, int) and 0 <= weakest < len(legs):
-        leg = legs[weakest]
-        p = leg.get("ai_prob") if leg.get("ai_prob") is not None else leg.get("market_prob")
-        against.append(f"The weakest leg is {leg.get('label', 'one leg')}" + (f" at {pct(p)}" if p is not None else "") + ".")
-    if len(legs) > 1 and not only_fair:
-        against.append("Each extra leg adds the bookmaker's cut again.")
+    # The case against, one short line: a price at fair odds to check, else what the bookmaker keeps and the
+    # expected result in money
+    outcome = None
+    basis = "ai" if expected.get("ai") is not None else "market"
+    if expected.get(basis) is not None and stake:
+        value = Decimal(str(expected[basis]))
+        word = "lose about {} of" if value < 0 else "make about {} on"
+        view = f"{who}'s view" if basis == "ai" else "the market's view"
+        outcome = f"on average you {word.format(money(abs(value)))} your {money(stake)} ({view})"
+    cut = ticket.get("book_cut")
     if fair:
-        names = ", ".join(str(leg.get("label", "a leg")) for leg in fair)
-        against.append(f"{names} {'is' if len(fair) == 1 else 'are'} priced at fair odds: no bookmaker here offers "
-                       "that price, and theirs is usually lower, so check it.")
-    most = ticket.get("most_likely") or {}
-    if most.get("result") and most.get("probability") is not None:
-        against.append(f"The most likely result is {most['result']} ({pct(most['probability'])}).")
-    case_against = " ".join(against) or "Every bet carries the bookmaker's cut, so the expected result is a loss."
+        names = picks_text([leg.get("label") or "a leg" for leg in fair])
+        case_against = (f"{names} {'is' if len(fair) == 1 else 'are'} priced at fair odds: no bookmaker here offers "
+                        "that price, so check yours.")
+    elif cut is not None and cut >= 0:
+        case_against = (f"The bookmaker keeps about {pct(cut, 1)} of money staked on tickets like this"
+                        + (f"; {outcome}" if outcome else "") + ".")
+    elif cut is not None:
+        case_against = ("These best prices beat the bookmakers' consensus: check they are still on offer"
+                        + (f"; {outcome}" if outcome else "") + ".")
+    elif outcome:
+        case_against = f"{outcome[0].upper()}{outcome[1:]}."
+    else:
+        case_against = "Every bet carries the bookmaker's cut."
     return {"verdict": verdict, "per_leg": per_leg, "case_against": case_against}
+
+
+def relaxed_texts(entries: Any) -> List[str]:
+    """The rules closest effort loosened (engine/builder.py's ``relaxed``: [{rule, from, to, words}], or the words
+    alone), as their words, in order and once each."""
+    words: List[str] = []
+    for entry in entries or []:
+        text = entry.get("words") if isinstance(entry, dict) else entry
+        if isinstance(text, str) and text.strip() and text.strip() not in words:
+            words.append(text.strip())
+    return words
+
+
+def builder_template(cards: Sequence[Dict[str, Any]], most: int = 3) -> str:
+    """The chat's answer in code's own words for Builder tickets (ticket_build's cards), when Claude's text failed
+    the checks: one line per ticket that leads with its option label ("Likeliest at your odds") or title, its picks,
+    its odds and its chance (the ticket's ``fit`` when closest effort gave one, else its own numbers), and the rules
+    the Builder relaxed for that ticket, quoted on its own line (each option loosens its own way). It never refuses:
+    the tickets are what code built."""
+    lines = []
+    shown = list(cards)[:most]
+    for card in shown:
+        ticket = card.get("ticket") or {}
+        fit = card.get("fit") if isinstance(card.get("fit"), dict) else {}
+        option = card.get("option") if isinstance(card.get("option"), dict) else {}
+        name = option.get("label") or card.get("title") or "Ticket"
+        odds = _odds_of(fit.get("odds")) or _odds_of(ticket.get("odds"))
+        chance = fit.get("chance")
+        if chance is None:
+            chance = (ticket.get("joint") or {}).get("chance")
+        if chance is None:
+            chance = (ticket.get("chance") or {}).get("ai")
+        line = f"{name}: {picks_text([leg_name(leg) for leg in ticket.get('legs') or []]) or 'these picks'}"
+        if odds is not None:
+            line += f", {odds:.2f}x"
+        if isinstance(chance, (int, float)) and not isinstance(chance, bool):
+            line += f", wins about {pct(chance)} of the time"
+        words = relaxed_texts(card.get("relaxed"))
+        if words:
+            line += f" (relaxed: {'; '.join(words)})"
+        lines.append(line + ".")
+    lines.append("The cards below have the details." if len(shown) > 1 else "The card below has the details.")
+    return "\n".join(lines)
+
+
+def picks_template(card: Dict[str, Any], most: int = 5) -> str:
+    """The chat's answer in code's own words for the likeliest winners (brain_top_picks' card), strongest first:
+    each pick's chance, price and book and why, in a few words (first_reason: not the chance again)."""
+    picks = [pick for pick in card.get("picks") or [] if isinstance(pick, dict)]
+    if not picks:
+        return "No game in scope has prices loaded right now: try another sport."
+    lines = ["The most likely winners, strongest first:"]
+    for i, pick in enumerate(picks[:most], 1):
+        line = f"{pick.get('rank') or i}. {pick.get('label') or 'A pick'}"
+        if isinstance(pick.get("chance"), (int, float)):
+            line += f", {pct(pick['chance'])}"
+        odds = _odds_of(pick.get("price"))
+        if odds is not None:
+            line += f" at {odds:.2f}" + (f" ({pick['book']})" if pick.get("book") else "")
+        first = first_reason(pick.get("why"))
+        if first:
+            line += f": {first.rstrip('.')}"
+        lines.append(line + ".")
+    lines.append("Add any of them to your slip from the card below.")
+    return "\n".join(lines)
 
 
 def _texts(result: Dict[str, Any]) -> List[str]:

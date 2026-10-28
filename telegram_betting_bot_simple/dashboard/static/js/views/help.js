@@ -303,7 +303,7 @@ function builderHtml() {
       <p class="small muted" style="margin-top:8px">Every preset ranks legs by a cautious chance (the blend minus 2 points) and uses moneylines, spreads and totals. Change a control that shapes the risk and the label turns to “Custom”; sports, time, bookmakers and the number of tickets keep the preset's name.</p>`, { info: "tiers" })}
     ${section("The controls", points([
       ["today", "<b>Scope</b>: sports and leagues (the same tree as Today, with “All sports”), the time window (today, the next 24 hours, 3 days or your own), a kick-off window in your time. Games already started are always left out: their prices are from before the start."],
-      ["target", `<b>Shape</b>: 1 to 12 legs or Auto, <a href="#/help/target_odds">target odds</a> with a ± <a href="#/help/tolerance">tolerance</a> (or a stake and “win about”, which set it), each leg's odds range, minimum chance and <a href="#/help/edge">edge</a>, and the most legs per team and league (always one per game).`],
+      ["target", `<b>Shape</b>: 1 to 12 legs or Auto, the <a href="#/help/target_odds">odds you want</a> with a ± <a href="#/help/tolerance">tolerance</a> (or a stake and “win about”, which set it), the <a href="#/help/target_chance">chance you want</a> (Any, 50% to 90% or your own), the <a href="#/help/closest_effort">Closest effort</a> switch, each leg's odds range, minimum chance and <a href="#/help/edge">edge</a>, and the most legs per team and league (always one per game).`],
       ["build", `<b>Markets</b>: moneyline, spread, totals, and for soccer both teams to score, draw no bet, double chance and team totals from the <a href="#/help/dixon_coles">goals model</a>. Props, corners and cards arrive later and are greyed out.`],
       ["swap", "<b>Correlation</b>: one leg per game, always: a same-game ticket needs a bookmaker's own same-game price, which isn't loaded. “Prefer positive correlation” only suggests same-game ideas."],
       ["shield", `<b>Data rules</b>: the oldest <a href="#/help/data_age">price</a> allowed (3 hours unless you change it), leave out games whose sources disagree or thin markets, and which bookmakers to use (never Pinnacle or an exchange).`],
@@ -313,8 +313,22 @@ function builderHtml() {
       ["check", "Every leg goes through your rules. A leg that fails one is a <a href=\"#/help/near_miss\">near miss</a>, named with the rule it failed."],
       ["chart", "Tickets of up to 4 legs are tried in every combination of the best 40 legs; longer ones, up to 12, by a beam search that keeps the best partial tickets on the way."],
       ["scale", "Tickets are ranked by how close they land to your target, the cautious expected return and the chance of winning, weighted by the preset, then priced exactly at your stake."],
-      ["alert", "When nothing fits, it says which rules ruled out how many legs, so you know what to relax."],
+      ["alert", "With Strict on and nothing that fits, it says which rules ruled out how many legs, so you know what to relax."],
     ], "info"))}
+    ${section("Closest effort", `<p>Ask for something no ticket can do exactly and the Builder still builds: it gets as close as it can and tells you how close. Closest effort is on unless you switch it to <b>Strict: only exactly what I asked</b>, and it's saved with your controls.</p>
+      ${points([
+        ["sliders", "It loosens one rule at a time, the one blocking the most first: the chance each leg needs (5 points a step), each leg's odds range, the minimum edge, the ticket's chance band, the value rules, then the window around your odds (±10%, 20%, 35%, 60%), and last the number of legs. It stops as soon as tickets appear."],
+        ["info", "Each ticket says what was loosened in a muted “Relaxed:” line, e.g. “Relaxed: per-leg chance lowered from 60% to 55%”."],
+        ["shield", "Never loosened: games already started, how old a price may be, your bookmakers, the markets you chose, one leg per game and the sports and time you picked."],
+      ])}
+      <h3 class="subhead">Odds and a chance together</h3>
+      <p>Set both the odds you want and the chance you want, and when no single ticket does both you get up to three options, each with a chip above it:</p>
+      ${points([
+        ["target", "<b>Likeliest at your odds</b>: pays about what you asked, with the best chance a ticket at those odds has."],
+        ["shield", "<b>Closest to your chance</b>: wins about as often as you asked (or as often as any ticket can), at the best odds that allows."],
+        ["scale", "<b>Best balance</b>: the nearest to both at once."],
+      ])}
+      <p class="small muted" style="margin-top:8px">Every ticket shows its real numbers next to yours, e.g. “3.52x · 27% (you asked 3.5x · 80%)”. The numbers are never bent to look closer: a higher chance always means shorter odds.</p>`, { info: "closest_effort" })}
     ${section("On each ticket", points([
       ["bets", "The odds, what it pays at your stake, the chance every leg wins as “1 in N” with its fair odds (with a draw-no-bet leg, whose draw gives the stake back, also the chance it wins money), the chance of reaching your target, the expected result in money and what the bookmakers keep."],
       ["info", "Each leg: the pick, price and bookmaker, its chance and edge, how old its price is, a “Why” line (the brain's top reasons and the main risk) and Swap: alternatives that keep every rule, re-priced without building again."],
@@ -326,6 +340,7 @@ function builderHtml() {
       ["alert", "The aim is to match the market and explain it, not to beat it: most tickets lose a little on average, and the card says how much."],
     ], "warn"))}
     <div class="hp-actions"><a class="btn btn-primary" href="#/build/builder">${icon("build", { size: 18 })}Open the Builder</a>
+      <a class="btn btn-secondary" href="#/help/closest_effort">${icon("sliders", { size: 18 })}Closest effort</a>
       <a class="btn btn-secondary" href="#/help/target_odds">${icon("target", { size: 18 })}Target odds</a>
       <a class="btn btn-secondary" href="#/help/near_miss">${icon("info", { size: 18 })}Near misses</a></div>`;
 }

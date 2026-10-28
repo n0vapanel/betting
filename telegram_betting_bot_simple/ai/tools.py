@@ -32,6 +32,16 @@ by the Lab) is re-analysed with pasted_slip_analyse: by its id, and only one
 pasted in this chat, with legs left out by number, another stake (checked
 like every stake: the slip's own, or less) or another ticket type. Its
 results carry the slip's numbers as the person's bookmaker wrote them.
+
+Closest effort (v3): ticket_build never comes back empty-handed while a leg
+is eligible. Asked for what no ticket can do (2 legs at 3.5x with an 80%
+chance), the Builder's closest tickets come back, each card titled by its
+option ("Likeliest at your odds", "Closest to your chance", "Best balance")
+with its fit and the rules relaxed for it, and the facts carry the same numbers
+for Claude to quote (each option with its own relaxed words: the options
+loosen the same rule to different steps). brain_top_picks ranks the likeliest winners (the Builder's
+legs, one a game, by the brain's chance) as a card of picks, each with its
+own "Add to slip".
 """
 
 from __future__ import annotations
@@ -45,13 +55,15 @@ from decimal import ROUND_DOWN, Decimal
 from typing import Any, Callable, Dict, Iterable, List, Literal, Mapping, Optional, Sequence, Set, Tuple
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from ..dashboard.lab import MAX_TOP_PICKS, OPTION_LABELS, TOP_PICKS
 from ..dashboard.service import CallRejected, NotFound
 from ..data.leagues import POPULAR_LEAGUES
 from ..engine import consensus
 from ..engine.pasted import system_key
 from ..engine.tickets import ai_given_no_push, chance_label, combinations, one_in
+from .explain import relaxed_texts
 
 # The leagues the assistant may name and load odds for, chosen on purpose (not every scoreboard the slate shows):
 # each key is spelled out in the router prompt and in about ten tool schemas, so every key costs input tokens on
@@ -59,6 +71,13 @@ from ..engine.tickets import ai_given_no_push, chance_label, combinations, one_i
 ASSISTANT_LEAGUES = ("basketball_wnba",)
 LEAGUE_KEYS: Tuple[str, ...] = tuple(sorted(set(POPULAR_LEAGUES) | set(ASSISTANT_LEAGUES)))
 MARKETS = ("h2h", "spreads", "totals")
+# Short names for the leagues the assistant knows (cards and code's own sentences)
+LEAGUE_TITLES = {"basketball_nba": "NBA", "basketball_wnba": "WNBA", "basketball_ncaab": "NCAAB",
+                 "americanfootball_nfl": "NFL", "americanfootball_ncaaf": "NCAAF", "icehockey_nhl": "NHL",
+                 "baseball_mlb": "MLB", "soccer_epl": "EPL", "soccer_spain_la_liga": "La Liga",
+                 "soccer_italy_serie_a": "Serie A", "soccer_germany_bundesliga": "Bundesliga",
+                 "soccer_france_ligue_one": "Ligue 1", "soccer_usa_mls": "MLS",
+                 "soccer_uefa_champs_league": "Champions League", "mma_mixed_martial_arts": "MMA"}
 SIDES = ("home", "away", "draw", "over", "under")
 # A soccer game's goals-model markets (engine/soccer.py, priced at fair odds) may be a slip's legs too: the input
 # model takes them (Claude copies a slip's refs), though the schema lists only the board's markets to stay small
@@ -95,9 +114,12 @@ CONTEXT_NOTE = ("Attribution explains the market's line and changes no number; o
 PASTED_SOURCE = ("The user's pasted slip at their own odds, priced by the brain: chances from the market, the model "
                  "or estimated from their price minus a typical margin when the leg isn't on our boards")
 MAX_PASTED_LEGS = 20
+TOP_PICKS_SOURCE = ("The brain's likeliest winners: the Builder's legs (cached boards at books a person can bet at, never a "
+                    "game under way or a stale price), ranked by chance in code, one per game")
 # Tools that price or build tickets: off while picks are paused after a warning sign
 PICK_TOOLS = frozenset({"odds_get_prices", "brain_price_legs", "ticket_price", "ticket_build", "ticket_analyse",
-                        "rollover_simulate", "slip_propose", "player_get_props", "pasted_slip_analyse"})
+                        "rollover_simulate", "slip_propose", "player_get_props", "pasted_slip_analyse",
+                        "brain_top_picks"})
 
 
 # --- what Claude sees -------------------------------------------------------------------------------
@@ -183,21 +205,33 @@ TOOLS: List[Dict[str, Any]] = [
     {"name": "ticket_build",
      "description": "Build tickets. Stake and target alone (the user's own money; target = money back, stake "
                     "included): up to three tickets near the target with the honest ceiling and a verdict. Any of "
-                    "preset, legs, target_odds, leg odds, min_chance, markets or tickets: the Builder with those "
-                    "controls (a preset fills the rest), e.g. 5 legs across NBA and EPL at about 10x, Risky. All "
-                    "optional; never invent a stake or target.",
+                    "preset, legs, target_odds, target_chance, leg odds, min_chance, markets or tickets: the Builder "
+                    "with those controls (a preset fills the rest), e.g. 5 legs across NBA and EPL at about 10x, "
+                    "Risky. If the exact ask can't be met it builds the closest tickets: labelled options and the "
+                    "rules it relaxed. All optional; never invent a stake or target.",
      "input_schema": _obj({
          "leagues": _LEAGUES, "stake": {"type": "number"}, "target": {"type": "number"},
          "max_legs": {"type": "integer", "description": "1 to 6"},
          "tier": {"type": "string", "enum": list(TIERS)}, "preset": {"type": "string", "enum": list(TIERS)},
          "legs": {"type": "integer", "description": "exactly 1 to 12; leave out for Auto"},
          "target_odds": {"type": "number", "description": "e.g. 10 for about 10x"},
+         "target_chance": {"type": "number", "description": "the whole ticket's chance, 0.8 for 80%"},
+         "best_effort": {"type": "boolean", "description": "default true (closest tickets); false: exactly or "
+                                                           "nothing"},
          "leg_odds_min": {"type": "number"}, "leg_odds_max": {"type": "number"},
          "min_chance": {"type": "number", "description": "per leg, 0.55 for 55%"},
          "markets": {"type": "array", "items": {"type": "string", "enum": list(BUILDER_MARKETS)}},
          "tickets": {"type": "integer", "description": f"1 to {MAX_BUILD_TICKETS}"},
-     }, optional=("leagues", "stake", "target", "max_legs", "tier", "preset", "legs", "target_odds", "leg_odds_min",
-                  "leg_odds_max", "min_chance", "markets", "tickets"))},
+     }, optional=("leagues", "stake", "target", "max_legs", "tier", "preset", "legs", "target_odds", "target_chance",
+                  "best_effort", "leg_odds_min", "leg_odds_max", "min_chance", "markets", "tickets"))},
+    {"name": "brain_top_picks",
+     "description": "The likeliest winners, one pick a game, highest chance first, each with its chance, price, "
+                    "book, edge and why: for 'who will win tonight', 'best picks', 'most likely winners'.",
+     "input_schema": _obj({"leagues": _LEAGUES,
+                           "n": {"type": "integer", "description": f"1 to {MAX_TOP_PICKS} (default {TOP_PICKS})"},
+                           "markets": {"type": "array", "items": {"type": "string", "enum": list(MARKETS)},
+                                       "description": "default h2h"}},
+                          optional=("n", "markets"))},
     {"name": "ticket_analyse",
      "description": "Analyse the user's own ticket: priced, with notes per leg (injuries, AI vs market gap, "
                     "analysts' views) and alternatives the code worked out (drop the weakest leg, singles, "
@@ -279,11 +313,30 @@ class BuildInput(BaseModel):
     min_chance: Optional[float] = Field(None, ge=0, le=1)
     markets: Optional[List[Literal[BUILDER_MARKETS]]] = Field(None, min_length=1, max_length=7)  # type: ignore[valid-type]
     tickets: Optional[int] = Field(None, ge=1, le=MAX_BUILD_TICKETS)
+    target_chance: Optional[float] = Field(None, ge=0.01, le=0.99)  # the whole ticket's chance, as a share
+    best_effort: Optional[bool] = None  # None: on (closest effort is the default)
+
+    @field_validator("target_chance", mode="before")
+    @classmethod
+    def _share(cls, value: Any) -> Any:
+        """A chance written as a percentage (80 for 80%) is read as the share it means (0.8)."""
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and 1 < value <= 100:
+            return value / 100
+        return value
 
     def builder_fields(self) -> Dict[str, Any]:
-        """The Builder's controls given (beyond the target builder's stake, target, max_legs and tier)."""
-        names = ("preset", "legs", "target_odds", "leg_odds_min", "leg_odds_max", "min_chance", "markets", "tickets")
+        """The Builder's controls given (beyond the target builder's stake, target, max_legs and tier, and the
+        best_effort switch, which both builders read)."""
+        names = ("preset", "legs", "target_odds", "target_chance", "leg_odds_min", "leg_odds_max", "min_chance",
+                 "markets", "tickets")
         return {name: getattr(self, name) for name in names if getattr(self, name) is not None}
+
+
+class TopPicksInput(BaseModel):
+    """brain_top_picks' input: the leagues, how many picks and which markets (moneylines by default)."""
+    leagues: List[LeagueKey] = Field(min_length=1, max_length=MAX_LEAGUES)  # type: ignore[valid-type]
+    n: Optional[int] = Field(None, ge=1, le=MAX_TOP_PICKS)
+    markets: Optional[List[Literal[MARKETS]]] = Field(None, min_length=1, max_length=3)  # type: ignore[valid-type]
 
 
 class RolloverInput(BaseModel):
@@ -339,7 +392,7 @@ INPUTS: Dict[str, type] = {
     "player_get_props": PlayerInput, "news_get": NewsInput, "brain_price_legs": LegsInput,
     "ticket_price": TicketInput, "ticket_build": BuildInput, "ticket_analyse": TicketInput,
     "rollover_simulate": RolloverInput, "slip_propose": TicketInput, "user_get_context": NoInput,
-    "pasted_slip_analyse": PastedInput,
+    "pasted_slip_analyse": PastedInput, "brain_top_picks": TopPicksInput,
 }
 
 
@@ -498,9 +551,38 @@ def ticket_facts(ticket: Mapping[str, Any]) -> Dict[str, Any]:
 CHANCE_SOURCES = {"blend": "markets_say", "books": "books", "model": "goals_model", "adjusted": "books_adjusted"}
 
 
+def relaxed_words(ticket: Mapping[str, Any]) -> List[str]:
+    """The rules closest effort loosened for a Builder ticket ("per-leg chance lowered from 60% to 55%"), in the
+    engine's words, once each."""
+    return relaxed_texts(ticket.get("relaxed"))
+
+
+def option_of(ticket: Mapping[str, Any]) -> Optional[Dict[str, str]]:
+    """The closest-effort option that picked a Builder ticket ({key, label}), or None."""
+    option = ticket.get("option")
+    if not isinstance(option, Mapping) or not option.get("key"):
+        return None
+    key = str(option["key"])
+    return {"key": key, "label": str(option.get("label") or OPTION_LABELS.get(key) or "Closest option")}
+
+
+def fit_facts(fit: Any) -> Optional[Dict[str, Any]]:
+    """A ticket's fit to what was asked (engine/builder.py's fit block) for Claude: its odds and chance, the
+    targets, how far off each is and whether each is met."""
+    if not isinstance(fit, Mapping):
+        return None
+    out = {key: fit.get(key) for key in ("odds", "chance", "target_odds", "target_chance", "odds_gap_pct",
+                                         "chance_gap_pp")}
+    meets = fit.get("meets") if isinstance(fit.get("meets"), Mapping) else {}
+    out["meets"] = {"odds": meets.get("odds"), "chance": meets.get("chance")}
+    return out
+
+
 def builder_ticket_facts(ticket: Mapping[str, Any]) -> Dict[str, Any]:
     """A Builder ticket's numbers Claude may quote: ticket_facts, plus its label, joint chance, chance of reaching
-    the target, notes and each leg's reasons, main risk and data age.
+    the target, notes and each leg's reasons, main risk and data age; with closest effort, the option that picked
+    it (``option``: "Likeliest at your odds" ...), how close it gets (``fit``) and the rules relaxed for it
+    (``relaxed``, in words).
 
     Each leg's ``chance`` is the builder's, named by ``chance_source`` ("markets_say": the markets brain's blend;
     "books": the price books' margin-free chance; "books_adjusted": that chance moved by a forecast or roof change
@@ -524,6 +606,15 @@ def builder_ticket_facts(ticket: Mapping[str, Any]) -> Dict[str, Any]:
                      "edge": view.get("ev", fact.get("edge")), "edge_vs_price": _p(view.get("edge")),
                      "age": view.get("age"), "why": view.get("why"), "risk": view.get("risk"),
                      "fair_odds_only": bool(view.get("model_price")) or None})
+    option = option_of(ticket)
+    if option is not None:
+        facts["option"] = option["label"]
+    fit = fit_facts(ticket.get("fit"))
+    if fit is not None:
+        facts["fit"] = fit
+    words = relaxed_words(ticket)
+    if words:
+        facts["relaxed"] = words
     return trim(facts, items=MAX_LEGS)
 
 
@@ -538,6 +629,31 @@ def ticket_card(ticket: Dict[str, Any], source: str, title: Optional[str] = None
             "ticket": ticket}
     card.update(extra or {})
     return card
+
+
+def builder_card(ticket: Dict[str, Any]) -> Dict[str, Any]:
+    """A Builder ticket's card: titled by its closest-effort option when one picked it ("Likeliest at your odds"),
+    else "<label> ticket #<rank>", with ``option`` ({key, label} or None), ``fit`` and ``relaxed`` beside the ticket
+    for the app's option chip, fit line and "Relaxed: ..." line."""
+    option = option_of(ticket)
+    label = ticket.get("label") or "Custom"
+    title = option["label"] if option else f"{label} ticket #{ticket.get('rank')}"
+    return ticket_card(ticket, "ticket_build", title=title,
+                       extra={"builder": True, "label": label, "option": option, "fit": ticket.get("fit"),
+                              "relaxed": [dict(entry) for entry in ticket.get("relaxed") or []
+                                          if isinstance(entry, Mapping)]})
+
+
+def picks_card(found: Mapping[str, Any], leagues: Sequence[str]) -> Dict[str, Any]:
+    """brain_top_picks' card: the likeliest winners, ranked, each with its chance, price, book, a short why and a
+    ref the app's "Add to slip" takes ({league, id, market, side, point})."""
+    where = " + ".join(LEAGUE_TITLES.get(league, league.split("_")[-1].upper()) for league in leagues)
+    picks = []
+    for pick in found.get("picks") or []:
+        ref = dict(pick.get("ref") or {})
+        picks.append({**dict(pick), "ref": ref, "refs": [ref]})
+    return {"type": "picks", "source": "brain_top_picks", "title": f"Most likely winners · {where}".strip(" ·"),
+            "leagues": list(leagues), "picks": picks, "as_of": found.get("as_of")}
 
 
 def plan_card(body: Dict[str, Any], compare: Dict[str, Any]) -> Dict[str, Any]:
@@ -737,6 +853,7 @@ STEPS: Dict[str, Callable[[Dict[str, Any]], str]] = {
     "brain_price_legs": lambda a: f"Running the brain on {len(a.get('legs') or [])} legs…",
     "ticket_price": lambda a: f"Pricing {len(a.get('legs') or [])} legs…",
     "ticket_build": lambda a: "Building tickets…" if not a.get("preset") else f"Building {a['preset'].title()} tickets…",
+    "brain_top_picks": lambda a: "Ranking the likeliest winners…",
     "ticket_analyse": lambda a: "Analysing your ticket…",
     "rollover_simulate": lambda a: "Running the rollover numbers…",
     "slip_propose": lambda a: "Preparing a slip for you to check…",
@@ -791,7 +908,7 @@ class Toolbox:
             "player_get_props": self._props, "news_get": self._news, "brain_price_legs": self._brain,
             "ticket_price": self._price, "ticket_build": self._build, "ticket_analyse": self._analyse,
             "rollover_simulate": self._rollover, "slip_propose": self._propose, "user_get_context": self._context,
-            "pasted_slip_analyse": self._pasted,
+            "pasted_slip_analyse": self._pasted, "brain_top_picks": self._top_picks,
         }
 
     def _as_of(self) -> str:
@@ -1188,7 +1305,9 @@ class Toolbox:
 
     def _build(self, data: BuildInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
         """ticket_build: the target builder for a stake and target alone (as before), else the Builder with the
-        controls given (a preset fills the rest)."""
+        controls given (a preset fills the rest). With closest effort (``best_effort``, on unless false) a stake and
+        target the target builder finds no ticket for go to the Builder at that target's odds, which always builds
+        the closest tickets there are."""
         if data.builder_fields() or data.stake is None or data.target is None:
             return self._builder(data)
         self._check_amount("stake", data.stake, "stake")
@@ -1201,6 +1320,9 @@ class Toolbox:
         self._use_leagues(body["leagues"])
         built = self.lab.build(self.uid, body) or {}
         tickets = [t for t in built.get("tickets") or [] if isinstance(t, dict)]
+        if not tickets and data.best_effort is not False and data.target >= data.stake * Decimal("1.01") \
+                and callable(getattr(self.lab, "builder_run", None)):
+            return self._builder(data)  # the closest the Builder can get to the target's odds
         frame = ("stake", "target_return", "target_profit", "multiple", "target_odds", "ceiling_chance",
                  "ceiling_one_in", "no_edge", "lottery", "short_odds", "edge", "expected_cost", "verdict", "notes",
                  "errors", "odds_as_of")
@@ -1219,7 +1341,9 @@ class Toolbox:
 
     def _builder(self, data: BuildInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
         """The Builder (POST /api/builder/run's code) with the controls Claude passed: amounts only as the user
-        gave them (a stake prices the tickets; a stake and target set the target odds), tickets at most three."""
+        gave them (a stake prices the tickets; a stake and target set the target odds), tickets at most three, and
+        closest effort on unless ``best_effort`` is false. The facts carry each closest-effort option (its label,
+        ticket and fit) with the rules relaxed for that ticket, in the engine's words."""
         controls: Dict[str, Any] = data.builder_fields()
         preset = controls.pop("preset", None) or data.tier
         if preset:
@@ -1229,6 +1353,7 @@ class Toolbox:
         if data.legs is None and data.max_legs is not None:
             controls["legs_max"] = data.max_legs
         controls["tickets"] = min(controls.get("tickets") or MAX_BUILD_TICKETS, MAX_BUILD_TICKETS)
+        controls["best_effort"] = data.best_effort is not False
         stake = None
         if data.stake is not None:
             self._check_amount("stake", data.stake, "stake")
@@ -1252,21 +1377,78 @@ class Toolbox:
                         "near_misses": [m.get("text") or m.get("reason") for m in built.get("near_misses") or []],
                         "unpriced": [u.get("reason") for u in built.get("unpriced") or []]}, items=12)
         content["tickets"] = [builder_ticket_facts(ticket) for ticket in tickets]
+        options = []
+        for entry in built.get("options") or []:
+            index = entry.get("ticket_index") if isinstance(entry, Mapping) else None
+            if isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(tickets):
+                key = str(entry.get("key") or "")
+                # Each option with its own relaxed words: the options loosen the same rule to different steps
+                options.append(trim({"option": entry.get("label") or OPTION_LABELS.get(key) or key, "key": key,
+                                     "ticket": index + 1, "fit": fit_facts(tickets[index].get("fit")),
+                                     "relaxed": relaxed_words(tickets[index]) or None}))
+        if options:
+            content["options"] = options
+        relaxed = any(relaxed_words(ticket) for ticket in tickets)
         content["source"] = BUILDER_SOURCE
+        hints = []
         if not tickets:
-            content["hint"] = "Nothing fits: say which rules blocked it (blocked, relax); don't invent a ticket"
-        elif not built.get("stake_given"):
-            content["hint"] = "No stake given: the money figures are per $10 staked; say so"
+            hints.append("Nothing could be built: say in one sentence what blocked it (blocked, relax, unpriced) and "
+                         "offer what would work, such as another sport; don't invent a ticket")
+        elif options:
+            hints.append("No single ticket meets every target, so code built the closest options: lead with them, one "
+                         "sentence each with its option label and its odds and chance from fit (closest to your "
+                         "odds: say its chance; closest to your chance: say its odds), and quote each option's own "
+                         "relaxed with that option only (each loosens its own way). Don't refuse, lecture or explain "
+                         "probability")
+        elif relaxed:
+            hints.append("Nothing met every rule exactly, so these are the closest tickets code could build: lead "
+                         "with them and quote each ticket's own relaxed with that ticket only")
+        if tickets and not built.get("stake_given"):
+            hints.append("No stake given: the money figures are per $10 staked; say so if you quote money")
+        if hints:
+            content["hint"] = ". ".join(hints)
         where = ", ".join(controls.get("leagues") or []) or "all sports"
         shape = f"{data.legs} legs" if data.legs else "Auto legs"
         aim = f", about {controls['target_odds']:g}x" if controls.get("target_odds") else ""
+        aim += f", {controls['target_chance']:.0%} chance" if controls.get("target_chance") else ""
+        named = {o["ticket"]: o.get("option") for o in options}
         summary = (f"ticket_build(builder: {where}, {built.get('label') or 'Custom'}, {shape}{aim}): " + " | ".join(
-            f"#{i + 1} " + "; ".join(f"{leg.get('label')} [{_ref_text(ref_of(leg))}]" for leg in ticket.get("legs") or [])
+            f"#{i + 1}{' ' + str(named[i + 1]) if named.get(i + 1) else ''} "
+            + "; ".join(f"{leg.get('label')} [{_ref_text(ref_of(leg))}]" for leg in ticket.get("legs") or [])
             for i, ticket in enumerate(tickets)) or "no ticket")
         # The ticket's own notes (fair odds, a long shot, disagreement) travel in ticket["notes"]: a card's "notes" are
         # per-leg notes ({index, notes}) to the app
-        cards = [ticket_card(ticket, "ticket_build", title=f"{ticket.get('label') or 'Custom'} ticket #{ticket.get('rank')}",
-                             extra={"builder": True, "label": ticket.get("label") or "Custom"}) for ticket in tickets]
+        cards = [builder_card(ticket) for ticket in tickets]
+        return content, summary, cards
+
+    def _top_picks(self, data: TopPicksInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
+        """brain_top_picks: the Lab's likeliest winners (engine/builder.py's top_picks over the Builder's legs),
+        highest chance first, one per game, as facts Claude may quote and a card of picks with "Add to slip"."""
+        leagues = list(dict.fromkeys(data.leagues))
+        found = self.lab.builder_top_picks(self.uid, leagues, data.n or TOP_PICKS, list(data.markets or ()) or None) or {}
+        picks = [pick for pick in found.get("picks") or [] if isinstance(pick, Mapping)]
+        facts = []
+        for pick in picks:
+            why = pick.get("why")
+            facts.append({"rank": pick.get("rank"), "pick": pick.get("label"), "game": pick.get("game"),
+                          "start": pick.get("start"), "chance": _p(pick.get("chance")),
+                          "chance_source": CHANCE_SOURCES.get(pick.get("chance_source"), pick.get("chance_source")),
+                          "odds": pick.get("price"), "book": pick.get("book"), "edge_vs_price": _p(pick.get("edge")),
+                          "why": why[:2] if isinstance(why, list) else why, "ref": pick.get("ref")})
+        content = {"picks": trim(facts, items=MAX_TOP_PICKS), "source": TOP_PICKS_SOURCE}
+        unpriced = [entry.get("reason") or entry.get("title") for entry in found.get("unpriced") or []
+                    if isinstance(entry, Mapping)]
+        if unpriced:
+            content["unpriced"] = unpriced
+        if picks:
+            content["hint"] = ("Lead with the picks, strongest first: each one's chance and odds in a few words and "
+                               "why. The card lets the user add any of them to the slip")
+        else:
+            content["hint"] = ("No game in scope has prices loaded now: say so in one sentence (unpriced says when "
+                               "odds are on their way) and offer another sport")
+        summary = f"brain_top_picks({', '.join(leagues)}): " + ("; ".join(
+            f"{pick.get('label')} [{_ref_text(pick.get('ref') or {})}]" for pick in picks) or "no picks")
+        cards = [picks_card(found, leagues)] if picks else []
         return content, summary, cards
 
     def _analyse(self, data: TicketInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:

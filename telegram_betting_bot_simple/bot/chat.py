@@ -57,7 +57,7 @@ from ..ai.assistant import (
     risk_flags,
     support_message,
 )
-from ..ai.explain import money, one_in_text, pct
+from ..ai.explain import first_reason, money, one_in_text, pct, relaxed_texts
 from ..ai.slip_reader import MAX_IMAGE_BYTES
 from ..ai.tools import pasted_card, pasted_label
 from ..config import Config
@@ -143,10 +143,32 @@ def addable(card: Dict[str, Any]) -> bool:
     return card.get("type") == "ticket" and bool(refs) and (card.get("ticket_type") == "multi" or len(refs) == 1)
 
 
+def fit_text(fit: Any) -> Optional[str]:
+    """A closest-effort ticket's fit to what was asked, as the app shows it: "3.52x · 31% (you asked 3.5x · 80%)"
+    (engine/builder.py's fit block: the ticket's odds and chance, and the targets given)."""
+    if not isinstance(fit, dict):
+        return None
+    have = [f"{fit['odds']:.2f}x" if isinstance(fit.get("odds"), (int, float)) else None,
+            pct(fit["chance"]) if isinstance(fit.get("chance"), (int, float)) else None]
+    asked = [f"{fit['target_odds']:g}x" if isinstance(fit.get("target_odds"), (int, float)) else None,
+             pct(fit["target_chance"]) if isinstance(fit.get("target_chance"), (int, float)) else None]
+    have, asked = [bit for bit in have if bit], [bit for bit in asked if bit]
+    if not have:
+        return None
+    return " · ".join(have) + (f" (you asked {' · '.join(asked)})" if asked else "")
+
+
 def _ticket_text(card: Dict[str, Any]) -> str:
     esc = html.escape
     ticket = card.get("ticket") or {}
     lines = [f"🧾 <b>{esc(str(card.get('title') or 'Ticket'))}</b>"]
+    # A Builder ticket picked by closest effort: how close it gets, and the rules relaxed to get there
+    fit = fit_text(card.get("fit"))
+    if fit:
+        lines.append(f"🎯 {esc(fit)}")
+    relaxed = relaxed_texts(card.get("relaxed"))
+    if relaxed:
+        lines.append(f"<i>Relaxed: {esc('; '.join(relaxed))}</i>")
     for leg in (ticket.get("legs") or [])[:MAX_CARD_LEGS]:
         odds = (leg.get("odds") or {}).get("decimal")
         chance = f" · AI {pct(leg['ai_prob'])}" if leg.get("ai_prob") is not None else ""
@@ -170,9 +192,9 @@ def _ticket_numbers(ticket: Dict[str, Any], currency: str = "$") -> List[str]:
     chance = ticket.get("chance") or {}
     views = []
     if chance.get("ai_one_in"):
-        views.append(f"AI {one_in_text(chance['ai_one_in'])} ({pct(chance.get('ai'))})")
+        views.append(f"AI {_chance_view(chance['ai_one_in'], chance.get('ai'))}")
     if chance.get("market_one_in"):
-        views.append(f"market {one_in_text(chance['market_one_in'])} ({pct(chance.get('market'))})")
+        views.append(f"market {_chance_view(chance['market_one_in'], chance.get('market'))}")
     if views:
         what = "Chance of a profit" if chance.get("headline") == "profit" else "Chance it wins"
         lines.append(f"{what}: " + " · ".join(views))
@@ -274,11 +296,46 @@ def _player_text(card: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+MAX_PICKS_SHOWN = 5
+
+
+def _chance_view(one_in: Any, p: Any) -> str:
+    """A ticket's chance as "1 in 3 (29%)" under even, else just "66%" ("1 in X" is 1/p rounded, so anything from about
+    40% to 66% is "1 in 2", which beside 66% reads as 50%)."""
+    if isinstance(p, (int, float)) and not isinstance(p, bool) and p >= 0.5:
+        return pct(p)
+    return f"{one_in_text(one_in)} ({pct(p)})"
+
+
+def _picks_text(card: Dict[str, Any]) -> str:
+    """The likeliest winners (brain_top_picks' card), ranked: each pick's chance, price and bookmaker and why, in a
+    few words (the first reason that isn't its chance again). Each has its own "Add pick" button."""
+    esc = html.escape
+    lines = [f"🏆 <b>{esc(str(card.get('title') or 'Most likely winners'))}</b>"]
+    for i, pick in enumerate((card.get("picks") or [])[:MAX_PICKS_SHOWN], 1):
+        bits = [f"{pick.get('rank') or i}. {esc(str(pick.get('label') or 'A pick'))}"]
+        if isinstance(pick.get("chance"), (int, float)):
+            bits.append(pct(pick["chance"]))
+        if pick.get("price"):
+            try:
+                price = f"{float(pick['price']):.2f}"  # "1.7" reads as 1.70, as the app shows it
+            except (TypeError, ValueError):
+                price = str(pick["price"])
+            bits.append(esc(price) + (f" at {esc(str(pick['book']))}" if pick.get("book") else ""))
+        lines.append(" · ".join(bits))
+        first = first_reason(pick.get("why"))
+        if first:
+            lines.append(f"   <i>{esc(first)}</i>")
+    return "\n".join(lines)
+
+
 def card_text(card: Dict[str, Any]) -> str:
     """One card from the assistant as Telegram HTML (the numbers are the code's, as priced)."""
     kind = card.get("type")
     if kind == "ticket":
         return _ticket_text(card)
+    if kind == "picks":
+        return _picks_text(card)
     if kind == "plan":
         return _plan_text(card)
     if kind == "player":
@@ -299,9 +356,10 @@ def reply_text(result: Dict[str, Any], asked: Optional[str] = None) -> str:
     cards = [card_text(card) for card in (reply.get("cards") or [])[:MAX_CARDS]]
     credits = result.get("credits") or {}
     foot = []
-    # Under a ticket, a plan or a pasted slip, the helpline, as the app shows it on every screen
+    # Under a ticket, a plan, a pasted slip or the likeliest winners, the helpline, as the app shows it on every screen
     shown = (reply.get("cards") or [])[:MAX_CARDS]
-    if any(card.get("type") in ("ticket", "plan", "pasted") for card in shown) and HELPLINE not in body_text(result):
+    if any(card.get("type") in ("ticket", "plan", "pasted", "picks") for card in shown) \
+            and HELPLINE not in body_text(result):
         foot.append(f"<i>{html.escape(HELPLINE)}</i>")
     if credits.get("daily_cents"):
         foot.append(f"<i>AI analyst · {credits.get('left_cents', 0):g}¢ of {credits['daily_cents']}¢ "
@@ -342,6 +400,14 @@ def reply_markup(result: Dict[str, Any], config: Optional[Config], private: bool
                 continue  # added in the app instead (its card says so)
             label = "➕ Add to slip" if len(tickets) == 1 else f"➕ Add ticket {n} to slip"
             rows.append([InlineKeyboardButton(label, callback_data=f"ai:add:{thread}:{at}:{index}")])
+        for index, card in enumerate(cards):
+            if card.get("type") != "picks":
+                continue
+            # The likeliest winners: one "Add pick" button each (the person's tap, as for a ticket), three a row
+            buttons = [InlineKeyboardButton(f"➕ Add pick {pick.get('rank') or n}",
+                                            callback_data=f"ai:pick:{thread}:{at}:{index}:{n - 1}")
+                       for n, pick in enumerate((card.get("picks") or [])[:MAX_PICKS_SHOWN], 1)]
+            rows += [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
         chips = [InlineKeyboardButton(chip[:60], callback_data=f"ai:{thread}:{at}:{i}")
                  for i, chip in enumerate((reply.get("chips") or [])[:4])]
         rows += [chips[i:i + 2] for i in range(0, len(chips), 2)]
@@ -755,6 +821,30 @@ async def add_to_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                        "Send /slip to see it.", show_alert=True)
 
 
+async def add_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Put one of the likeliest winners on the bot's slip: the person's own tap, never the AI's."""
+    query = update.callback_query
+    if not await _check_button(update, context):
+        return
+    _, _, thread, at, index, number = query.data.split(":")
+    stored = await _stored_reply(context, _uid(update), int(thread), int(at))
+    cards = stored.get("cards") or []
+    card = cards[int(index)] if int(index) < len(cards) else None
+    picks_ = (card or {}).get("picks") or [] if (card or {}).get("type") == "picks" else []
+    ref = (picks_[int(number)].get("ref") or {}) if int(number) < len(picks_) else {}
+    if ref.get("market") not in ("h2h", "spreads", "totals") or not ref.get("id"):
+        await query.answer("This pick isn't available any more.", show_alert=True)
+        return
+    slip = context.user_data.setdefault("picks", [])
+    pick = {"league": ref["league"], "id": ref["id"], "market": ref["market"], "side": ref["side"]}
+    if not any(p.get("league") == pick["league"] and p.get("id", "")[:16] == pick["id"][:16]
+               and p.get("market") == pick["market"] and p.get("side") == pick["side"] for p in slip):
+        slip.append(pick)
+    context.user_data["mode"] = "multi"
+    await query.answer(f"Added to your slip ✓ ({len(slip)} in all, priced as one parlay). Send /slip to see it.",
+                       show_alert=True)
+
+
 async def confirm_age(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not await _check_button(update, context):
@@ -803,6 +893,7 @@ def setup_chat(application: Application, config: Config) -> None:
     # ai:add:<thread>:<answer>:<card> and ai:<thread>:<answer>:<chip>; older two-number buttons fall
     # through to the catch-all, which says the menu has expired
     application.add_handler(CallbackQueryHandler(add_to_slip, pattern=r"^ai:add:\d{1,12}:\d{1,6}:\d$"))
+    application.add_handler(CallbackQueryHandler(add_pick, pattern=r"^ai:pick:\d{1,12}:\d{1,6}:\d:\d$"))
     # A chat turn takes seconds: block=False lets the bot keep serving everyone else's taps meanwhile
     application.add_handler(CallbackQueryHandler(chip_tapped, pattern=r"^ai:\d{1,12}:\d{1,6}:\d$", block=False))
     # New messages only: editing a sent message shouldn't start a second (paid) turn

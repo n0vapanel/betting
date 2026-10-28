@@ -857,13 +857,14 @@ def _leg_line(leg: Dict[str, Any]) -> str:
     return f"{html.escape(leg['label'])} {leg['odds']['american']} ({chances})"
 
 
-BUILDER_LINE = ("Built by the Builder with the Safe, Risky and Crazy presets; the app's Build screen lets you "
-                "change every control.")
+BUILDER_LINE = ("Built by the Builder with the Safe, Risky and Crazy presets; when nothing fits a level exactly, "
+                "the closest ticket shows with what was relaxed. The app's Build screen lets you change every control.")
 
 
 def bets_text(data: Dict[str, Any], tier: Optional[str], league_title: str) -> str:
     """The AI bets screen: each preset's tickets (engine/bets.py: the Builder under that preset, one bookmaker at a
-    time), or one preset's in full with its band."""
+    time), or one preset's in full with its band. A level nothing fits exactly shows its closest tickets instead
+    (closest effort: ``closest``, each with its label, "Closest to Safe", and the rules relaxed, in words)."""
     esc = html.escape
     tiers = data["tiers"]
     lines = [f"🎲 <b>AI bets · {esc(league_title)}</b>", esc(data.get("note", "")), f"<i>{esc(BUILDER_LINE)}</i>", ""]
@@ -872,11 +873,14 @@ def bets_text(data: Dict[str, Any], tier: Optional[str], league_title: str) -> s
         lines.append(f"{TIER_ICONS[key]} <b>{esc(info['title'])}</b>: {esc(info['rule'])}")
         if tier and info.get("detail"):
             lines.append(f"   {esc(info['detail'])}")
-        bets_list = info["bets"] if tier else info["bets"][:1]
+        found = info["bets"] or info.get("closest") or []
+        bets_list = found if tier else found[:1]
         if not bets_list:
             lines += [f"   {esc(info.get('empty') or 'Nothing fits right now.')}", ""]
             continue
         for bet in bets_list:
+            if bet.get("label"):
+                lines.append(f"🎯 <b>{esc(bet['label'])}</b>")
             kind = "Single" if len(bet["legs"]) == 1 else f"{len(bet['legs'])}-leg multi"
             lines.append(f"<b>{kind}</b> at {esc(bet['book'] or '')}: {bet['odds']['american']} · {esc(bet['badge'])}")
             lines += [f"   • {_leg_line(leg)}" for leg in bet["legs"]]
@@ -884,6 +888,8 @@ def bets_text(data: Dict[str, Any], tier: Optional[str], league_title: str) -> s
             lines.append(f"   Chance: AI {pct(bet['probability'])}{market} · $10 returns {money(10 * bet['odds']['decimal'])}"
                          f" · expected {bet['ev'] * 10:+.2f} per $10")
             lines.append(f"   <i>{esc(bet['why'])}</i>")
+            if bet.get("relaxed"):
+                lines.append(f"   <i>Relaxed: {esc('; '.join(str(words) for words in bet['relaxed']))}</i>")
         lines.append("")
     return "\n".join(lines)
 

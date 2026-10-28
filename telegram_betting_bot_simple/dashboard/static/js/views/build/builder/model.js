@@ -19,9 +19,16 @@
 //   restore(local, server, ...)  the newer of this device's copy and the server's, as {controls, ui}
 //   targetFrom(stake, back)      "5.00" from $10 → $50 (the person's own amounts), or null
 //   ageWords(seconds)            "3 h", "40 min"
+//   CHANCES                      the "Chance you want" choices (shares; null is Any, anything else is Custom)
+//
+// Closest effort (v3): ``target_chance`` is the chance the whole ticket wins that the person wants (0.8 for 80%),
+// beside ``target_odds``; ``best_effort`` (on unless the person picks Strict) lets the server return the closest
+// tickets when nothing fits exactly. best_effort is a scope field (engine/presets.py): switching it keeps the
+// preset's name; a target chance, like target odds, makes the run Custom.
 
 export const FIELDS = [
-  "leagues", "window", "kickoff", "exclude_started", "legs", "target_odds", "tolerance_pct", "leg_odds_min", "leg_odds_max",
+  "leagues", "window", "kickoff", "exclude_started", "legs", "target_odds", "target_chance", "tolerance_pct", "best_effort",
+  "leg_odds_min", "leg_odds_max",
   "min_chance", "min_edge", "max_per_game", "max_per_team", "max_per_league", "markets", "avoid_same_game",
   "prefer_correlation", "max_price_age_s", "exclude_disagree", "exclude_thin", "books", "tickets", "preset", "caution_pp",
   "legs_max", "odds_min", "odds_max", "joint_min", "joint_max", "multi_leg_min", "whelan", "whelan_slack",
@@ -29,7 +36,7 @@ export const FIELDS = [
 ];
 
 // engine/presets.py SCOPE_FIELDS (the presets route sends its own list as defaults.scope_fields)
-export const SCOPE_FIELDS = ["leagues", "window", "kickoff", "exclude_started", "books", "tickets", "preset", "tz", "prefer_correlation"];
+export const SCOPE_FIELDS = ["leagues", "window", "kickoff", "exclude_started", "books", "tickets", "preset", "tz", "prefer_correlation", "best_effort"];
 
 // Fixed until a bookmaker's own same-game price is loaded: the engine keeps one leg per game and never uses a game
 // already under way, whatever these say (engine/builder.py only adds a note). The form shows them switched off with
@@ -42,8 +49,8 @@ export const PRESET_ICONS = { safe: "shield", risky: "scale", crazy: "zap" };
 
 // What the presets route returns when the server has none yet (engine/builder.py Controls() defaults)
 export const DEFAULTS = {
-  leagues: null, window: null, kickoff: null, exclude_started: true, legs: null, target_odds: null, tolerance_pct: 10,
-  leg_odds_min: null, leg_odds_max: null, min_chance: null, min_edge: null, max_per_game: 1, max_per_team: 1,
+  leagues: null, window: null, kickoff: null, exclude_started: true, legs: null, target_odds: null, target_chance: null,
+  tolerance_pct: 10, best_effort: true, leg_odds_min: null, leg_odds_max: null, min_chance: null, min_edge: null, max_per_game: 1, max_per_team: 1,
   max_per_league: null, markets: ["h2h", "spreads", "totals"], avoid_same_game: true, prefer_correlation: false,
   max_price_age_s: 10800, exclude_disagree: false, exclude_thin: false, books: null, tickets: 3, preset: null,
   caution_pp: 2, legs_max: 4, odds_min: null, odds_max: null, joint_min: null, joint_max: null, multi_leg_min: null,
@@ -58,6 +65,9 @@ export const WINDOWS = [
   { value: "3d", label: "3 days" },
   { value: "custom", label: "Custom" },
 ];
+
+// "Chance you want": Any (null), these, or Custom (any whole % from 1 to 99)
+export const CHANCES = [0.5, 0.6, 0.7, 0.8, 0.9];
 
 export const AGES = [1800, 3600, 7200, 10800, 21600, 43200, 86400];
 export const MAX_WINDOW_DAYS = 8; // dashboard/lab.py MAX_WINDOW_DAYS: the slate holds today and the next six days
@@ -78,7 +88,7 @@ const bool = (v) => (typeof v === "boolean" ? v : undefined);
 function cleanField(key, v) {
   if (v === null) {
     // null means "none" / "all" / "Auto" for these; the rest need a value
-    return ["leagues", "window", "kickoff", "legs", "target_odds", "leg_odds_min", "leg_odds_max", "min_chance", "min_edge",
+    return ["leagues", "window", "kickoff", "legs", "target_odds", "target_chance", "leg_odds_min", "leg_odds_max", "min_chance", "min_edge",
       "max_per_league", "books", "preset", "odds_min", "odds_max", "joint_min", "joint_max", "multi_leg_min", "tz"].includes(key) ? null : undefined;
   }
   switch (key) {
@@ -118,6 +128,7 @@ function cleanField(key, v) {
     case "whelan_slack": return int(v, 0, MAX_LEGS);
     case "max_price_age_s": return int(v, 60, 7 * 86400);
     case "target_odds": return num(v, 1.01, 1e6);
+    case "target_chance": return num(v, 0.01, 0.99);
     case "tolerance_pct": return num(v, 0, 90);
     case "leg_odds_min": case "leg_odds_max": return num(v, 1.01, 1000);
     case "odds_min": return num(v, 1, 1e6);
@@ -127,7 +138,7 @@ function cleanField(key, v) {
     case "min_edge": return num(v, -1, 1);
     case "caution_pp": return num(v, 0, 20);
     case "exclude_started": case "avoid_same_game": case "prefer_correlation": case "exclude_disagree": case "exclude_thin":
-    case "whelan": case "exclude_low_conf": case "exclude_model_price":
+    case "whelan": case "exclude_low_conf": case "exclude_model_price": case "best_effort":
       return bool(v);
     default: return undefined;
   }

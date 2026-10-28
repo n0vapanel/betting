@@ -221,7 +221,8 @@ GOOD = [cand("ok1", chance=0.58, price=1.75), cand("ok2", chance=0.56, price=1.8
      "priced at fair odds by the goals model (excluded)"),
 ])
 def test_every_leg_rule_names_itself_in_the_near_misses(leg, change, rule, words) -> None:
-    result = build(GOOD + [leg], Controls(legs=1, tickets=5).replace(**change), NOW)
+    # Strict: closest effort would fill the five tickets asked for with the rule loosened (tests/test_best_effort.py)
+    result = build(GOOD + [leg], Controls(legs=1, tickets=5, best_effort=False).replace(**change), NOW)
     assert result.tickets and all(leg.key not in keys(t) for t in result.tickets)
     miss = next(m for m in result.near_misses if m["key"] == leg.key)
     assert miss["rule"] == rule and words in miss["text"]
@@ -458,11 +459,13 @@ def test_the_performance_bound() -> None:
 
 
 # --- blocked and notes ----------------------------------------------------------------------------
+# What blocked a run is the strict run's story (best_effort False): with closest effort on, a run with any eligible
+# leg always builds (tests/test_best_effort.py)
 
 def test_blocked_says_which_rule_and_by_how_many() -> None:
     board = [cand(f"g{i}", chance=0.60, price=1.58) for i in range(4)]
     board += [cand(f"h{i}", chance=0.50, price=1.90) for i in range(8)]
-    result = build(board, Controls(legs=6, target_odds=20.0, min_chance=0.55), NOW)
+    result = build(board, Controls(legs=6, target_odds=20.0, min_chance=0.55, best_effort=False), NOW)
     assert not result.tickets
     assert result.blocked["message"] == "No 6-leg ticket near 20.0x: only 4 games pass 'min chance 55%'."
     assert result.blocked["rules"] == [{"rule": "min_chance", "label": "min chance 55%", "removed": 8}]
@@ -471,9 +474,9 @@ def test_blocked_says_which_rule_and_by_how_many() -> None:
 
 def test_blocked_when_the_target_is_out_of_reach_or_whelan_rules_it_out() -> None:
     short = [cand(f"g{i}", chance=0.8, price=1.2) for i in range(6)]
-    out = build(short, Controls.from_dict({"preset": "safe", "target_odds": 10.0}), NOW)
+    out = build(short, Controls.from_dict({"preset": "safe", "target_odds": 10.0, "best_effort": False}), NOW)
     assert "the longest 3 legs that pass reach only 1.73x" in out.blocked["message"]
-    whelan = build(slate(30, 6), Controls(legs_max=6, target_odds=40.0), NOW)
+    whelan = build(slate(30, 6), Controls(legs_max=6, target_odds=40.0, best_effort=False), NOW)
     assert not whelan.tickets and "'the Whelan leg cap' ruled out" in whelan.blocked["message"]
     assert "set the number of legs to lift it" in whelan.blocked["message"]
     # Setting the number of legs lifts it, and the ticket says so
@@ -487,7 +490,7 @@ def test_blocked_when_the_target_is_out_of_reach_or_whelan_rules_it_out() -> Non
     # A league with no prices doesn't take a leg's place: 1 league plus the 12 legs
     assert len(many.near_misses) == 13 and many.near_misses[0]["rule"] == "no_prices"
     assert sum(miss["rule"] != "no_prices" for miss in many.near_misses) == 12
-    nothing = build([cand("x", chance=0.3, price=3.0)], Controls(min_chance=0.5), NOW)
+    nothing = build([cand("x", chance=0.3, price=3.0)], Controls(min_chance=0.5, best_effort=False), NOW)
     assert nothing.blocked["message"] == "No ticket: no leg passes the rules ('min chance 50%' ruled out 1)."
 
 
@@ -516,7 +519,7 @@ def test_team_and_league_caps() -> None:
     assert all({"g1", "g2"} - {leg["event_id"] for leg in t["legs"]} for t in one.tickets)
     two = build(board, Controls(legs=2, tickets=3, max_per_team=2), NOW)
     assert any({leg["event_id"] for leg in t["legs"]} == {"g1", "g2"} for t in two.tickets)
-    league = build(board, Controls(legs=2, tickets=3, max_per_team=2, max_per_league=1), NOW)
+    league = build(board, Controls(legs=2, tickets=3, max_per_team=2, max_per_league=1, best_effort=False), NOW)
     assert league.tickets and all(len({leg["league"] for leg in t["legs"]}) == 2 for t in league.tickets)
 
 
@@ -632,7 +635,7 @@ def test_a_push_is_stake_back_in_the_joint_block_the_notes_and_the_band() -> Non
     # The joint band is on the chance of winning money: 51% is inside 25-60%
     banded = build([a, b], Controls(markets={"draw_no_bet"}, legs=2, joint_min=0.25, joint_max=0.60), NOW)
     assert [keys(t) for t in banded.tickets] == [{a.key, b.key}]
-    assert not build([a, b], Controls(markets={"draw_no_bet"}, legs=2, joint_min=0.55), NOW).tickets
+    assert not build([a, b], Controls(markets={"draw_no_bet"}, legs=2, joint_min=0.55, best_effort=False), NOW).tickets
     # With no push nothing changes: fair odds 1 / chance, and under 1 in 4 is a long shot
     assert ticket_chances([(0.2, 0.0, 4.5)])["joint"]["fair_odds"] == 5.0
     assert "Long shot: expect to lose most of these." in ticket_notes([("x", set(), "DraftKings")], 0.2)
@@ -643,7 +646,7 @@ def test_a_fair_odds_leg_has_no_edge_to_measure() -> None:
     bettable = [cand(f"g{i}", chance=0.53, price=1.91) for i in range(4)]  # +0.6 pts against the price
     fair = [cand(f"m{i}", chance=0.58, price=1.72, flags={"model_price"}, book="Fair odds", market="btts",
                  side="yes", chance_source="model", fair=None) for i in range(4)]
-    result = build(bettable + fair, Controls(markets={"h2h", "btts"}, legs=2, min_edge=-0.01), NOW)
+    result = build(bettable + fair, Controls(markets={"h2h", "btts"}, legs=2, min_edge=-0.01, best_effort=False), NOW)
     assert result.tickets and not any(leg["model_price"] for t in result.tickets for leg in t["legs"])
     miss = next(m for m in result.near_misses if m["key"] == fair[0].key)
     assert miss["rule"] == "min_edge" and "no bookmaker's price to measure an edge against" in miss["reason"]
@@ -667,8 +670,9 @@ def test_presets_keep_the_old_tiers_value_rules() -> None:
     old = [bets.Candidate(event_id=f"h{i}", game=f"A{i} @ H{i}", market="h2h", side="home", point=None,
                           label=f"H{i}", probability=0.82, fair=0.82, prices={"DraftKings": 1.12}) for i in range(4)]
     assert bets.build_tier(bets.TIERS[0], old) == []
-    safe = build(favourites, PRESETS["safe"], NOW)
-    assert safe.tickets == [] and safe.stats["rejected"].get("min_ev")
+    strict = PRESETS["safe"].replace(best_effort=False)  # still Safe: strict or not keeps the preset's name
+    safe = build(favourites, strict, NOW)
+    assert safe.label == "Safe" and safe.tickets == [] and safe.stats["rejected"].get("min_ev")
     assert any("(Safe)" in rule["label"] for rule in safe.blocked["ticket_rules"])
     # Any edit makes it Custom, the person's own rules: then they build (and show their expected loss)
     assert build(favourites, PRESETS["safe"].replace(min_chance=0.61), NOW).tickets
@@ -676,7 +680,7 @@ def test_presets_keep_the_old_tiers_value_rules() -> None:
     trio = [cand("a", chance=0.95, price=1.04), cand("b", chance=0.95, price=1.04), cand("c", chance=0.73, price=1.36)]
     three = build(trio, PRESETS["safe"].replace(legs=3), NOW)
     assert three.label == "Custom" and three.tickets  # Custom: the 3-leg floor doesn't apply
-    trio_safe = build(trio, PRESETS["safe"], NOW)
+    trio_safe = build(trio, strict, NOW)
     assert trio_safe.tickets and all(len(t["legs"]) <= 2 for t in trio_safe.tickets)
     assert trio_safe.stats["rejected"].get("three_leg")
     far = build([cand("x", chance=0.75, price=1.33, fair=0.65)], PRESETS["safe"], NOW)
@@ -701,16 +705,16 @@ def test_the_pool_reaches_a_target_the_favourites_cant() -> None:
 
 
 def test_blocked_names_the_shape_rule_that_cut_every_branch() -> None:
-    capped = build(slate(20, 5), Controls(legs=3, max_per_league=1), NOW)  # every leg is NBA
+    capped = build(slate(20, 5), Controls(legs=3, max_per_league=1, best_effort=False), NOW)  # every leg is NBA
     assert not capped.tickets and "1 per league" in capped.blocked["message"]
     assert any("1 per league" in words for words in capped.blocked["relax"])
     assert "fewer legs than 3" in capped.blocked["relax"]
-    beam_capped = build(slate(30, 5), Controls(legs=8, max_per_league=3), NOW)
+    beam_capped = build(slate(30, 5), Controls(legs=8, max_per_league=3, best_effort=False), NOW)
     assert not beam_capped.tickets and "3 per league" in beam_capped.blocked["message"]
-    risky8 = build(slate(40, 3), Controls.from_dict({"preset": "risky", "legs": 8}), NOW)
+    risky8 = build(slate(40, 3), Controls.from_dict({"preset": "risky", "legs": 8, "best_effort": False}), NOW)
     assert not risky8.tickets and "'joint chance 25%+'" in risky8.blocked["message"]
     assert "joint chance 25%+" in risky8.blocked["relax"] and "max price age 3 h" not in risky8.blocked["relax"]
-    exact = build(slate(40, 3), Controls(legs=8, target_odds=60.0, tolerance_pct=0), NOW)
+    exact = build(slate(40, 3), Controls(legs=8, target_odds=60.0, tolerance_pct=0, best_effort=False), NOW)
     assert not exact.tickets and "none of the" in exact.blocked["message"]
     assert exact.blocked["relax"] == ["a wider tolerance than ±0%"]
 
@@ -718,24 +722,25 @@ def test_blocked_names_the_shape_rule_that_cut_every_branch() -> None:
 def test_try_relaxing_follows_what_blocked_the_run() -> None:
     # Out of reach: more legs or a lower target; a stale favourite's rule can't raise the reach, so it isn't named
     board = slate(20, 7) + [cand("old", chance=0.8, price=1.2, price_age_s=20000)]
-    out = build(board, Controls.from_dict({"preset": "risky", "legs": 3, "target_odds": 500.0}), NOW)
+    out = build(board, Controls.from_dict({"preset": "risky", "legs": 3, "target_odds": 500.0, "best_effort": False}),
+                NOW)
     assert "reach only" in out.blocked["message"]
     assert out.blocked["relax"][:2] == ["more legs than 3", "a lower target"]
     assert "max price age 3 h" not in out.blocked["relax"]
     # A long price the same rule removed could raise it: then it is named
     longer = build(board + [cand("old2", chance=0.3, price=30.0, price_age_s=20000)],
-                   Controls(legs=3, target_odds=500.0), NOW)
+                   Controls(legs=3, target_odds=500.0, best_effort=False), NOW)
     assert "max price age 3 h" in longer.blocked["relax"]
     # Auto stops at its own number of legs, and says so
-    auto = build(board, Controls.from_dict({"preset": "safe", "target_odds": 10.0}), NOW)
+    auto = build(board, Controls.from_dict({"preset": "safe", "target_odds": 10.0, "best_effort": False}), NOW)
     assert "more legs (Auto stops at 3)" in auto.blocked["relax"]
     # Even the shortest legs pay too much: fewer legs or a higher target
-    short = build(board, Controls(legs=4, target_odds=1.3), NOW)
+    short = build(board, Controls(legs=4, target_odds=1.3, best_effort=False), NOW)
     assert short.blocked["relax"][:2] == ["fewer legs than 4", "a higher target"]
     # ... counted one leg a game: a game's second short price can't go on the same ticket
     eight = [cand(f"r{i}", chance=0.78, price=1.25) for i in range(10)]
     eight.append(cand("r0", side="over", market="totals", point=2.5, chance=0.95, price=1.02))
-    band = build(eight, Controls.from_dict({"preset": "risky", "legs": 8}), NOW)
+    band = build(eight, Controls.from_dict({"preset": "risky", "legs": 8, "best_effort": False}), NOW)
     assert "even the shortest legs that pass pay 4.86x" in band.blocked["message"]
     assert band.blocked["relax"][:2] == ["fewer legs than 8", "a higher ticket-odds band"]
 

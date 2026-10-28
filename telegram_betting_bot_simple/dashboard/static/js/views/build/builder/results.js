@@ -3,6 +3,12 @@
 // price, book, chance, edge, data age, "Why" and Swap), the near misses with the rule each failed, the plain
 // "what blocked it" when nothing could be built, and the ideas when correlation ideas were asked for.
 //
+// Closest effort (v3): a ticket an option picked shows its chip above it ("Likeliest at your odds", "Closest to your
+// chance", "Best balance"), every ticket with a target its fit line ("3.52x · 31% (you asked 3.5x · 80%)") and the
+// rules the Builder relaxed for it ("Relaxed: …"). With closest effort on, an empty run never shows the "No ticket
+// fits" card (the engine builds whenever a leg is eligible): it says there is nothing to build from yet. Strict
+// keeps that card, with "Show the closest instead".
+//
 // Every number is the server's (POST /api/builder/run, /api/builder/price after a swap): this file only lays
 // them out. Every outside text is escaped. Venue & conditions (v3 Stage 4): a leg's Why carries the server's context
 // line, and a leg whose chance a forecast or roof change moved shows the "adj" chip (its reason in the chip's
@@ -18,6 +24,7 @@ import { leagueTitle, me } from "../../../app.js";
 import { gameShort, cutPct, mostLikelyText } from "../common.js";
 import { legBadges } from "../../context/badges.js";
 import { unitsFor } from "../../context/units.js";
+import { optionsFor, fitParts, relaxedText } from "./fit.js";
 
 const FLAG_BADGES = {
   disagree: ["Sources disagree", "warn", "scale"],
@@ -227,10 +234,12 @@ function cardHtml(card, ti, view) {
   const notes = [...new Set([...(t.notes || []), ...(t.warnings || [])])];
   const inSlip = card.inSlip;
   return `<article class="card bd-ticket t-${esc(String(label).toLowerCase())}" data-bd-card="${ti}" aria-labelledby="bd-t${ti}-h">
+    ${optionChips(view.result, ti, card.original || t)}
     <header class="bd-thead">
       <div class="bd-ttitle"><h3 id="bd-t${ti}-h" tabindex="-1">Ticket ${ti + 1} <span>· ${esc(ticketKind(t))}</span></h3>${badge(label, LABEL_KIND[label] || "muted")}${card.swapped ? badge("Swapped", "info", "swap") : ""}</div>
       <div class="bd-odds"><b class="num">${esc(priceText(t.odds))}</b><small>${money(t.total_stake, { cents: true })} → ${money(t.max_payout, { cents: true })}</small></div>
     </header>
+    ${fitHtml(t)}
     ${(t.reasons || []).map((r) => notice(r, "danger")).join("")}
     <div class="bd-stats">${stats.join("")}</div>
     <ol class="bd-legs">${(t.legs || []).map((leg, li) => legHtml(card, ti, leg, li)).join("")}</ol>
@@ -245,6 +254,23 @@ function cardHtml(card, ti, view) {
     ${me().ai_enabled ? '<p class="bd-hint bd-cost">Explain and Ask use your daily AI allowance; building, swapping and adding are free.</p>' : ""}
     ${explainHtml(card, ti, view)}
   </article>`;
+}
+
+// --- closest effort: the option, the fit, what was relaxed ----------------------------------------------------
+
+/** The chips of the options that picked this ticket ("Likeliest at your odds" ...), above it; "" for a plain run. */
+function optionChips(result, ti, ticket) {
+  const chips = optionsFor(result, ti, ticket);
+  if (!chips.length) return "";
+  return `<div class="bd-opts">${chips.map((o) => `<span class="bd-opt k-${esc(o.key || "other")}">${icon(o.iconName, { size: 14 })}${esc(o.label)}</span>`).join("")}</div>`;
+}
+
+/** "3.52x · 31% (you asked 3.5x · 80%)" and the muted "Relaxed: …" line under the ticket's head. */
+function fitHtml(t) {
+  const fit = fitParts(t.fit);
+  const relaxed = relaxedText(t.relaxed);
+  return `${fit ? `<p class="bd-fit">${icon("target", { size: 14 })}<span><b class="num">${esc(fit.got)}</b> <span class="bd-asked">(you asked ${esc(fit.asked)})</span></span>${fit.onTarget ? badge("On target", "good", "check") : ""}</p>` : ""}
+    ${relaxed ? `<p class="bd-relaxed">${icon("sliders", { size: 14 })}<span>${esc(relaxed)}</span></p>` : ""}`;
 }
 
 // --- near misses, blocked, ideas ---------------------------------------------------------------------------
@@ -274,6 +300,7 @@ function unpricedHtml(result) {
 
 function blockedHtml(result) {
   const b = result.blocked || {};
+  const strict = result.controls?.best_effort === false; // a server without closest effort sends no switch
   const rules = [...(b.rules || []).map((r) => ({ ...r, n: r.removed, verb: "ruled out" })), ...(b.ticket_rules || []).map((r) => ({ ...r, n: r.rejected, verb: "rejected" }))];
   const scope = b.scope || [];
   return `<section class="card section bd-blocked" aria-live="polite">
@@ -283,7 +310,29 @@ function blockedHtml(result) {
     ${rules.length ? `<h3 class="subhead">What ruled them out</h3><ul class="bd-rules">${rules.map((r) => `<li><span>${esc(r.label)}</span><b class="num">${esc(Number(r.n).toLocaleString())} ${esc(r.verb)}</b></li>`).join("")}</ul>` : ""}
     ${scope.length ? `<p class="bd-hint">Outside your scope: ${esc(scope.map((r) => `${r.label} (${r.removed})`).join(", "))}.</p>` : ""}
     ${(b.relax || []).length ? `<h3 class="subhead">Try relaxing</h3><div class="chip-row wrap">${b.relax.map((r) => `<span class="chip">${icon("sliders", { size: 14 })}${esc(r)}</span>`).join("")}</div>` : ""}
-    <div class="empty-actions" style="justify-content:flex-start;margin-top:14px"><button type="button" class="btn btn-secondary" data-bd-open-controls>${icon("sliders", { size: 18 })}Change the controls</button></div>
+    <div class="empty-actions" style="justify-content:flex-start;margin-top:14px">
+      ${strict ? `<button type="button" class="btn btn-primary" data-bd-closest>${icon("target", { size: 18 })}Show the closest instead</button>` : ""}
+      <button type="button" class="btn btn-secondary" data-bd-open-controls>${icon("sliders", { size: 18 })}Change the controls</button></div>
+    ${strict ? '<p class="bd-hint">Strict is on: only exactly what you asked. Closest effort builds the nearest tickets and says what it relaxed.</p>' : ""}
+  </section>`;
+}
+
+/**
+ * Closest effort on and no ticket: no leg passes the rules it never relaxes (games in scope, started games, the
+ * price age, the bookmakers, the markets chosen), so there is nothing to build from yet. Never the "blocked" card.
+ */
+function nothingHtml(result) {
+  const b = result.blocked || {};
+  const rules = (b.rules || []).filter((r) => Number(r.removed) > 0);
+  const scope = b.scope || [];
+  return `<section class="card section bd-nothing" aria-live="polite">
+    <div class="section-head"><h2>${icon("clock", { size: 18 })} Nothing to build from yet</h2></div>
+    <p class="lead">${esc(b.message || "No game in your sports and time window has a price to bet at right now.")}</p>
+    ${rules.length ? `<h3 class="subhead">What left the legs out</h3><ul class="bd-rules">${rules.map((r) => `<li><span>${esc(r.label)}</span><b class="num">${esc(Number(r.removed).toLocaleString())}</b></li>`).join("")}</ul>` : ""}
+    ${scope.length ? `<p class="bd-hint">Outside your scope: ${esc(scope.map((r) => `${r.label} (${r.removed})`).join(", "))}.</p>` : ""}
+    <div class="empty-actions" style="justify-content:flex-start;margin-top:14px">
+      <button type="button" class="btn btn-secondary" data-bd-open-controls>${icon("sliders", { size: 18 })}Change sports or time</button>
+      <button type="button" class="btn btn-secondary" data-bd-build>${icon("refresh", { size: 18 })}Build again</button></div>
   </section>`;
 }
 
@@ -315,7 +364,8 @@ export function resultHtml(view) {
     ${head}
     ${notes.length ? `<ul class="warnings bd-notes">${notes.map((n) => `<li>${icon(/expect to lose/i.test(n) ? "zap" : "info", { size: 14 })}<span>${esc(n)}</span></li>`).join("")}</ul>` : ""}
     ${unpricedHtml(result)}
-    ${cards.length ? `<div class="bd-cards">${cards.map((card, i) => cardHtml(card, i, view)).join("")}</div>` : blockedHtml(result)}
+    ${cards.length ? `<div class="bd-cards">${cards.map((card, i) => cardHtml(card, i, view)).join("")}</div>`
+      : result.controls?.best_effort === true ? nothingHtml(result) : blockedHtml(result)}
     ${ideasHtml(result)}
     ${missesHtml(result)}
     ${statsLine(view)}

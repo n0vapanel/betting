@@ -147,6 +147,21 @@ const CSS = `
 :is(.view-build, .bd-sheet) .bd-pick .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 :is(.view-build, .bd-sheet) .bd-pick small { flex: none; color: var(--text-2); font-weight: 500; font-size: 12.5px; }
 :is(.view-build, .bd-sheet) .bd-pick > .icon { flex: none; color: var(--text-2); }
+/* Closest effort's switch: a checkbox drawn as a switch (role="switch"), the whole row its 44 px target */
+:is(.view-build, .bd-sheet) .bd-switch input[role="switch"] {
+  appearance: none; -webkit-appearance: none; position: relative; width: 40px; height: 24px; margin: 0; border-radius: 999px; cursor: pointer;
+  background: var(--card-2); border: 1px solid var(--line-strong); transition: background var(--speed), border-color var(--speed);
+}
+:is(.view-build, .bd-sheet) .bd-switch input[role="switch"]::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--text-2);
+  transition: transform var(--speed), background var(--speed);
+}
+:is(.view-build, .bd-sheet) .bd-switch input[role="switch"]:checked { background: var(--accent); border-color: var(--accent); }
+:is(.view-build, .bd-sheet) .bd-switch input[role="switch"]:checked::after { transform: translateX(16px); background: var(--accent-ink, #fff); }
+:is(.view-build, .bd-sheet) .bd-switch input[role="switch"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:is(.view-build, .bd-sheet) .bd-switch { align-items: center; }
+:is(.view-build, .bd-sheet) .bd-switch .info-btn { margin: -4px 0; }
+:is(.view-build, .bd-sheet) .bd-pair.bd-chance { margin-top: 10px; }
 .view-build .bd-key { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); min-width: 0; }
 .view-build .bd-key .bd-hint { margin-top: -4px; }
 @media (max-width: 360px) {
@@ -251,6 +266,27 @@ const CSS = `
 .view-build .bd-rules span { min-width: 0; overflow-wrap: anywhere; }
 .view-build .bd-blocked .chip { cursor: default; white-space: normal; text-align: left; }
 .view-build .bd-ideas .bullets { font-size: 13.5px; }
+/* closest effort: the option chips above a ticket, its fit line and what was relaxed */
+.view-build .bd-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: -4px; }
+.view-build .bd-opt {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 2px 10px 2px 8px; border-radius: 999px; max-width: 100%;
+  font-size: 12.5px; font-weight: 700; line-height: 1.25; background: var(--accent-soft); color: var(--text); border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.view-build .bd-opt .icon { flex: none; color: var(--accent); }
+.view-build .bd-opt.k-your_chance { background: var(--info-soft); border-color: color-mix(in srgb, var(--info) 55%, transparent); }
+.view-build .bd-opt.k-your_chance .icon { color: var(--info-ink); }
+.view-build .bd-opt.k-closest { background: var(--violet-soft); border-color: color-mix(in srgb, var(--violet) 55%, transparent); }
+.view-build .bd-opt.k-closest .icon { color: var(--violet); }
+.view-build .bd-fit { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; font-size: 13.5px; line-height: 1.4; }
+.view-build .bd-fit > .icon { flex: none; color: var(--text-2); }
+.view-build .bd-fit > span { min-width: 0; overflow-wrap: anywhere; }
+.view-build .bd-fit b { font-weight: 750; }
+.view-build .bd-fit .bd-asked { color: var(--text-2); }
+.view-build .bd-fit .badge { font-size: 11px; padding: 1px 6px; }
+.view-build .bd-relaxed { display: flex; align-items: flex-start; gap: 6px; margin: -4px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.view-build .bd-relaxed > .icon { flex: none; margin-top: 2px; }
+.view-build .bd-relaxed > span { min-width: 0; overflow-wrap: anywhere; }
+.view-build .bd-nothing .lead { font-size: 15px; }
 
 /* the sheets: the groups fill the sheet's width; Telegram's main button is hidden while a sheet is open, so
    the sheet has its own Build */

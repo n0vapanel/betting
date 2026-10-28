@@ -35,7 +35,7 @@ import { formatReply, describeRequest, describeTicket, stepsFor } from "./ask/fo
 import {
   loadRequest, saveRequest, checkRequest, requestHtml, requestSummary, amountChips, targetChoices, MAX_SPORTS, STAKES,
 } from "./ask/request.js";
-import { cardHtml, ticketLegs, ticketBody, slipState, syncCardButtons, plainStake, kindLine } from "./ask/cards.js";
+import { cardHtml, ticketLegs, ticketBody, slipState, syncCardButtons, plainStake, kindLine, pickLeg } from "./ask/cards.js";
 import { openPasteSheet, looksLikeSlip, shotBlocked, MAX_PASTE } from "./ask/paste.js";
 import {
   pastedClick, pastedChange, pastedInput, pastedToggle, syncPastedButtons, revealPasted, markAnswered, pastedText, loadPlan,
@@ -52,8 +52,9 @@ const CODE_KINDS = new Set(["support", "fix", "gate", "unread", "confirm", "free
 // The least an AI turn needs from today's allowance (ai/assistant.py MIN_TURN_CENTS): under it the server
 // makes no AI call at all (no answer, no screenshot read), so the screen says so instead of offering one
 const MIN_TURN_CENTS = 5;
-const DEFAULT_DISCLOSURE = "You're chatting with an AI analyst (Claude, made by Anthropic). The app's code works out "
-  + "every number; the AI explains them and can still be wrong. Nothing here is a tip, and only you add bets to your slip.";
+const DEFAULT_DISCLOSURE = "You're chatting with an AI analyst (Claude, made by Anthropic). Our code works out every "
+  + "number; the AI picks and explains from them and can still be wrong: no pick is certain, and only you add "
+  + "bets to your slip.";
 const SUGGESTIONS = ["Who does the AI favour tonight?", "Explain what the bookmaker keeps", "Why do rollovers end early?",
   "How does the AI work out its chances?"];
 const PASTE_STEPS = ["Reading your slip…", "Matching your slip to our games…", "Pricing it at your odds…", "Double-checking the numbers…"];
@@ -1452,6 +1453,21 @@ function onClick(event) {
   if (add) {
     const card = findCard(add.dataset.cardAdd);
     if (card?.ticket) addTicket(card.ticket, card.refs);
+    return;
+  }
+  const pickAdd = target.closest("[data-pick-add]");
+  if (pickAdd) {
+    // One of the likeliest winners: on the slip or off it again (the person's tap only)
+    const [mi, ci, pi] = pickAdd.dataset.pickAdd.split(":");
+    const pick = findCard(`${mi}:${ci}`)?.picks?.[Number(pi)];
+    const leg = pickLeg(pick);
+    if (!leg) return;
+    const added = slip.toggle(leg);
+    if (added === null) toast("Your slip is full: remove a pick first", { kind: "warn" });
+    else {
+      haptic.select();
+      toast(added ? `Added ${leg.label || "the pick"} to your slip` : `Took ${leg.label || "the pick"} off your slip`, { kind: added ? "good" : "info" });
+    }
     return;
   }
   const altAdd = target.closest("[data-alt-add]");

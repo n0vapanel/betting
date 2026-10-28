@@ -4,12 +4,15 @@
 //   presetChipsHtml(s)            the Safe · Risky · Crazy chips (drawn once; presetPressed() sets which is on)
 //   presetStatusHtml(s)           "Custom · from Safe" with "Back to Safe" once a control differs, and the line
 //                                 under the chips (Crazy: "expect to lose most of these")
-//   keyHtml(s, pfx)               the phone's key controls: sports, legs, target odds (± tolerance)
+//   keyHtml(s, pfx)               the phone's key controls: sports, legs, the odds you want (± tolerance), the
+//                                 chance you want and the Closest effort switch
 //   groupsHtml(s, pfx, {open})    every group (Scope, Shape, Markets, Correlation, Data rules, Output) as
 //                                 collapsible <details>; ``open`` lists the groups shown open
 //   readChange(target, s)         {controls?, ui?, error?, field} from the input that changed, or null
 //
-// ``s`` = {c: controls, ui, presets, described, markets, books, counts, total, label, changed, errors}.
+// ``s`` = {c: controls, ui, presets, described, markets, books, counts, total, label, changed, errors, chanceCustom}.
+// Closest effort (v3): "Chance you want" (Any, 50–90% or Custom: c.target_chance, a share) sits under "Odds you
+// want", and the switch (c.best_effort) reads "Closest effort" when on, "Strict: only exactly what I asked" when off.
 // Inputs carry data-bd="<field>" and data-kind (how to read them). ``pfx`` keeps ids unique when the same
 // control is drawn twice (the phone's strip and its sheet). Every outside text is escaped.
 
@@ -17,7 +20,7 @@ import { esc, explain } from "../../../ui.js";
 import { icon } from "../../../icons.js";
 import { leagueTitle } from "../../../app.js";
 import {
-  PRESET_KEYS, PRESET_TITLES, PRESET_ICONS, WINDOWS, AGES, MARKET_ORDER, MAX_LEGS, MAX_TICKETS, ageWords, numText,
+  PRESET_KEYS, PRESET_TITLES, PRESET_ICONS, WINDOWS, AGES, MARKET_ORDER, MAX_LEGS, MAX_TICKETS, CHANCES, ageWords, numText,
   pointsText, parseNumber, bandText, cleanMoney, windowProblem,
 } from "./model.js";
 
@@ -155,12 +158,55 @@ function sportsButton(s, pfx) {
 
 function targetBoxes(s, pfx) {
   const c = s.c;
-  const band = bandText(c.odds_min, c.odds_max, "odds");
   return `<div class="bd-pair bd-target">
-    ${numberBox(s, pfx, "target_odds", numText(c.target_odds), { label: "Target odds", placeholder: "e.g. 10", suffix: "x", info: "target_odds" })}
+    ${numberBox(s, pfx, "target_odds", numText(c.target_odds), { label: "Odds you want", placeholder: "e.g. 3.5", suffix: "x", info: "target_odds" })}
     ${numberBox(s, pfx, "tolerance_pct", numText(c.tolerance_pct, 1), { label: "±", srLabel: "Tolerance, plus or minus", suffix: "%", placeholder: "10", info: "tolerance" })}
   </div>
-  <p class="bd-hint" data-bd-target-hint>${esc(c.target_odds ? `Tickets paying ${targetRange(c)}.` : band ? `No target: the preset's band, ${band}.` : "No target: any odds.")}</p>`;
+  ${chanceBoxes(s, pfx)}
+  <p class="bd-hint" data-bd-target-hint>${esc(targetHint(c))}</p>`;
+}
+
+/** Whether the chance control shows its own box: Custom picked, or a chance that isn't one of the choices. */
+export function chanceIsCustom(s) {
+  const v = s.c.target_chance;
+  return Boolean(s.chanceCustom) || (v != null && !CHANCES.some((x) => Math.abs(x - v) < 1e-9));
+}
+
+/** "Chance you want": Any, 50% to 90%, or Custom with a % box beside it. */
+function chanceBoxes(s, pfx) {
+  const c = s.c;
+  const custom = chanceIsCustom(s);
+  const value = custom ? "custom" : c.target_chance == null ? "" : String(c.target_chance);
+  const options = [{ value: "", label: "Any" }, ...CHANCES.map((x) => ({ value: String(x), label: `${Math.round(x * 100)}%` })), { value: "custom", label: "Custom…" }];
+  return `<div class="bd-pair bd-chance">
+    ${select(pfx, "target_chance", value, options, { label: "Chance you want", kind: "chance", info: "target_chance" })}
+    ${custom ? numberBox(s, pfx, "chance_pct", pointsText(c.target_chance), { label: "Your chance", srLabel: "The chance you want, in %", suffix: "%", kind: "chancepct", placeholder: "e.g. 75" }) : ""}
+  </div>`;
+}
+
+/** The line under the targets: what a run aims for, in the person's own numbers. */
+function targetHint(c) {
+  const chance = c.target_chance != null ? `${pointsText(c.target_chance)}%` : "";
+  if (c.target_odds && chance) return `Tickets paying ${targetRange(c)} that win ${chance} of the time or more.`;
+  if (chance) return `The highest odds that still win ${chance} of the time or more.`;
+  if (c.target_odds) return `Tickets paying ${targetRange(c)}.`;
+  const band = bandText(c.odds_min, c.odds_max, "odds");
+  return band ? `No target: the preset's band, ${band}.` : "No target: any odds.";
+}
+
+const EFFORT = {
+  on: ["Closest effort", "Nothing fits exactly? You still get the closest tickets, each saying how close it gets and what was relaxed."],
+  off: ["Strict: only exactly what I asked", "Nothing fits? No ticket: you see which rules blocked it."],
+};
+
+/** The Closest effort switch (c.best_effort): on by default, kept with the controls. */
+function effortSwitch(s, pfx) {
+  const on = s.c.best_effort !== false;
+  const [title, hint] = EFFORT[on ? "on" : "off"];
+  return `<label class="bd-check bd-switch" for="${id(pfx, "best_effort")}">
+    <input type="checkbox" role="switch" id="${id(pfx, "best_effort")}" data-bd="best_effort" data-kind="bool"${on ? " checked" : ""} aria-describedby="${id(pfx, "best_effort-hint")}">
+    <span><b data-bd-effort-title>${esc(title)}</b><small id="${id(pfx, "best_effort-hint")}" data-bd-effort-hint>${esc(hint)}</small></span>${explain("closest_effort")}
+  </label>`;
 }
 
 /** "9.00x to 11.00x" for a target ± tolerance (display of the person's own numbers). */
@@ -180,6 +226,7 @@ export function keyHtml(s, pfx = "bdk") {
       ${select(pfx, "legs", s.c.legs ?? "", legsOptions(s.c), { label: "Legs", kind: "legs" })}
     </div>
     ${targetBoxes(s, pfx)}
+    ${effortSwitch(s, pfx)}
   </div>`;
 }
 
@@ -194,8 +241,10 @@ function summaryFor(key, s) {
   }
   if (key === "shape") {
     const legs = c.legs ? `${c.legs} legs` : "Auto legs";
-    const target = c.target_odds ? `target ${numText(c.target_odds)}x ±${numText(c.tolerance_pct, 1)}%` : "no target";
-    return `${legs} · ${target}`;
+    const odds = c.target_odds ? `${numText(c.target_odds)}x ±${numText(c.tolerance_pct, 1)}%` : "";
+    const chance = c.target_chance != null ? `${pointsText(c.target_chance)}% chance` : "";
+    const target = [odds, chance].filter(Boolean).join(", ") || "no target";
+    return `${legs} · ${target}${c.best_effort === false ? " · strict" : ""}`;
   }
   if (key === "markets") {
     const on = (c.markets || []).map((m) => s.markets?.[m]?.title || m);
@@ -245,6 +294,7 @@ function shapeBody(s, pfx) {
   return `<div class="field"><div class="bd-pair">${select(pfx, "legs", c.legs ?? "", legsOptions(c), { label: "Legs", kind: "legs" })}</div>
       <p class="bd-hint">Auto picks how many; a number you set lifts the Whelan cap ${explain("multi", { label: "Why do more legs cost more?" })}</p></div>
     <div class="field">${targetBoxes(s, pfx)}</div>
+    <div class="field">${effortSwitch(s, pfx)}</div>
     <div class="field"><span class="label">Or from your stake</span>
       <div class="bd-pair">${moneyBox(s, pfx, "stake", ui.stake, { label: "Stake", placeholder: "10" })}${moneyBox(s, pfx, "back", ui.back, { label: "Win about (total back)", placeholder: "50" })}</div>
       <p class="bd-hint bd-conv" data-bd-conv aria-live="polite">${esc(conv)}</p></div>
@@ -354,11 +404,11 @@ export function syncSummaries(container, s) {
     const ui = s.ui;
     conv.textContent = ui.stake && ui.back && s.c.target_odds ? `$${ui.stake} to win about $${ui.back}: target ${numText(s.c.target_odds)}x` : ui.stake && !ui.back ? "Add “win about” to set the target from your stake." : "";
   }
-  for (const hint of container.querySelectorAll("[data-bd-target-hint]")) {
-    const c = s.c;
-    const band = bandText(c.odds_min, c.odds_max, "odds");
-    hint.textContent = c.target_odds ? `Tickets paying ${targetRange(c)}.` : band ? `No target: the preset's band, ${band}.` : "No target: any odds.";
-  }
+  for (const hint of container.querySelectorAll("[data-bd-target-hint]")) hint.textContent = targetHint(s.c);
+  // The switch's words follow its state (the container being typed in isn't redrawn)
+  const [title, hint] = EFFORT[s.c.best_effort !== false ? "on" : "off"];
+  for (const el of container.querySelectorAll("[data-bd-effort-title]")) el.textContent = title;
+  for (const el of container.querySelectorAll("[data-bd-effort-hint]")) el.textContent = hint;
   // The custom window's problem (the inputs being typed in aren't redrawn)
   const problem = windowProblem(s.ui);
   for (const el of container.querySelectorAll('[id$="-win-err"]')) el.textContent = problem;
@@ -392,6 +442,7 @@ const LIMITS = {
   joint_min: { lo: 0, hi: 100, scale: 100, words: "A chance is 0 to 100%." },
   joint_max: { lo: 0, hi: 100, scale: 100, words: "A chance is 0 to 100%." },
   multi_leg_min: { lo: 0, hi: 100, scale: 100, words: "A chance is 0 to 100%." },
+  chance_pct: { lo: 1, hi: 99, scale: 100, words: "The chance you want is 1 to 99%." },
 };
 
 /**
@@ -404,6 +455,12 @@ export function readChange(target, s) {
   const kind = target.dataset.kind;
   const c = s.c;
   if (kind === "bool") return { field, controls: { [field]: target.checked }, error: "" };
+  if (kind === "chance") {
+    // Custom keeps the chance there is (its box opens beside the list); Any clears it
+    if (target.value === "custom") return { field, controls: {}, chanceCustom: true, error: "" };
+    const v = target.value === "" ? null : Number(target.value);
+    return { field, controls: { target_chance: Number.isFinite(v) ? v : null }, chanceCustom: false, error: "" };
+  }
   if (kind === "legs") return { field, controls: { legs: target.value === "" ? null : Number(target.value) }, error: "" };
   if (kind === "int") return { field, controls: { [field]: Number(target.value) }, error: "" };
   if (kind === "intnull") return { field, controls: { [field]: target.value === "" ? null : Number(target.value) }, error: "" };
@@ -445,6 +502,7 @@ export function readChange(target, s) {
   if (!parsed.ok) return { field, controls: {}, error: limit.words };
   let value = parsed.value;
   if (value === null && limit.optional === false) value = field === "tolerance_pct" ? 10 : 2;
+  if (field === "chance_pct") return { field, controls: { target_chance: value }, error: "" };
   const changes = { [field]: value };
   // Pairs must stay in order
   const pairs = { leg_odds_min: ["leg_odds_max", 1], leg_odds_max: ["leg_odds_min", -1], odds_min: ["odds_max", 1], odds_max: ["odds_min", -1],

@@ -157,6 +157,9 @@ BUILDER_SETTING = "builder"  # users.settings: the person's last builder control
 BUILDER_TTL = 60.0  # seconds a builder result is shared
 BUILDER_STAKE = Decimal("10")  # the stake tickets are priced at when the person gives none
 MAX_BUILDER_BYTES = 4096  # the saved controls, as JSON
+TOP_PICKS = 5  # the likeliest winners shown by default (brain_top_picks)
+MAX_TOP_PICKS = 10
+TOP_PICK_MARKETS = ("h2h",)  # "who will win": moneylines unless a market is asked for
 ODDS_REQUESTS_PER_RUN = 2  # boards one run may put on their way through the slate's loader (throttled there too)
 REQUEST_WORDS = {  # the slate's answer to a request for odds, as a league without prices reads it
     "queued": "the latest odds are loading in the background",
@@ -222,6 +225,38 @@ def candidate_leg(candidate: Any, books: Optional[Iterable[str]] = None) -> Opti
                      label=candidate.label, game=candidate.game, start=candidate.start, ai_prob=candidate.chance,
                      market_prob=candidate.fair, push_prob=candidate.push, book=book, group=candidate.game_key,
                      adjusted=candidate.adjusted)
+
+
+# Closest effort's options (engine/builder.py's result.options keys), in the words the app and the AI use when the
+# engine sends no label of its own: the engine's own labels, one source for every part
+OPTION_LABELS: Dict[str, str] = dict(bets.builder.OPTION_LABELS)
+
+
+def best_effort_view(result: Dict[str, Any]) -> Dict[str, Any]:
+    """A builder result (Result.to_dict(), restaked) in the shape the routes and tools send: ``options`` always a
+    list (each {key, label, ticket_index}, label filled from OPTION_LABELS when the engine gave none, entries naming
+    no ticket dropped), and every ticket with ``fit`` (None without targets), ``relaxed`` ([] when nothing was
+    loosened) and ``option`` ({key, label} of the option that picked it, else None). Changes the result in place and
+    returns it."""
+    tickets_ = [t for t in result.get("tickets") or [] if isinstance(t, dict)]
+    for ticket in tickets_:
+        ticket.setdefault("fit", None)
+        ticket["relaxed"] = [dict(entry) for entry in ticket.get("relaxed") or [] if isinstance(entry, Mapping)]
+        ticket["option"] = None
+    options = []
+    for entry in result.get("options") or []:
+        if not isinstance(entry, Mapping):
+            continue
+        index = entry.get("ticket_index")
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(tickets_):
+            continue
+        key = str(entry.get("key") or "")
+        label = str(entry.get("label") or OPTION_LABELS.get(key) or "Closest option")
+        options.append({**dict(entry), "key": key, "label": label, "ticket_index": index})
+        if tickets_[index]["option"] is None:  # options picking the same ticket keep the first label
+            tickets_[index]["option"] = {"key": key, "label": label}
+    result["options"] = options
+    return result
 
 
 # --- small helpers --------------------------------------------------------------------------------
@@ -1558,7 +1593,14 @@ class Lab(Gates):
         """POST /api/builder/run {controls, stake?}: the engine's Result as JSON (Decimals as strings), its tickets
         priced at the person's stake (else $10), plus ``unpriced`` (leagues in scope with games but no prices, each
         a near miss; the slate's throttled background loader is asked for their odds) and ``as_of``. Picks only: the
-        gates and the pause."""
+        gates and the pause.
+
+        Closest effort (controls ``best_effort``, on unless the person picked strict): a request no ticket meets
+        exactly gets the closest tickets the engine can make, each with ``fit`` ({odds, chance, target_odds,
+        target_chance, odds_gap_pct, chance_gap_pp, meets: {odds, chance}}) and ``relaxed`` ([{rule, from, to,
+        words}], the rules loosened), and with both target odds and a target chance ``options`` ([{key, label,
+        ticket_index}]: "your_odds", "your_chance", "closest") labels them. Every ticket carries ``fit`` and
+        ``relaxed`` here, empty when the engine set none, and the result ``options`` (empty for a plain run)."""
         user = self.ready(uid, picks=True)
         stake = None
         if body.get("stake") is not None:
@@ -1570,7 +1612,7 @@ class Lab(Gates):
         now = datetime.datetime.fromtimestamp(self._now(), datetime.timezone.utc)
         out = engine.restake(shared["result"], stake if stake is not None else BUILDER_STAKE, now)
         out.update(unpriced=shared["unpriced"], as_of=shared["as_of"], stake_given=stake is not None)
-        return out
+        return best_effort_view(out)
 
     def _builder_shared(self, controls: Any) -> Dict[str, Any]:
         """The result before the stake: shared by everyone for BUILDER_TTL seconds (see the section comment)."""
@@ -1639,13 +1681,61 @@ class Lab(Gates):
             entry["reason"] = text
         return out
 
+    def builder_top_picks(self, uid: str, leagues: Optional[Sequence[str]] = None, n: int = TOP_PICKS,
+                          markets: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+        """The likeliest winners ("who will win tonight", brain_top_picks): engine/builder.py's top_picks over the
+        Builder's legs (the same candidates a run uses, assembled from what is in hand, never fetched), highest chance
+        first, one pick a game, moneylines unless ``markets`` says otherwise. Price safety is a run's: only books a
+        person can bet at (never a price at the goals model's fair odds), never a game under way or a price older
+        than the Builder's stale limit (Controls.max_price_age_s); with ``leagues`` only those, and a league among
+        them with games but no prices loaded is named in ``unpriced`` and asked for in the background (the slate's
+        throttled loader, as a run asks). Picks only: the gates and the pause.
+
+        Returns {picks: [{rank, ref, league, label, game, start, chance, chance_source, price, book, edge, why,
+        why_units?}], leagues, markets, unpriced: [{league, title, games, reason}], as_of: {slate, consensus}}."""
+        self.ready(uid, picks=True)
+        engine = _engine_builder()
+        markets = [m for m in dict.fromkeys(markets or TOP_PICK_MARKETS) if m in engine.MARKETS] or \
+            list(TOP_PICK_MARKETS)
+        n = max(1, min(int(n or TOP_PICKS), MAX_TOP_PICKS))
+        scope = set(leagues) if leagues else None
+        now = self._now()
+        assembled = self.service.builder_candidates(now=now)
+        usable = [candidate for candidate in assembled["candidates"] if (scope is None or candidate.league in scope)
+                  and "stale_price" not in candidate.flags]
+        # The engine prices each pick at its best price book and leaves out a game under way, a price older than the
+        # Builder's stale limit and a leg priced at the goals model's fair odds
+        found = engine.top_picks(usable, n=n, markets=tuple(markets),
+                                 now=datetime.datetime.fromtimestamp(now, datetime.timezone.utc),
+                                 max_price_age_s=engine.Controls().max_price_age_s)
+        picks = []
+        for rank, pick in enumerate(found, 1):
+            view = {key: pick.get(key) for key in ("ref", "league", "label", "game", "start", "chance",
+                                                   "chance_source", "book", "edge")}
+            why = pick.get("why")
+            price = pick.get("price")
+            view.update(rank=rank, price=None if price is None else str(price),
+                        why=[str(line) for line in (why if isinstance(why, (list, tuple)) else [why]) if line][:3])
+            if pick.get("why_units"):
+                view["why_units"] = pick["why_units"]
+            picks.append(view)
+        unpriced = []
+        if scope is not None:
+            # Leagues asked about with games and no prices loaded: named, and their boards asked for in the background
+            controls = engine.Controls(leagues=sorted(scope))
+            unpriced = [{key: entry.get(key) for key in ("league", "title", "games", "reason")}
+                        for entry in self._unpriced(assembled, controls, scope)]
+        return {"picks": picks, "leagues": sorted(scope) if scope else None, "markets": markets, "unpriced": unpriced,
+                "as_of": {"slate": assembled.get("etag"), "consensus": assembled.get("consensus_as_of")}}
+
     def builder_price(self, uid: str, body: Mapping[str, Any]) -> Dict[str, Any]:
-        """POST /api/builder/price {legs: [ref], stake?, books?, target_odds?, tolerance_pct?}: a builder ticket (e.g.
-        after a swap) priced with the builder's own numbers (its chances, and each leg's best price at the allowed
-        books): tickets.price_ticket plus ``refs``, ``removed`` (picks no longer on offer), ``model_priced`` and the
-        engine's ``joint`` and ``reach_target`` blocks (builder.ticket_chances: the chance every leg wins, the chances it
-        wins money and loses the stake, its fair odds, and the chance it pays at least the low end of the target
-        window), as a run's tickets carry them."""
+        """POST /api/builder/price {legs: [ref], stake?, books?, target_odds?, target_chance?, tolerance_pct?}: a
+        builder ticket (e.g. after a swap) priced with the builder's own numbers (its chances, and each leg's best price
+        at the allowed books): tickets.price_ticket plus ``refs``, ``removed`` (picks no longer on offer),
+        ``model_priced``, the engine's ``joint`` and ``reach_target`` blocks (builder.ticket_chances: the chance every
+        leg wins, the chances it wins money and loses the stake, its fair odds, and the chance it pays at least the
+        low end of the target window) and ``fit`` (builder.ticket_fit: how close it gets to the run's target odds and
+        chance; None without either), as a run's tickets carry them."""
         user = self.ready(uid, picks=True)
         stake = BUILDER_STAKE
         if body.get("stake") is not None:
@@ -1681,8 +1771,14 @@ class Lab(Gates):
         engine = _engine_builder()
         notes = engine.ticket_notes([(leg.label, leg_flags, leg.book) for leg, leg_flags in zip(found, flags)],
                                     chances["joint"]["profit"], lose=chances["joint"]["lose"])
+        # How close the swapped ticket gets to the run's targets, as a run's tickets say it (None without one)
+        target_chance = body.get("target_chance")
+        fit = engine.ticket_fit(math.prod((leg.price for leg in found), start=Decimal(1)), chances["joint"]["chance"],
+                                float(target_odds) if target_odds is not None else None,
+                                float(target_chance) if target_chance is not None else None,
+                                float(tolerance) if tolerance is not None else engine.Controls().tolerance_pct)
         priced.update(refs=[_ref_of(view) for view in priced["legs"]], removed=removed,
-                      model_priced=any(leg.book == MODEL_BOOK for leg in found), notes=notes, **chances)
+                      model_priced=any(leg.book == MODEL_BOOK for leg in found), notes=notes, fit=fit, **chances)
         return priced
 
     def save_builder(self, raw: Mapping[str, Any], user: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
