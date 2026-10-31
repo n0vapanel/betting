@@ -812,17 +812,43 @@ def _poisson_total_for_over(over: np.ndarray) -> np.ndarray:
     return (low + high) / 2
 
 
-def grids_many(lam: np.ndarray, mu: np.ndarray, rho: float, max_goals: int = soccer.MAX_GOALS) -> np.ndarray:
-    """Dixon-Coles score grids (n, G, G), as ``soccer.grid``."""
+def rho_bounds_many(lam: Any, mu: Any) -> Tuple[np.ndarray, np.ndarray]:
+    """``soccer.rho_bounds`` per match: (low, high) arrays of Dixon and Coles' valid range of rho for home rates
+    ``lam`` and away rates ``mu``."""
+    lam, mu = np.asarray(lam, dtype=float), np.asarray(mu, dtype=float)
+    return np.maximum(-1.0 / lam, -1.0 / mu), np.minimum(1.0 / (lam * mu), 1.0)
+
+
+def narrow_rho_many(rho: Any, lam: Any, mu: Any) -> Tuple[Any, np.ndarray]:
+    """(rho as used per match, which matches needed narrowing): ``rho`` moved to the nearest end of each match's
+    valid range, as ``soccer.derive`` serves it. ``rho`` comes back unchanged when no match needs narrowing."""
+    low, high = rho_bounds_many(lam, mu)
+    narrowed = (rho < low) | (rho > high)
+    if not narrowed.any():
+        return rho, narrowed
+    return np.minimum(np.maximum(rho, low), high), narrowed
+
+
+def grids_many(lam: np.ndarray, mu: np.ndarray, rho: Any, max_goals: int = soccer.MAX_GOALS) -> np.ndarray:
+    """Dixon-Coles score grids (n, G, G), as ``soccer.grid``: ``rho`` (one value, or one per match) must lie inside
+    each match's valid range (``rho_bounds_many``), else ValueError; a tau is never clipped."""
+    low, high = rho_bounds_many(lam, mu)
+    outside = ~((low <= rho) & (rho <= high))
+    if outside.any():
+        i = int(np.flatnonzero(np.broadcast_to(outside, np.shape(low)))[0])
+        bad = float(np.broadcast_to(rho, np.shape(low))[i])
+        raise ValueError(f"rho {bad:g} is outside Dixon and Coles' valid range [{low[i]:.4g}, {high[i]:.4g}] for goal "
+                         f"rates {lam[i]:g} and {mu[i]:g} ({int(np.count_nonzero(outside))} of {np.size(low)} matches)")
     k = np.arange(max_goals + 1, dtype=float)
     lf = stats.lgamma(k + 1)
     ph = np.exp(-lam[:, None] + k[None, :] * np.log(lam[:, None]) - lf[None, :])
     pa = np.exp(-mu[:, None] + k[None, :] * np.log(mu[:, None]) - lf[None, :])
     g = ph[:, :, None] * pa[:, None, :]
+    # Inside the valid range every factor is at least 0: the floors only absorb rounding at its exact ends
     g[:, 0, 0] *= np.maximum(1 - lam * mu * rho, 0)
     g[:, 0, 1] *= np.maximum(1 + lam * rho, 0)
     g[:, 1, 0] *= np.maximum(1 + mu * rho, 0)
-    g[:, 1, 1] *= max(1 - rho, 0)
+    g[:, 1, 1] *= np.maximum(1 - rho, 0)
     return g / g.sum(axis=(1, 2), keepdims=True)
 
 
@@ -836,7 +862,9 @@ _BOTH = ((_IDX[:, None] >= 1) & (_IDX[None, :] >= 1)).astype(float)
 
 
 def _fit_values_many(x: np.ndarray, rho: float) -> np.ndarray:
-    g = grids_many(np.exp(x[:, 0]), np.exp(x[:, 1]), rho)
+    # As soccer._fit_values: each candidate's rho narrowed into its own valid range (the fit tries rates up to 6)
+    lam, mu = np.exp(x[:, 0]), np.exp(x[:, 1])
+    g = grids_many(lam, mu, narrow_rho_many(rho, lam, mu)[0])
     return np.column_stack([(g * _HOME).sum((1, 2)), (g * _DRAW).sum((1, 2)), (g * _AWAY).sum((1, 2)),
                             (g * _OVER).sum((1, 2))])
 
@@ -845,9 +873,12 @@ def goals_scores(matches: Sequence[MatchRecord], rho: float, nudge: float,
                  rates: Optional[Tuple[np.ndarray, np.ndarray]] = None,
                  start: Optional[Tuple[np.ndarray, np.ndarray]] = None) -> Dict[str, Any]:
     """Per-match scores of the goals model at ``rho``/``nudge``: exact-score log score, total-goals CRPS and PIT, the
-    BTTS-yes chance (with the nudge, clamped like ``soccer.markets``) and its log loss."""
+    BTTS-yes chance (with the nudge, clamped like ``soccer.markets``) and its log loss. A match whose rates put
+    ``rho`` outside its valid range is scored with rho narrowed into it, as ``soccer.derive`` would serve it; those
+    matches are flagged in "rho_clamped"."""
     lam, mu = rates if rates is not None else rates_many(matches, rho, start=start)
-    g = grids_many(lam, mu, rho)
+    used, clamped = narrow_rho_many(rho, lam, mu)
+    g = grids_many(lam, mu, used)
     hg = np.array([min(m.home_goals, _G - 1) for m in matches])
     ag = np.array([min(m.away_goals, _G - 1) for m in matches])
     exact = g[np.arange(len(matches)), hg, ag]
@@ -863,7 +894,7 @@ def goals_scores(matches: Sequence[MatchRecord], rho: float, nudge: float,
     both = np.array([1.0 if m.home_goals >= 1 and m.away_goals >= 1 else 0.0 for m in matches])
     return {"exact_ls": -np.log(np.maximum(exact, 1e-300)), "goals_crps": counted["per_game_crps"],
             "goals_pit": counted["pit"], "btts_raw": btts_raw, "btts": btts, "btts_y": both,
-            "btts_ll": stats.log_loss(btts, both), "rates": (lam, mu)}
+            "btts_ll": stats.log_loss(btts, both), "rates": (lam, mu), "rho_clamped": clamped}
 
 
 CLIMATOLOGY_MIN = 100  # training matches a league needs for its own climatology (else the pooled one is used)

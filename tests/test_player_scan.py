@@ -162,11 +162,16 @@ class Service:
 
 
 def make_board(now: float = NOW, **options: Any) -> PlayerBoard:
-    cache = TTLCache(name="scan-test")
+    """A board over the fixtures. Its cache keeps the board's own time (``board._now``, which a test may move): a
+    refresh half an hour on finds the cache's copies as old as they would be, as on the server, where both run on
+    time.time()."""
+    made: List[PlayerBoard] = []
+    cache = TTLCache(name="scan-test", clock=lambda: made[0]._now() if made else now)
     espn = EspnClient(cache, clock=lambda: now)
     players = PlayerData(espn, now=lambda: datetime.datetime.fromtimestamp(now, datetime.timezone.utc))
     service = Service(espn, cache, options.pop("detail", None), options.pop("odds", None))
-    return PlayerBoard(service, players, cache, now=lambda: now, **options)
+    made.append(PlayerBoard(service, players, cache, now=lambda: now, **options))
+    return made[0]
 
 
 def no_banned(texts: List[str]) -> None:
@@ -315,8 +320,10 @@ def test_history_sums_the_columns_a_row_has_and_respects_needs() -> None:
 def test_form_mean_is_recency_weighted_and_shrunk() -> None:
     w = [1.0, 0.5 ** 0.2, 0.5 ** 0.4]
     weighted = (30 * w[0] + 20 * w[1] + 10 * w[2]) / sum(w)
-    assert engine.form_mean([30, 20, 10], [30, 20, 10]) == pytest.approx((3 * weighted + 5 * 20) / 8, abs=1e-9)
-    assert engine.form_mean([30, 20, 10], [30, 20, 10]) == pytest.approx(20.345473, abs=1e-5)
+    # The season weighs the games it stands on, at most 5 (P0 RD11: before, a 3-game season counted as 5 games and
+    # gave (3 x weighted + 5 x 20) / 8 = 20.345)
+    assert engine.form_mean([30, 20, 10], [30, 20, 10]) == pytest.approx((3 * weighted + 3 * 20) / 6, abs=1e-9)
+    assert engine.form_mean([30, 20, 10], [30, 20, 10]) == pytest.approx(20.460624, abs=1e-5)
     # Ten games of 30 after a season averaging 20: (10 x 30 + 5 x 20) / 15
     assert engine.form_mean([30] * 10, [30] * 10 + [10] * 10) == pytest.approx(400 / 15)
     assert engine.form_mean([], []) is None
@@ -514,8 +521,9 @@ def test_edges_only_on_the_matching_price_and_stale_lines_flagged() -> None:
 
 def test_no_number_scans_each_players_posted_line_by_edge() -> None:
     players = [
+        # 80% at 1.80: +45%, under the cap for a plausible edge (EDGE_CAP)
         form_player("1", "Value", [27] * 10, props=[{"market": "player_points", "kind": "over_under", "line": 22.5,
-                                                    "over_price": Decimal("1.91"), "under_price": Decimal("1.91")}]),
+                                                    "over_price": Decimal("1.80"), "under_price": Decimal("1.91")}]),
         form_player("2", "Fair", [24] * 10, props=[{"market": "player_points", "kind": "over_under", "line": 23.5,
                                                    "over_price": Decimal("1.91"), "under_price": Decimal("1.91")}]),
         form_player("3", "NoLine", [40] * 10),
@@ -992,3 +1000,259 @@ def test_reasons_read_well_without_a_log_for_one_a_game_and_never_carry_a_price(
                            "over": {"decimal": 1.17, "american": "-588"}})
     reasons = engine.why(milestone, spec, "over")
     assert reasons[-1] == "20+ posted" and not any("588" in reason for reason in reasons)
+
+
+# --- v4 P0: names, sorts, trends, kinds, edges mode and weekdays ----------------------------------------------------
+
+NAMED = [
+    form_player("1", "Luka Dončić", [31, 28, 35, 30, 27, 33, 29, 26, 34, 30]),
+    form_player("2", "Shai Gilgeous-Alexander", [22, 19, 24, 21, 18, 23, 20, 22, 25, 17]),
+    form_player("3", "Jaren Jackson Jr.", [14, 12, 21, 13, 15, 12, 14, 11, 13, 16]),
+    form_player("4", "Bench Guy", [6, 8, 5, 7, 9, 4, 6, 8, 7, 5]),
+    form_player("5", "Hurt Star", [30, 32, 29, 31, 30, 28, 33, 30, 29, 31], status="Out"),
+    form_player("6", "Seth Curry", [12, 10, 9, 11, 14, 8, 10, 12, 9, 11]),
+    form_player("7", "Stephen Curry", [35, 22, 30, 28, 26, 30, 25, 29, 27, 31]),
+]
+
+
+def test_names_return_each_named_player_whether_he_qualifies_or_not() -> None:
+    ask = engine.make_ask(NBA, "pts", 20)
+    out = engine.scan(board_view(NAMED), ask, names=["luka doncic", "GILGEOUS-ALEXANDER", "jackson", "Hurt Star",
+                                                      "Bench Guy", "Nobody Here", "shai"])
+    rows = out["players"]
+    # Ranked by chance, the ruled-out player last; full names, last names (a suffix off), a unique first name and
+    # accents all match
+    assert [row["name"] for row in rows] == ["Luka Dončić", "Shai Gilgeous-Alexander", "Jaren Jackson Jr.",
+                                             "Bench Guy", "Hurt Star"]
+    assert [row["qualifies"] for row in rows] == [True, True, False, False, False]
+    hurt = rows[-1]
+    assert hurt["ruled_out"] is True and hurt["status"] == "Out" and "ruled_out" not in rows[0]
+    assert rows[3]["chance"] < 0.01 and rows[3]["why"]  # not a candidate, still answered
+    assert out["missing_names"] == ["Nobody Here"] and out["close"] == [] and out["more"] == 0
+    assert out["mode"] == "scan" and [row["rank"] for row in rows] == [1, 2, 3, 4, 5]
+    # A last name two players share is ambiguous (v4 P0 fix, contract 1: a name in exactly one place, so no rows,
+    # and both candidates); a first name's start with the last name gives one
+    curry = engine.scan(board_view(NAMED), ask, names=["Curry"])
+    assert curry["players"] == [] and curry["missing_names"] == [] and curry["started_names"] == []
+    assert curry["ambiguous_names"] == [{"name": "Curry", "candidates": ["Seth Curry", "Stephen Curry"]}]
+    steph = engine.scan(board_view(NAMED), ask, names=["Steph Curry"])
+    assert [row["name"] for row in steph["players"]] == ["Stephen Curry"] and steph["missing_names"] == []
+    assert steph["ambiguous_names"] == []
+    # A first name several players have matches each of them (the scan calls it ambiguous: F3)
+    found, missing = engine.match_names([{"athlete_id": "1", "name": "Jalen Brunson"},
+                                         {"athlete_id": "2", "name": "Jalen Williams"}], ["jalen", "Brunson"])
+    assert found == {"jalen": ["1", "2"], "Brunson": ["1"]} and missing == []
+    # Names the board doesn't know, or no names at all: nothing, said so
+    empty = engine.scan(board_view(NAMED), ask, names=["Michael Jordan"])
+    assert empty["players"] == [] and empty["missing_names"] == ["Michael Jordan"]
+    assert "missing_names" not in engine.scan(board_view(NAMED), ask)
+
+
+def test_sorts_reorder_the_rows_and_hot_and_cold_rank_by_the_last_five_against_the_season() -> None:
+    ask = engine.make_ask(NBA, "pts", 20)
+    view = board_view(NAMED)
+    default = engine.scan(view, ask)
+    assert engine.scan(view, ask, sort="chance")["players"] == default["players"]
+    by_l10 = engine.scan(view, ask, sort="l10")["players"]
+    rates = [row["hits"]["l10"][0] / row["hits"]["l10"][1] for row in by_l10]
+    assert rates == sorted(rates, reverse=True)
+    by_projection = engine.scan(view, ask, sort="projection")["players"]
+    assert [row["projection"] for row in by_projection] == sorted((r["projection"] for r in by_projection), reverse=True)
+    trending = [form_player("10", "Heater", [30, 29, 31, 28, 30, 15, 14, 16, 15, 14]),
+                form_player("11", "Freezer", [10, 11, 9, 12, 10, 25, 24, 26, 25, 27]),
+                form_player("12", "Steady", [20, 20, 20, 20, 20, 20, 20, 20, 20, 20]),
+                form_player("13", "Short Log", [40, 40, 40, 40]),  # 4 games: not ranked
+                form_player("14", "Injured Heater", [30, 29, 31, 28, 30, 15, 14, 16, 15, 14], status="Out")]
+    hot = engine.scan(board_view(trending), ask, sort="hot")
+    assert [row["name"] for row in hot["players"]] == ["Heater", "Steady", "Freezer"] and hot["close"] == []
+    heater = hot["players"][0]
+    # v4 P0 fix (contract 2): ten games this season, so the last 5 against this season's other 5
+    assert heater["trend"] == {"l5": 29.6, "season": 14.8, "diff": 14.8, "vs": "season"}
+    cold = engine.scan(board_view(trending), ask, sort="cold")
+    assert [row["name"] for row in cold["players"]] == ["Freezer", "Steady", "Heater"]
+    assert cold["players"][0]["trend"]["diff"] == round(10.4 - 25.4, 1)
+    # Hot and cold skip the candidate filter: "Freezer" never reached 20 in his last 5, he is still ranked
+    assert engine.scan(board_view(trending), ask, sort="hot", n=1)["more"] == 2
+    with pytest.raises(ValueError):
+        engine.scan(view, ask, sort="sideways")
+
+
+def test_hot_and_cold_without_a_number_read_the_posted_line_or_the_season_average() -> None:
+    lined = form_player("1", "Lined", [30, 29, 31, 28, 30, 15, 14, 16, 15, 14], props=[
+        {"market": "player_points", "kind": "over_under", "line": 22.5, "over_price": None, "under_price": None}])
+    bare = form_player("2", "Bare", [25, 24, 26, 23, 25, 15, 14, 16, 15, 14])
+    out = engine.scan(board_view([lined, bare]), engine.make_ask(NBA, "pts", None), sort="hot")
+    by_name = {row["name"]: row for row in out["players"]}
+    assert by_name["Lined"]["threshold"] == 23 and by_name["Lined"]["line"]["line"] == 22.5
+    assert by_name["Bare"]["threshold"] == 20 and "line" not in by_name["Bare"]  # season average 19.7, rounded up
+
+
+def test_every_row_says_its_kind_and_a_yes_no_row_has_only_its_chance() -> None:
+    out = engine.scan(board_view([nba_player(SGA_ROW, SGA_ROWS, [])]), engine.make_ask(NBA, "pts", 20))
+    row = (out["players"] + out["close"])[0]
+    assert row["kind"] == "count" and row["projection"] == 31.2
+    # SGA, newest first: 26, 34, 17, 32 this season, then last season's: 4 games this season are short of the 5 a
+    # trend needs, and the last 5 never reach into last season (v4 P0 fix, contract 2: F2), so no trend at all
+    assert "trend" not in row
+    dd = engine.scan(board_view([nba_player(SGA_ROW, SGA_ROWS, [])]), engine.make_ask(NBA, "dd"))
+    dd_row = (dd["players"] + dd["close"])[0]
+    assert dd_row["kind"] == "yes_no" and dd_row["projection"] is None and dd_row["chance"] > 0
+    assert "trend" not in dd_row
+    # With his whole last season (the board's last_season_rows) and a fifth game this season, a double-double's
+    # trend is a share of games against last season's share
+    fifth = [{**SGA_ROWS[0], "event_id": "x5"}] + SGA_ROWS
+    shared = engine.scan(board_view([nba_player(SGA_ROW, fifth, [], last_season_rows=SGA_ROWS[4:])]),
+                         engine.make_ask(NBA, "dd"))
+    moved = (shared["players"] + shared["close"])[0]["trend"]
+    assert moved["vs"] == "last_season" and 0 <= moved["l5"] <= 1 and 0 <= moved["season"] <= 1
+    shakir = log_rows("football", "nfl_gamelog_4373678")
+    nfl = board_view([{"athlete_id": "4373678", "name": "Khalil Shakir", "team": "BUF", "opponent": "BAL",
+                       "home": True, "position": "WR", "event_id": "401909891", "status": None, "projection": None,
+                       "rows": shakir, "props": []}], league=NFL)
+    yards = engine.scan(nfl, engine.make_ask(NFL, "rec_yds", 40))
+    assert (yards["players"] + yards["close"])[0]["kind"] == "yards"
+    attd = engine.scan(nfl, engine.make_ask(NFL, "anytime_td"))
+    assert all(row["kind"] == "yes_no" and row["projection"] is None for row in attd["players"] + attd["close"])
+
+
+def test_a_partial_board_says_how_many_games_failed_even_when_all_are_built() -> None:
+    view = board_view([form_player("1", "Star", [31] * 10)], games_failed=1)
+    assert engine.scan(view, engine.make_ask(NBA, "pts", 20))["loading"] == {"games_ready": 1, "games_total": 1,
+                                                                            "failed": 1}
+    still = board_view([form_player("1", "Star", [31] * 10)], games_ready=3, games_total=10, games_failed=2)
+    assert engine.scan(still, engine.make_ask(NBA, "pts", 20))["loading"] == {"games_ready": 3, "games_total": 10,
+                                                                             "failed": 2}
+    assert "loading" not in engine.scan(board_view([form_player("1", "Star", [31] * 10)]),
+                                        engine.make_ask(NBA, "pts", 20))
+
+
+def _ou(market: str, line: float, over: str, under: str) -> Dict[str, Any]:
+    return {"market": market, "kind": "over_under", "line": line, "over_price": Decimal(over),
+            "under_price": Decimal(under), "label": f"{line:g}"}
+
+
+def _rung(line: float, over: str, market: str = "player_points") -> Dict[str, Any]:
+    return {"market": market, "kind": "milestone", "line": line, "over_price": Decimal(over), "under_price": None,
+            "label": f"{int(line + 0.5)}+"}
+
+
+def edges_board() -> Dict[str, Any]:
+    """Two form players. "Main Line" (projected 25.6): points posted at 23.5 (24+ is 65%: +21.7% at 1.87), rebounds at
+    4.5, a near 25+ rung priced at 3.00 (+72%: suspect), a 30+ and a far 40+. "Long Shot" (projected 19.5, a wild
+    log): only rungs, the near ones (15+, 20+) priced short of his numbers, the far ones long: 35+ at 20.0 (+22%, the
+    negative binomial's tail) and 40+ at 100.0 (+166%)."""
+    main = form_player("1", "Main Line", [27, 24, 29, 22, 26, 28, 23, 25, 27, 24], props=[
+        _ou("player_points", 23.5, "1.87", "1.95"), _ou("player_rebounds", 4.5, "1.80", "2.00"),
+        _rung(24.5, "3.00"), _rung(29.5, "4.00"), _rung(39.5, "15.0")])
+    wild = form_player("2", "Long Shot", [8, 32, 9, 31, 10, 33, 7, 30, 9, 31], props=[
+        _rung(14.5, "1.30"), _rung(19.5, "2.05"), _rung(24.5, "3.40"), _rung(34.5, "20.0"), _rung(39.5, "100.0")])
+    return board_view([main, wild])
+
+
+def test_edges_mode_ranks_the_priced_lines_of_every_stat_by_edge() -> None:
+    view = edges_board()
+    out = engine.scan_edges(view, NBA, 10)
+    rows = out["players"]
+    assert out["mode"] == "edges" and out["games"] == 1 and "loading" not in out and "close" not in out
+    assert [(row["name"], row["stat"], row["side"], row["threshold"]) for row in rows] == [
+        ("Main Line", "pts", "over", 24), ("Main Line", "reb", "over", 5)]  # one row per player and stat
+    assert [row["edge"] for row in rows] == sorted((row["edge"] for row in rows), reverse=True)
+    for row in rows:
+        spec = engine.STATS[NBA][row["stat"]]
+        assert row["stat_label"] == spec["label"] and row["kind"] == "count" and row["why"]
+        assert row["line"]["kind"] == "over_under" and row["line"]["matches"] is True
+        assert 0 < row["edge"] <= engine.EDGE_CAP
+        assert row["edge"] == pytest.approx(row["chance"] * row["line"][row["side"]]["decimal"] - 1, abs=0.01)
+        # Each row is the scan's own row for that line's number (named: edges mode has no candidate filter)
+        same = engine.scan(view, engine.make_ask(NBA, row["stat"], row["threshold"], row["side"]),
+                           names=[row["name"]])["players"][0]
+        assert (same["chance"], same.get("edge")) == (row["chance"], row["edge"])
+    assert engine.scan_edges(view, NBA, 1)["more"] == 1 and len(engine.scan_edges(view, NBA, 1)["players"]) == 1
+    # Unders: the main line's under (no edge here); stale lines and ruled-out players are left out
+    assert engine.scan_edges(view, NBA, 10, side="under")["players"] == []
+    stale = edges_board()
+    stale["games"]["401909891"]["props"]["stale"] = True
+    assert engine.scan_edges(stale, NBA, 10)["players"] == []
+    hurt = edges_board()
+    hurt["players"][0]["status"] = "Out"
+    assert engine.scan_edges(hurt, NBA, 10)["players"] == []
+    with pytest.raises(ValueError):
+        engine.scan_edges(view, NBA, 10, side="both")
+    # Named players: only their lines, and the names not on the board
+    named = engine.scan_edges(view, NBA, 25, names=["main line", "Nobody Here"])
+    assert {row["name"] for row in named["players"]} == {"Main Line"} and named["missing_names"] == ["Nobody Here"]
+    assert "missing_names" not in out
+    # A yes bet is priced too: the NFL's anytime TD
+    tds = [{"season": "2026", "stats": {"RUSH TD": v}} for v in [1, 2, 1, 1, 0, 1, 2, 1, 0, 1]]
+    yes = [{"market": "player_anytime_td", "kind": "yes", "line": None, "yes_price": Decimal("2.10"),
+            "over_price": None, "under_price": None, "label": None}]
+    nfl = board_view([form_player("9", "Goal Line Back", [0] * 10, rows=tds, props=yes)], league=NFL)
+    [td] = engine.scan_edges(nfl, NFL, 10)["players"]
+    assert (td["stat"], td["side"], td["line"]["kind"], td["kind"]) == ("anytime_td", "over", "yes", "yes_no")
+    assert td["edge"] == round(td["chance"] * 2.10 - 1, 4) and td["projection"] is None
+
+
+def test_edges_mode_never_prices_a_far_rung_and_caps_a_suspect_edge() -> None:
+    """A far milestone rung's "edge" is the model's tail against a long price (the e2e world showed +343%): edges mode
+    prices only the main line, the yes bets and the rungs within RUNG_WINDOW of the projection (the nearest either
+    side), and an edge above EDGE_CAP is suspect everywhere: no number, ``edge_suspect``, never ranked."""
+    view = edges_board()
+    names = lambda out: {row["name"] for row in out["players"]}
+    # Long Shot's far 35+ has a positive edge the window alone keeps out; his 40+ is past the cap as well
+    far = engine.scan(view, engine.make_ask(NBA, "pts", 35), names=["Long Shot"])["players"][0]
+    assert 0 < far["edge"] <= engine.EDGE_CAP and far["line"]["label"] == "35+"
+    farther = engine.scan(view, engine.make_ask(NBA, "pts", 40), names=["Long Shot"])["players"][0]
+    assert "edge" not in farther and farther["edge_suspect"] is True and farther["chance"] * 100 - 1 > 0.5
+    assert "Long Shot" not in names(engine.scan_edges(view, NBA, 25))
+    assert engine._near_rungs(engine._ladder(view["players"][1]["props"]), 19.51) == [15, 20]
+    # The main line's edge is still there, and the near 25+ at +72% is suspect: shown without a number, never ranked
+    rows = engine.scan_edges(view, NBA, 25)["players"]
+    assert ("Main Line", 24) in {(row["name"], row["threshold"]) for row in rows}
+    suspect = engine.scan(view, engine.make_ask(NBA, "pts", 25), names=["Main Line"])["players"][0]
+    assert suspect["edge_suspect"] is True and "edge" not in suspect and suspect["line"]["label"] == "25+"
+    assert suspect["chance"] * 3.00 - 1 > engine.EDGE_CAP and 25 in engine._near_rungs(
+        engine._ladder(view["players"][0]["props"]), 25.6)
+    assert all(row["edge"] <= engine.EDGE_CAP and not row.get("edge_suspect") for row in rows)
+    # The cap holds in every ranking by edge: a posted line's +80% is not an edge either
+    capped = board_view([form_player("3", "Too Good", [30] * 10, props=[_ou("player_points", 22.5, "1.91", "1.91")])])
+    row = engine.scan(capped, engine.make_ask(NBA, "pts", None))["players"][0]
+    assert row["edge_suspect"] is True and "edge" not in row and row["chance"] * 1.91 - 1 > engine.EDGE_CAP
+    assert engine.scan(capped, engine.make_ask(NBA, "pts", 23), sort="edge")["players"][0].get("edge") is None
+    assert engine.EDGE_CAP == 0.5 and engine.RUNG_WINDOW == 0.25
+
+
+def test_weekdays_map_to_today_tomorrow_or_later() -> None:
+    saturday = datetime.datetime(2026, 10, 31, 15, 0, tzinfo=datetime.timezone.utc).timestamp()  # 11:00 in New York
+    assert engine.day_for_weekday("touchdown sunday", saturday, "America/New_York") == "tomorrow"
+    assert engine.day_for_weekday("anytime td saturday", saturday, ZoneInfo("America/New_York")) == "today"
+    assert engine.day_for_weekday("points on tuesday", saturday, "America/New_York") is None
+    assert engine.day_for_weekday("20+ points tonight", saturday) is None
+    late = datetime.datetime(2026, 11, 1, 3, 30, tzinfo=datetime.timezone.utc)  # Saturday 23:30 in New York
+    assert engine.day_for_weekday("sunday", late, "America/New_York") == "tomorrow"
+    assert engine.day_for_weekday("sunday", late, "UTC") == "today"
+    assert engine.weekday_named("SOG 3+ on Thursdays") == 3 and engine.weekday_named("tonight") is None
+    reading = lambda text: engine.parse_ask(text, now=saturday, tz="America/New_York")
+    assert reading("anytime TD scorers sunday")["day"] == "tomorrow"
+    assert reading("20+ points on saturday")["day"] == "today"
+    assert reading("SOG 3+ tuesday")["day"] == "later"
+    assert reading("PRA overs tomorrow")["day"] == "tomorrow" and reading("10+ boards")["day"] == "today"
+
+
+def test_the_default_stat_per_league_for_hot_and_cold() -> None:
+    assert [engine.default_stat(league) for league in (NBA, engine.WNBA, NHL, NFL, MLB, "soccer_epl")] == \
+        ["pts", "pts", "points", "rush_rec_yds", "tb", "goals"]
+    with pytest.raises(ValueError):
+        engine.default_stat("cricket_odi")
+
+
+def test_edges_mode_leaves_out_a_rung_priced_out_of_its_ladders_order() -> None:
+    """SGA's captured rebounds ladder has "2+" at 2.16 under "5+" at 2.01: a 2+ can't pay more than a 5+ (a capture or
+    feed error), and edges mode doesn't show it as a 97% edge."""
+    props = props_of("nba_props_401909891", "basketball")["4278073"]
+    rebounds = sorted((p["line"], float(p["over_price"])) for p in props
+                      if p["market"] == "player_rebounds" and p["over_price"] is not None)
+    assert rebounds[0] == (1.5, 2.16) and (4.5, 2.01) in rebounds
+    rows = engine.scan_edges(board_view([nba_player(SGA_ROW, SGA_ROWS, props)]), NBA, 10)["players"]
+    assert not [row for row in rows if row["stat"] == "reb" and row["line"]["line"] == 1.5]
+    kept = engine._ladder([p for p in props if p["market"] == "player_rebounds"])
+    assert [p["line"] for p in kept] == [4.5, 5.5, 6.5, 7.5, 8.5, 9.5]

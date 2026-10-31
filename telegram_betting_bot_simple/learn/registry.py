@@ -263,6 +263,32 @@ def check(sport: Any, values: Mapping[str, Any]) -> Dict[str, float]:
     return out
 
 
+def rho_bounds(rates: Optional[Tuple[Iterable[float], Iterable[float]]] = None) -> Tuple[float, float]:
+    """``soccer.rho``'s bounds, checked against the goal rates seen.
+
+    The knob's own bounds are [-0.25, 0.05], but a Dixon-Coles rho is only valid for a match inside
+    max(-1/lambda, -1/mu) <= rho <= min(1/(lambda mu), 1) (``engine.soccer.rho_bounds``): -0.25 needs both rates at
+    most 4 and 0.05 a product of the rates at most 20. With ``rates`` (the home rates and the away rates of the
+    matches seen) the knob's bounds come back narrowed to the range valid for every one of them, so a value inside
+    needs no narrowing on those matches (``soccer.derive`` and ``evaluate.goals_scores`` narrow it per match, and
+    flag it, when it does). ``learn/tune``'s rho refit searches inside these bounds for its training window. Every
+    match's range holds 0 (independent scores), so the result is never empty. ValueError for a rate that isn't a
+    positive number."""
+    low, high = KNOBS["soccer.rho"].bounds("soccer")
+    if rates is None:
+        return low, high
+    home, away = (list(rates[0]), list(rates[1]))
+    if len(home) != len(away):
+        raise ValueError(f"Rates come in pairs: {len(home)} home rates against {len(away)} away rates")
+    for lam, mu in zip(home, away):
+        lam, mu = _finite(lam, "a home rate"), _finite(mu, "an away rate")
+        if lam <= 0 or mu <= 0:
+            raise ValueError(f"Goal rates must be positive, got {lam:g} and {mu:g}")
+        valid_low, valid_high = soccer.rho_bounds(lam, mu)
+        low, high = max(low, valid_low), min(high, valid_high)
+    return low, high
+
+
 def _finite(value: Any, name: str) -> float:
     if isinstance(value, bool):
         raise ValueError(f"{name} must be a number, got {value!r}")

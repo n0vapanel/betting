@@ -136,9 +136,11 @@ class FakeBoard:
 
 
 class FakeBoards:
-    """data/player_board.py's PlayerBoard as the Lab uses it: scan(league, stat, threshold, side, day, n) is the
-    engine's result for make_ask(...) (the real make_ask, and the real scan() over a snapshot) plus {league, day,
-    title, no_games}. Each league and day asked for is recorded, with its ask."""
+    """data/player_board.py's PlayerBoard as the Lab uses it: scan(league, stat, threshold, side, day, n, *, names,
+    sort) is the engine's result for make_ask(...) (the real make_ask, and the real scan() over a snapshot) plus
+    {league, day, title, no_games}; scan_edges(league, side, day, n) the real scan_edges over a snapshot (canned rows
+    under by_stat["edges"] otherwise; side None is both sides). Each league and day asked for is recorded, with its ask (and its names and
+    sort when given)."""
 
     def __init__(self, boards: Optional[Dict[tuple, FakeBoard]] = None) -> None:
         self.boards = boards or {}
@@ -146,22 +148,54 @@ class FakeBoards:
         self.asks: List[Dict[str, Any]] = []
 
     def scan(self, league: str, stat: Any, threshold: Any = None, side: str = "over", day: str = "today",
-             n: int = 10, wait: Optional[float] = None) -> Dict[str, Any]:
+             n: int = 10, wait: Optional[float] = None, *, names: Optional[List[str]] = None,
+             sort: Optional[str] = None) -> Dict[str, Any]:
         ask = scan_engine.make_ask(league, stat, threshold, side, day)
         self.asked.append((league, day))
-        self.asks.append({**ask, "n": n})
+        self.asks.append({**ask, "n": n, **({"names": list(names)} if names is not None else {}),
+                          **({"sort": sort} if sort is not None else {})})
         board = self.boards.get((league, day)) or FakeBoard(league, day, games_total=0)
         if board.snapshot is not None:
-            result = scan_engine.scan(board.snapshot, ask, n)
+            extra = {key: value for key, value in (("names", names), ("sort", sort)) if value is not None}
+            result = scan_engine.scan(board.snapshot, ask, n, **extra)
         else:
             found = board.by_stat.get(ask["stat"]) or {}
-            result = {"ask": ask, "players": [dict(r) for r in found.get("players") or []][:n],
-                      "close": [dict(r) for r in found.get("close") or []][:5], "more": 0, "as_of": AS_OF,
-                      "games": board.games_total, "games_started": 0}
+            players = [dict(r) for r in found.get("players") or []]
+            close = [dict(r) for r in found.get("close") or []]
+            missing: List[str] = []
+            if names is not None:  # the named players only, qualifying or not (the canned rows' own names)
+                matched, missing = scan_engine.match_names(players + close, names)
+                wanted = {pid for ids in matched.values() for pid in ids}
+                players = [r for r in players + close if r["athlete_id"] in wanted]
+                close = []
+            if sort in ("hot", "cold"):  # the canned rows that have a trend, by the last 5 against the season
+                players = sorted((r for r in players + close if r.get("trend")),
+                                 key=lambda r: -r["trend"]["diff"] if sort == "hot" else r["trend"]["diff"])
+                close = []
+            result = {"ask": ask, "players": players[:n], "close": close[:5], "more": 0, "as_of": AS_OF,
+                      "games": board.games_total, "games_started": 0, "mode": "scan"}
+            if names is not None:
+                result["missing_names"] = missing
             if board.games_ready < board.games_total:
                 result["loading"] = {"games_ready": board.games_ready, "games_total": board.games_total}
         if board.reading:
             result["loading"] = {"games_ready": 0, "games_total": 0}
+        result.update(league=league, day=day, title=scan_engine.TITLES.get(league, league),
+                      no_games=not board.reading and board.games_total == 0)
+        return result
+
+    def scan_edges(self, league: str, side: Optional[str] = None, day: str = "today", n: int = 10,
+                   wait: Optional[float] = None) -> Dict[str, Any]:
+        self.asked.append((league, day))
+        self.asks.append({"league": league, "mode": "edges", "side": side, "day": day, "n": n})
+        board = self.boards.get((league, day)) or FakeBoard(league, day, games_total=0)
+        if board.snapshot is not None:
+            result = scan_engine.scan_edges(board.snapshot, league, n, side=side)
+        else:
+            rows = [dict(r) for r in (board.by_stat.get("edges") or {}).get("players") or []
+                    if side is None or r.get("side") == side]
+            result = {"mode": "edges", "players": rows[:n], "more": max(0, len(rows) - n), "as_of": AS_OF,
+                      "games": board.games_total, "games_started": 0}
         result.update(league=league, day=day, title=scan_engine.TITLES.get(league, league),
                       no_games=not board.reading and board.games_total == 0)
         return result
@@ -275,7 +309,8 @@ def test_a_phrase_a_half_line_tomorrow_and_n_are_read_as_the_scan_means_them(wor
     lined = world.lab.player_scan(UID, NBA, "pra", None)
     assert boards.asks[-1]["threshold"] is None and lined["ask"] == "PRA overs (posted lines)"
     attd = world.lab.player_scan(UID, NFL, "ATTD", 5)
-    assert attd["ask"] == "anytime TD" and attd["threshold"] == 1  # a yes/no ask has its own number
+    # 2 or more is a count of TDs, never answered as anytime (1+): the data review's RD12
+    assert attd["ask"] == "5+ TDs" and attd["threshold"] == 5
     assert attd["leagues"] == [] and attd["leagues_without_games"] == ["NFL"]
 
 
@@ -602,7 +637,8 @@ def test_the_scan_template_lists_the_players_then_who_is_close_and_what_is_loadi
     many = dict(card, players=[dict(r, rank=i) for i, r in enumerate(card["players"] * 2, 1)],
                 loading={"games_ready": 8, "games_total": 10})
     lines = scan_template(many).split("\n")
-    assert [line[:2] for line in lines[1:6]] == ["1.", "2.", "3.", "4.", "5."] and lines[6].startswith("Also close: ")
+    # The 6th to 8th rows qualify too, so they're "Also:", not "Also close" (review 2, m4)
+    assert [line[:2] for line in lines[1:6]] == ["1.", "2.", "3.", "4.", "5."] and lines[6].startswith("Also: ")
     assert "8 of 10 games loaded so far" in scan_template(many)
     form = dict(card, players=[dict(card["players"][0], model="form")], close=[])
     assert scan_template(form).split("\n")[1].endswith("(from recent form)")
@@ -648,7 +684,9 @@ def analyst_answer(facts: Mapping[str, Any]) -> str:
         return "Picks are paused right now, so I can't list players until then."
     lines = []
     for player in facts["players"][:3]:
-        lines.append(f"{player['name']} ({player['team']} v {player['opponent']}): {player['projection']} projected, "
+        # A yes/no event (anytime TD) has no projection to quote: its chance is the answer (review 2, m5)
+        projected = f"{player['projection']} projected, " if "projection" in player else ""
+        lines.append(f"{player['name']} ({player['team']} v {player['opponent']}): {projected}"
                      f"{player['chance'] * 100:.0f}% to get {facts['threshold']}+, {player['history'][1]}.")
     return " ".join(lines)
 
@@ -858,8 +896,9 @@ def test_this_week_is_scanned_for_today_and_the_context_says_so_in_one_line(worl
     card = answer["cards"][0]
     assert card["ask"] == "anytime TD" and card["players"][0]["model"] == "form"
     assert card["title"] == "Strongest anytime TD · NFL · tonight"
-    assert scan_template(card).startswith("Strongest anytime TD tonight:\n1. Christian McCaffrey (SF v SEA) 0.9 "
-                                          "projected, 58% to get there, 6 of last 10 (from recent form)")
+    # A yes/no event shows only its chance (review 2, m5): "0.9 projected" TDs means nothing to anyone
+    assert scan_template(card).startswith("Strongest anytime TD tonight:\n1. Christian McCaffrey (SF v SEA) 58% to get "
+                                          "there, 6 of last 10 (from recent form)")
 
 
 # --- the bot -----------------------------------------------------------------------------------------------------------

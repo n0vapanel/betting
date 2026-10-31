@@ -5,7 +5,8 @@ A read, ``TTLCache.get(key, ttl, loader, stale=0, error_ttl=30, persist=None, ki
 
 - Fresh (younger than ``ttl``): the copy in memory.
 - Within ``ttl + stale``: the copy in memory at once, and at most one background refresh for the key, on a small
-  bounded pool of threads.
+  bounded pool of threads. A thread inside ``inline_refreshes()`` (the player board's fetch pool) loads it itself
+  instead, so the requests stay inside its own limit.
 - Older, or missing: loaded under the key's lock, so any number of people asking at once cause one load. With a
   store, its ``shared_cache`` table is read first: a fresh copy saved by the other process is used as it is.
   Otherwise a short lease (``cache_leases``) makes one process the loader. A process that finds the lease taken
@@ -47,6 +48,7 @@ of literals. AI chat answers are never cached here: chats are personal.
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import gzip
 import itertools
@@ -61,7 +63,7 @@ import time
 import weakref
 from collections import OrderedDict
 from time import monotonic as _real_monotonic  # waits that must pass even under a test's frozen clock
-from typing import Any, Callable, Dict, Hashable, Iterable, List, NamedTuple, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Hashable, Iterable, Iterator, List, NamedTuple, Optional, Tuple, Union
 
 log = logging.getLogger(__name__)
 
@@ -311,6 +313,25 @@ READ_FIELDS = ("hits", "stale_hits", "shared_hits", "misses", "negative_hits")  
 
 _INSTANCES: "weakref.WeakSet[TTLCache]" = weakref.WeakSet()
 _SERIAL = itertools.count(1)
+_INLINE = threading.local()  # per thread: how deep inside inline_refreshes() it is
+
+
+@contextlib.contextmanager
+def inline_refreshes() -> Iterator[None]:
+    """Inside, this thread's reads load a copy that is past its TTL themselves, as if there were none, instead of
+    serving it and leaving the refresh to the cache's background threads. A caller that limits its own fetches (the
+    player board's FETCHES pool threads, data/player_board.py) so keeps every request its reads cause inside that
+    limit. A key backing off a failure still serves its last good copy at once."""
+    depth = getattr(_INLINE, "depth", 0)
+    _INLINE.depth = depth + 1
+    try:
+        yield
+    finally:
+        _INLINE.depth = depth
+
+
+def _inline() -> bool:
+    return getattr(_INLINE, "depth", 0) > 0
 
 # (monotonic fetch time, wall-clock fetch time, value, kind, fresh for, usable for): the last two are the copy's own
 # life in seconds after its fetch (its TTL, and its TTL plus stale window), which no reader can lengthen
@@ -493,7 +514,7 @@ class TTLCache:
             self._entries.move_to_end(key)
             self._count(kind, "hits")
             return entry[2], entry[1]
-        if age < usable:
+        if age < usable and not _inline():
             self._entries.move_to_end(key)
             self._count(kind, "stale_hits")
             self._schedule_locked(job)
@@ -519,7 +540,7 @@ class TTLCache:
                 seen = entry[1]
                 age = self._mono() - entry[0]
                 ttl, usable = self._limits(job, entry)
-                if age < usable:
+                if age < usable and not (age >= ttl and _inline()):
                     with self._lock:
                         self._count(kind, "shared_hits")
                         if age >= ttl:

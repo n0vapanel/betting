@@ -72,7 +72,7 @@ from ..data.leagues import POPULAR_LEAGUES
 from ..engine import consensus
 from ..engine.pasted import system_key
 from ..engine.tickets import ai_given_no_push, chance_label, combinations, one_in
-from .explain import FORM_WORDS, relaxed_texts, scan_ask, scan_heading, scan_hits, scan_when
+from .explain import FORM_WORDS, relaxed_texts, scan_ask, scan_heading, scan_hits, scan_when, scan_yes_no
 
 # The leagues the assistant may name and load odds for, chosen on purpose (not every scoreboard the slate shows):
 # each key is spelled out in the router prompt and in about ten tool schemas, so every key costs input tokens on
@@ -138,6 +138,14 @@ SCAN_STAT_KEYS: Tuple[str, ...] = (
 SCAN_DAYS = ("today", "tomorrow")
 SCAN_N = 10  # players a scan returns by default
 MAX_SCAN_N = 25
+MAX_SCAN_NAME = 60  # characters in a player's name for the scan's name filter
+# How a scan may rank its rows (engine/scan.py's sorts): hot and cold by the last 5 against the season, edge by the
+# posted price (with no stat: the best edges on every posted line, edges mode)
+SCAN_SORTS = ("chance", "projection", "l10", "edge", "hot", "cold")
+CARD_SORTS = ("hot", "cold", "edge")  # the sorts a player_scan card carries (the app's trend chip, Refresh, finder)
+# "Who's hot" names no stat: hot and cold rank the league's own default (engine/scan.py's default_stat; no league:
+# points, which the NBA is scanned for first)
+SCAN_DEFAULT_STAT = "pts"
 SCAN_SOURCE = ("The player scan: ESPN game logs (hits in the last 5, last 10 and this season), the NBA game model's "
                "projection (else a recency-weighted form model from the game log), DraftKings lines from ESPN; "
                "ranked by chance in code")
@@ -303,19 +311,23 @@ TOOLS: List[Dict[str, Any]] = [
 TOOLS.append({
     "name": "players_scan",
     "description": "Players ranked for a stat and a number today or tomorrow ('20+ points', '10+ boards', 'anytime "
-                   "TD', 'PRA overs'), strongest first: each one's hits (last 5, last 10, season), projection, chance "
-                   "and posted line, plus who is close. Use it for any list of players.",
+                   "TD', 'PRA overs'), strongest first: hits (L5, L10, season), projection, chance, posted line, who's "
+                   "close. player: one player ('will Steph hit 5 threes'). sort hot/cold: L5 vs season ('who's hot', "
+                   "fades). No stat, sort edge: best edges on all posted lines ('best props'). For any list of "
+                   "players.",
     "input_schema": _obj({
         "league": {**_LEAGUE, "description": "Leave out for the leagues with games that day"},
-        "stat": {"type": "string", "description": "A stat key (pts, reb, ast, fg3m, pra, sog, k, anytime_td; td is the "
-                                                  "NBA triple-double, sent with its league) or the user's word "
-                                                  "('boards', 'threes')"},
+        "stat": {"type": ["string", "null"], "description": "A stat key (pts, reb, ast, fg3m, pra, sog, k, anytime_td; "
+                                                            "td is the NBA triple-double, sent with its league) or the "
+                                                            "user's word ('boards')"},
         "threshold": {"type": ["number", "null"], "description": "The number to reach (20 for 20+ or over 19.5, 1 "
                                                                  "for anytime); null for each posted line"},
         "side": {"type": "string", "enum": ["over", "under"]},
         "day": {"type": "string", "enum": list(SCAN_DAYS)},
         "n": {"type": "integer", "description": f"1 to {MAX_SCAN_N}"},
-    }, optional=("league", "side", "day", "n")),
+        "player": {"type": "string"},
+        "sort": {"type": "string", "enum": list(SCAN_SORTS)},
+    }, optional=("league", "side", "day", "n", "player", "sort")),
 })
 # The learning loop (learn/): read only, from the store; never a pick tool
 TOOLS.append({"name": "brain_progress",
@@ -429,16 +441,20 @@ class NoInput(BaseModel):
 
 
 class ScanInput(BaseModel):
-    """players_scan's input: the league (None: the leagues with games that day), the stat (a key or a phrase), the
-    number to reach (None: each player's posted line), over or under, today or tomorrow, how many players."""
+    """players_scan's input: the league (None: the leagues with games that day), the stat (a key or a phrase; None
+    with sort edge is the best edges on every posted line, with sort hot or cold the league's headline stat), the
+    number to reach (None: each player's posted line), over or under (None: over, or either side for the best
+    edges), today or tomorrow, how many players, one player's name (the scan's name filter) and the order."""
     league: Optional[LeagueKey] = None  # type: ignore[valid-type]
-    stat: str = Field(min_length=1, max_length=40)
+    stat: Optional[str] = Field(None, min_length=1, max_length=40)
     threshold: Optional[float] = Field(None, gt=0, le=999)
-    side: Literal["over", "under"] = "over"
+    side: Optional[Literal["over", "under"]] = None
     day: Literal[SCAN_DAYS] = "today"  # type: ignore[valid-type]
     n: Optional[int] = Field(None, ge=1, le=MAX_SCAN_N)
+    player: Optional[str] = Field(None, min_length=1, max_length=MAX_SCAN_NAME)
+    sort: Optional[Literal[SCAN_SORTS]] = None  # type: ignore[valid-type]
 
-    @field_validator("league", "side", "day", mode="before")
+    @field_validator("league", "side", "day", "sort", mode="before")
     @classmethod
     def _plain(cls, value: Any) -> Any:
         """"" is no league; "Tonight" is today; words are read in lower case."""
@@ -449,6 +465,18 @@ class ScanInput(BaseModel):
             if value == "tonight":
                 return "today"
         return value
+
+    @field_validator("stat", "player", mode="before")
+    @classmethod
+    def _words(cls, value: Any) -> Any:
+        """Spaces trimmed and single; "" is none."""
+        if isinstance(value, str):
+            return " ".join(value.split()) or None
+        return value
+
+    def edges(self) -> bool:
+        """The best edges on every posted line: no stat, sort edge."""
+        return self.stat is None and self.sort == "edge"
 
 
 class PastedInput(BaseModel):
@@ -733,13 +761,19 @@ def picks_card(found: Mapping[str, Any], leagues: Sequence[str]) -> Dict[str, An
 
 
 SCAN_FIELDS = ("ask", "stat", "stat_label", "threshold", "side", "day", "leagues", "players", "close", "loading",
-               "as_of", "leagues_without_games", "note")
+               "as_of", "leagues_without_games", "note", "more", "no_games_today", "checked_tomorrow")
 
 
 def scan_card(found: Mapping[str, Any]) -> Dict[str, Any]:
     """players_scan's card: Lab.player_scan's result as it came (the ranked rows, the close ones, a partial board's
     loading), titled "Projected for 20+ points · NBA · tonight". A row offers "Add to slip" only when its own
-    ``addable`` says so (the app's slip takes game picks, so for now none does: the price is shown instead)."""
+    ``addable`` says so (the app's slip takes game picks, so for now none does: the price is shown instead). The card
+    also carries the scan's ``mode`` ("scan", or "edges" for the best edges on every posted line), ``more`` (how many
+    further rows were ranked beyond the ones returned), ``missing_names``, ``ambiguous_names`` and ``started_names``
+    (the names asked for that it couldn't rank: contract 1 of SPEC_P0_FIX), ``games`` (the games still to come),
+    ``games_started`` and ``error``, and the ask's ``sort`` (hot, cold or edge; None otherwise) and ``names`` (the
+    players asked for by name, [] when none), so the app can show a trend chip and re-run the same scan. An empty scan
+    is a card too ("NFL: no games")."""
     where = " + ".join(LEAGUE_TITLES.get(league, str(league).split("_")[-1].upper())
                        for league in found.get("leagues") or [])
     title = " · ".join(part for part in (scan_heading(found), where, scan_when(found)) if part)
@@ -747,7 +781,32 @@ def scan_card(found: Mapping[str, Any]) -> Dict[str, Any]:
     card.update({key: found.get(key) for key in SCAN_FIELDS if found.get(key) is not None})
     card.setdefault("players", [])
     card.setdefault("close", [])
+    card["mode"] = "edges" if found.get("mode") == "edges" else "scan"
+    card["missing_names"] = [str(name) for name in found.get("missing_names") or []]
+    card["ambiguous_names"] = ambiguous_entries(found.get("ambiguous_names"))
+    card["started_names"] = started_entries(found.get("started_names"))
+    for key in ("games", "games_started", "error"):
+        card[key] = found.get(key)
+    card["sort"] = found.get("sort") if found.get("sort") in CARD_SORTS else None
+    card["names"] = [str(name) for name in found.get("names") or []]
     return card
+
+
+def ambiguous_entries(entries: Any) -> List[Dict[str, Any]]:
+    """``ambiguous_names`` as the card and the facts carry them: [{name, candidates: [full name, ...]}] (at most 5)."""
+    out = []
+    for entry in entries or []:
+        if isinstance(entry, Mapping) and str(entry.get("name") or "").strip():
+            out.append({"name": str(entry["name"]),
+                        "candidates": [str(name) for name in entry.get("candidates") or [] if str(name).strip()][:5]})
+    return out
+
+
+def started_entries(entries: Any) -> List[Dict[str, Any]]:
+    """``started_names`` as the card and the facts carry them: [{name, player, game}]."""
+    return [{"name": str(entry.get("name") or ""), "player": str(entry.get("player") or entry.get("name") or ""),
+             "game": str(entry.get("game") or "")}
+            for entry in entries or [] if isinstance(entry, Mapping) and (entry.get("player") or entry.get("name"))]
 
 
 def _hits_fact(hits: Any) -> Optional[Dict[str, str]]:
@@ -766,23 +825,35 @@ def _tenth(value: Any) -> Any:
     return round(number, 1) if number is not None else None
 
 
-def scan_row_facts(row: Mapping[str, Any]) -> Dict[str, Any]:
+def scan_row_facts(row: Mapping[str, Any], found: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """One scan row as Claude sees it: every number the reply may quote (the projection, the chance, the hits as
-    "9/10" and in words, the averages, the posted line and price, the edge) and the row's own short reasons."""
+    "9/10" and in words, the averages, the last 5 against the season, the posted line and price, the edge) and the
+    row's own short reasons. A yes/no event (``kind`` yes_no: anytime TD, double-double) has no projection to quote:
+    its chance is the answer. A named player's row says whether he ``qualifies`` and whether he's ``ruled_out``; one
+    of the best edges across stats names its own ``stat`` and ``side``."""
+    found = found or {}
     hits = row.get("hits")
     history = [words for words in (scan_hits(hits, "l5"), scan_hits(hits, "l10"), scan_hits(hits, "season")) if words]
     avg = row.get("avg") if isinstance(row.get("avg"), Mapping) else {}
+    trend = row.get("trend") if isinstance(row.get("trend"), Mapping) else {}
     why = row.get("why")
+    yes = scan_yes_no(row, found)
     facts = {
         "rank": row.get("rank"), "name": row.get("name"), "league": row.get("league"), "team": row.get("team"),
         "opponent": row.get("opponent"), "game": row.get("game"), "start": row.get("start"),
         "status": row.get("status"), "status_tag": row.get("status_tag"), "minutes": _tenth(row.get("minutes")),
-        "threshold": row.get("threshold"), "projection": _tenth(row.get("projection")),
+        "kind": row.get("kind") or ("yes_no" if yes else None), "stat": row.get("stat"),
+        "stat_label": row.get("stat_label"), "side": row.get("side"), "threshold": row.get("threshold"),
+        "projection": None if yes else _tenth(row.get("projection")),
         "chance": _p(row.get("chance")), "chance_source": row.get("chance_source"), "model": row.get("model"),
         "model_label": row.get("model_label") or (FORM_WORDS if row.get("model") == "form" else None),
         "hits": _hits_fact(hits), "history": history or None,
         "avg": {str(k): _tenth(v) for k, v in avg.items() if _tenth(v) is not None} or None,
+        "trend": {str(k): v if k == "vs" else _tenth(v) for k, v in trend.items()
+                  if (k == "vs" and v in ("season", "last_season")) or _tenth(v) is not None} or None,
         "line": dict(row["line"]) if isinstance(row.get("line"), Mapping) else None, "edge": _p(row.get("edge")),
+        "qualifies": row.get("qualifies") if isinstance(row.get("qualifies"), bool) else None,
+        "ruled_out": True if row.get("ruled_out") else None,
         "why": [str(entry) for entry in why][:3] if isinstance(why, (list, tuple)) else why,
     }
     return {key: value for key, value in facts.items() if value not in (None, "", [], {})}
@@ -790,42 +861,114 @@ def scan_row_facts(row: Mapping[str, Any]) -> Dict[str, Any]:
 
 def scan_facts(found: Mapping[str, Any]) -> Dict[str, Any]:
     """players_scan's result for Claude: the ask, the ranked players and the close ones (scan_row_facts), the
-    loading state of a partial board, the leagues without games, the source and a hint to lead with the players."""
+    loading state of a partial board, the leagues without games, the source and a hint on how to answer (never with
+    an example's numbers: a hint's words aren't facts). The best edges across stats (``mode`` edges), hot and cold
+    (``sort``), the players asked for by name (``names``, with ``missing_names``) and a day with no games moved to
+    tomorrow (``no_games_today``) each get their own hint."""
     players = [row for row in found.get("players") or [] if isinstance(row, Mapping)]
     close = [row for row in found.get("close") or [] if isinstance(row, Mapping)]
+    mode = "edges" if found.get("mode") == "edges" else "scan"
+    sort = found.get("sort") if found.get("sort") in SCAN_SORTS else None
+    names = [str(name) for name in found.get("names") or []]
     content: Dict[str, Any] = {
         "ask": scan_ask(found), "stat": found.get("stat"), "threshold": found.get("threshold"),
-        "side": found.get("side") or "over", "day": found.get("day") or "today",
+        "side": found.get("side") or ("either" if mode == "edges" else "over"), "day": found.get("day") or "today",
         "leagues": list(found.get("leagues") or []),
-        "players": trim([scan_row_facts(row) for row in players], items=MAX_SCAN_N, text=160),
-        "close": trim([scan_row_facts(row) for row in close], items=5, text=160),
-        "source": SCAN_SOURCE,
+        "players": trim([scan_row_facts(row, found) for row in players], items=MAX_SCAN_N, text=160),
+        "close": trim([scan_row_facts(row, found) for row in close], items=5, text=160),
+        "source": SCAN_SOURCE, "mode": mode,
     }
+    if sort:
+        content["sort"] = sort
+    if names:
+        content["names"] = names
+    if found.get("missing_names"):
+        content["missing_names"] = [str(name) for name in found["missing_names"]]
+    ambiguous, started_names = ambiguous_entries(found.get("ambiguous_names")), started_entries(found.get("started_names"))
+    if ambiguous:
+        content["ambiguous_names"] = ambiguous
+    if started_names:
+        content["started_names"] = started_names
     if found.get("more"):
-        content["more"] = found["more"]  # how many more qualified beyond the players shown
-    if found.get("games"):
-        content["games"] = found["games"]
+        content["more"] = found["more"]  # how many further rows were ranked beyond the ones returned
+    started = found.get("games_started") if isinstance(found.get("games_started"), int) else 0
+    if found.get("games") or started:
+        content["games"] = found.get("games") or 0  # the games still to come (0 once every game has started)
+    if started:
+        content["games_started"] = started
+    if found.get("error"):
+        content["error"] = str(found["error"])[:160]
     loading = found.get("loading")
     if isinstance(loading, Mapping):
         content["loading"] = {key: loading.get(key) for key in ("games_ready", "games_total")}
+        if loading.get("failed"):
+            content["loading"]["failed"] = loading["failed"]
     if found.get("leagues_without_games"):
         content["leagues_without_games"] = list(found["leagues_without_games"])
+    if found.get("no_games_today"):
+        content["no_games_today"] = list(found["no_games_today"])
     if found.get("note"):
         content["note"] = found["note"]
-    lead = ("Lead with the players, strongest first: for each, the projection, the chance and the history in a few "
-            "words (e.g. '31.2 projected, 82% to get 20+, 9 of last 10'), and the posted line when there is one. "
-            "Rows with model form are from recent form: say so. With no number asked, each row's threshold is its "
-            "posted line's. The card shows every row")
-    if players:
-        content["hint"] = lead
+    rows = players or close
+    every_started = bool(started) and not found.get("games")
+    unranked = bool(found.get("missing_names") or ambiguous or started_names)
+    if mode == "edges" and players:
+        hint = ("These are the best edges on the posted lines across every stat: lead with them, strongest first, each "
+                "one's stat, side and line, his chance, the edge and the history in a few words")
+    elif sort in ("hot", "cold") and players:
+        hint = (f"Ranked by form ({'hottest' if sort == 'hot' else 'coldest'} first): lead with each one's average "
+                "over his last five against his season (trend), then his projection and chance when the row has them"
+                + ("; cold form is what a fade looks at" if sort == "cold" else ""))
+    elif names and rows:
+        hint = ("They asked about these players by name: answer about each one with his projection, chance and "
+                "history; one that doesn't qualify isn't projected to get there (say so plainly, with his numbers), "
+                "and a ruled_out one is out")
+    elif players:
+        hint = ("Lead with the players, strongest first: for each, the projection, the chance and the history in a few "
+                "words, and the posted line when there is one. Rows with model form are from recent form: say so. "
+                "With no number asked, each row's threshold is its posted line's. The card shows every row")
     elif close:
-        content["hint"] = "Nobody reaches it yet: give the closest ones the same way, strongest first"
+        hint = "Nobody reaches it yet: give the closest ones the same way, strongest first"
+    elif names and unranked:
+        hint = "The scan couldn't rank the names asked for (see below): say so in one line each"
+    elif every_started:
+        hint = ("Every game that day has already started (games_started, and games is the games still to come), so "
+                "nobody is left to rank: say so in one line")
     else:
-        content["hint"] = "No player qualifies right now: say so in one line and offer another stat, number or day"
+        hint = "No player qualifies right now: say so in one line and offer another stat, number or day"
+    if rows and any(row.get("kind") == "yes_no" for row in content["players"] + content["close"]):
+        hint += "; a yes_no row is a yes-or-no event: give its chance and history, never a projection"
+    if rows and mode != "edges" and (sort == "edge" or (content["threshold"] is None and not sort)):
+        hint += "; they rank by edge: give each one's edge as well as his chance"
+    if found.get("more"):
+        what = ("more posted lines have an edge" if mode == "edges" else "more players are ranked"
+                if sort in ("hot", "cold") else "more qualify")
+        hint += (f"; more is how many further rows were ranked beyond these: say in one line how many {what} (the "
+                 "Player finder lists them)")
+    if found.get("missing_names"):
+        hint += "; missing_names: names matching nobody in that day's games: say they couldn't be found"
+    if ambiguous:
+        hint += "; ambiguous_names: each name matches more than one player (candidates): ask which one, naming them"
+    if started_names:
+        hint += ("; started_names: each one's game has already started (game), so the scan doesn't have them: say so "
+                 "in one line")
+    if started and not every_started:
+        hint += ("; games_started games have already started: their players aren't listed (say so in one line; games "
+                 "is the games still to come)")
+    if found.get("no_games_today"):
+        hint += "; there were no games today in no_games_today, so these are tomorrow's: say so in one line"
+    if found.get("checked_tomorrow") and not rows:
+        content["checked_tomorrow"] = True
+        hint += "; tomorrow has none there either (checked_tomorrow)"
+    content["hint"] = hint
     ready, total = ((content.get("loading") or {}).get(key) or 0 for key in ("games_ready", "games_total"))
     if content.get("loading") and (ready < total or not total):
         content["hint"] += ("; the board is still loading: give what's ready and say in one line how many games are "
                             "loaded so far (loading)")
+    elif (content.get("loading") or {}).get("failed"):
+        content["hint"] += "; some games are still missing data (loading failed): say so in one line"
+    if found.get("error") and not rows:
+        content["hint"] += "; the scores service failed just now (error): say so, don't guess"
     return content
 
 
@@ -1032,7 +1175,9 @@ STEPS: Dict[str, Callable[[Dict[str, Any]], str]] = {
     "slip_propose": lambda a: "Preparing a slip for you to check…",
     "user_get_context": lambda a: "Checking your settings…",
     "pasted_slip_analyse": lambda a: "Re-checking your slip…",
-    "players_scan": lambda a: f"Scanning {'tomorrow' if a.get('day') == 'tomorrow' else 'tonight'}'s players…",
+    "players_scan": lambda a: (f"Checking {str(a['player'])[:MAX_SCAN_NAME]}…" if a.get("player") else
+                               f"Scanning {'tomorrow' if a.get('day') == 'tomorrow' else 'tonight'}'s "
+                               f"{'lines' if not a.get('stat') and a.get('sort') == 'edge' else 'players'}…"),
 }
 
 
@@ -1629,17 +1774,84 @@ class Toolbox:
     def _players_scan(self, data: ScanInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
         """players_scan: Lab.player_scan (engine/scan.py over the player board: ESPN game logs, the NBA model, ESPN's
         DraftKings props through the shared cache; no Odds API quota) as facts Claude may quote and a player_scan
-        card. A partial board answers with what's ready and its loading state."""
-        found = self.lab.player_scan(self.uid, data.league, data.stat, data.threshold, data.side, data.day,
-                                     data.n or SCAN_N) or {}
+        card. A partial board answers with what's ready and its loading state.
+
+        ``player`` is the scan's name filter (names=[player]: his row whether he qualifies or not); ``sort`` its order
+        (hot and cold by the last 5 against the season). No stat with sort edge is edges mode (the best edges on
+        every posted line, either side unless one is asked); no stat with hot or cold reads the league's default stat:
+        the named league's, else the Lab's choice (the first league with games that day: m4, contract 5).
+        A day with no games in any league scanned tries tomorrow and says so (``no_games_today``); an empty scan is
+        still a card, so the person sees "NFL: no games" rather than nothing."""
+        stat = data.stat
+        if stat is None and data.sort in ("hot", "cold") and data.league:
+            stat = self._default_stat(data.league)  # with no league the Lab picks the first with games, and its stat
+        if stat is None and not data.edges() and data.sort not in ("hot", "cold"):
+            raise ToolError("invalid_input", "These inputs aren't valid: stat",
+                            "Name the stat (a key such as pts or reb), or leave it out with sort edge for the best "
+                            "edges on every posted line, or with sort hot or cold for form")
+        side = data.side if data.edges() else (data.side or "over")
+        n = data.n or SCAN_N
+        names = [data.player] if data.player else []
+        found = self._scan(data, stat, side, data.day, n, names)
+        if data.day == "today" and self._no_games(found):
+            later = self._scan(data, stat, side, "tomorrow", n, names)
+            if self._no_games(later):
+                found["checked_tomorrow"] = True
+            else:
+                later["no_games_today"] = list(found.get("leagues_without_games") or [])
+                found = later
+        if data.edges():
+            found["mode"] = "edges"
+            found["side"] = side  # None: the best edge on either side
+        found["sort"] = data.sort
+        found["names"] = names
         content = scan_facts(found)
         rows = [row for row in found.get("players") or [] if isinstance(row, Mapping)]
-        shown = "; ".join(f"{row.get('name')} {_tenth(row.get('projection'))} ({_p(row.get('chance'))})"
-                          for row in rows[:5])
+        if content["mode"] == "edges":
+            shown = "; ".join(f"{row.get('name')} {row.get('stat')} {row.get('side')} "
+                              f"{(row.get('line') or {}).get('line')} ({_p(row.get('chance'))}, edge {_p(row.get('edge'))})"
+                              for row in rows[:5])
+        else:
+            shown = "; ".join(f"{row.get('name')} {_tenth(row.get('projection'))} ({_p(row.get('chance'))})"
+                              for row in rows[:5])
         leagues = ", ".join(found.get("leagues") or []) or "no league with games"
-        summary = f"players_scan({content['ask']}, {leagues}, {content['day']}): {shown or 'nobody yet'}"
-        cards = [scan_card(found)] if rows or found.get("close") or found.get("loading") else []
-        return content, summary, cards
+        asked = ("best edges" if content["mode"] == "edges" else content["ask"])
+        extra = "".join(f", {part}" for part in (data.sort if data.sort else None,
+                                                 f"player {data.player}" if data.player else None) if part)
+        summary = f"players_scan({asked}, {leagues}, {content['day']}{extra}): {shown or 'nobody yet'}"
+        return content, summary, [scan_card(found)]
+
+    def _scan(self, data: ScanInput, stat: Optional[str], side: Optional[str], day: str, n: int,
+              names: List[str]) -> Dict[str, Any]:
+        """One Lab.player_scan call (names and sort only when asked, so a plain scan is the call it always was)."""
+        extra: Dict[str, Any] = {}
+        if names:
+            extra["names"] = list(names)
+        if data.sort:
+            extra["sort"] = data.sort
+        found = self.lab.player_scan(self.uid, data.league, stat, data.threshold, side, day, n, **extra) or {}
+        return dict(found)
+
+    @staticmethod
+    def _default_stat(league: Optional[str]) -> str:
+        """The stat "who's hot" reads with none named: the league's own (engine/scan.py's default_stat), else points."""
+        if not league:
+            return SCAN_DEFAULT_STAT
+        try:
+            from ..engine.scan import default_stat
+            return default_stat(league)
+        except (ImportError, ValueError):
+            return SCAN_DEFAULT_STAT
+
+    @staticmethod
+    def _no_games(found: Mapping[str, Any]) -> bool:
+        """Whether a scan found no games at all: no league scanned had any that day (nothing loading, no rows, and
+        not a scores error, which isn't "no games")."""
+        if found.get("error") or found.get("leagues") or found.get("loading"):
+            return False
+        if found.get("players") or found.get("close"):
+            return False
+        return bool(found.get("leagues_without_games")) or found.get("no_games") is True
 
     def _brain_progress(self, data: NoInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
         """brain_progress: the learning loop's numbers (learn/progress.py tool_facts) from the store: per sport the

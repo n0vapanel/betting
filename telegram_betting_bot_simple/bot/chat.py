@@ -39,8 +39,11 @@ import asyncio
 import html
 import logging
 import random
+import re
 import time
+import unicodedata
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.constants import ChatType, ParseMode
@@ -57,8 +60,10 @@ from ..ai.assistant import (
     risk_flags,
     support_message,
 )
-from ..ai.explain import (FORM_WORDS, first_reason, money, one_in_text, pct, relaxed_texts, scan_loading_text,
-                          scan_matchup)
+from ..ai.explain import (FORM_WORDS, edge_text, first_reason, money, names_text, one_in_text, pct, relaxed_texts,
+                          scan_by_edge, scan_chance_text, scan_edge_label, scan_empty_text, scan_loading_text,
+                          scan_matchup, scan_mode, scan_more_text, scan_notes, scan_says_empty, scan_trend_text,
+                          scan_yes_no)
 from ..ai.slip_reader import MAX_IMAGE_BYTES
 from ..ai.tools import pasted_card, pasted_label
 from ..config import Config
@@ -331,9 +336,77 @@ def _picks_text(card: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-MAX_SCAN_SHOWN = 5  # a player scan's rows written out (the app's card has them all)
+MAX_SCAN_SHOWN = 5  # a player scan's rows numbered (the rest it returned follow under "Also:", as on the app's card)
 MAX_SCAN_VIEW = 3  # "View player" buttons under a scan: its top rows
 SCAN_PLAYER_GONE = "This player isn't available any more."
+FINDER_BUTTON = "🔎 Open the Player finder"
+# The leagues the Player finder covers (dashboard/static/js/views/players/scan.js SCAN_LEAGUES: engine/scan.py's)
+FINDER_DEFAULT_LEAGUE = "basketball_nba"
+FINDER_MAX_NAMES, FINDER_MAX_NAME = 5, 60
+
+
+# A piece that is only a name's suffix ("Jr.", "III", "3rd"): it belongs to the name before it ("Michael Porter, Jr.")
+_FINDER_SUFFIX = re.compile(r"^(?:jr|sr|ii|iii|iv|2nd|3rd)\.?$", re.I)
+_FINDER_KEEP = " .'’-()"
+
+
+def _finder_clean(piece: str) -> str:
+    """One name as the finder keeps it: letters (any script) and decimal digits, space and . ' ’ - ( ) (anything else,
+    _ < > = " / and tabs included, is a space), spaces collapsed, trimmed, cut to 60 code points and trimmed again."""
+    kept = "".join(char if char.isalpha() or char.isdecimal() or char in _FINDER_KEEP else " " for char in piece)
+    return " ".join(part for part in kept.split(" ") if part)[:FINDER_MAX_NAME].strip()
+
+
+def _finder_names(names: Any) -> List[str]:
+    """The Player finder's cleanNames (dashboard/static/js/views/players/scan.js), character for character: each value
+    NFC-normalised and split on commas; each piece cleaned (_finder_clean), empty ones skipped; a piece that is only a
+    suffix ("Jr.", "III", "3rd") joins the previous name with a space (across the list too; cut to 60 and trimmed
+    again, as the finder's cutText does), or stands alone with no name before it; then repeats dropped (compared
+    lower-cased, the first kept), at most 5. "Marvin Bagley 3rd" stays whole, "Michael Porter, Jr." is "Michael Porter
+    Jr." and "Marcus Sutton (MIA)" keeps its brackets."""
+    pieces: List[str] = []
+    for value in names if isinstance(names, (list, tuple)) else [names]:
+        for part in unicodedata.normalize("NFC", "" if value is None else str(value)).split(","):
+            name = _finder_clean(part)
+            if not name:
+                continue
+            if pieces and _FINDER_SUFFIX.match(name):
+                pieces[-1] = f"{pieces[-1]} {name}"[:FINDER_MAX_NAME].strip()  # cut and trimmed, as the finder does
+            else:
+                pieces.append(name)
+    out: List[str] = []
+    for name in pieces:
+        if name.lower() not in {seen.lower() for seen in out}:
+            out.append(name)
+    return out[:FINDER_MAX_NAMES]
+
+
+def finder_hash(card: Dict[str, Any]) -> Optional[str]:
+    """The Player finder's address for a player_scan card, as the app's "Open in Player finder" builds it (cards.js
+    scanAsk then scan.js finderHash): "#/players?league=basketball_nba&stat=pts&at=20&day=today" (at=line for each
+    posted line; side=under; sort=hot|cold|edges; player=... for each name asked). None for a card without a league
+    the finder covers."""
+    try:
+        from ..engine.scan import STATS
+    except Exception:  # a server without the scan's engine
+        STATS = {}
+    leagues = card.get("leagues") or []
+    first = (card.get("players") or [{}])[0] if card.get("players") else {}
+    league = leagues[0] if leagues else (first.get("league") if isinstance(first, dict) else None)
+    if not league or (STATS and league not in STATS):
+        return None
+    edges = scan_mode(card) == "edges"
+    threshold = card.get("threshold")
+    line = edges or threshold is None or isinstance(threshold, bool) or not isinstance(threshold, (int, float))
+    sort = "edges" if edges else card.get("sort") if card.get("sort") in ("hot", "cold") else ""
+    query = [("league", league or FINDER_DEFAULT_LEAGUE), ("stat", str(card.get("stat") or "pts")),
+             ("at", "line" if line else f"{threshold:g}"), ("day", "tomorrow" if card.get("day") == "tomorrow" else "today")]
+    if card.get("side") == "under":
+        query.append(("side", "under"))
+    if sort:
+        query.append(("sort", sort))
+    query += [("player", name) for name in _finder_names(card.get("names") or [])]
+    return "#/players?" + urlencode(query)
 
 
 def _decimal_price(price: Any) -> Optional[str]:
@@ -372,8 +445,14 @@ def scan_line_text(line: Any) -> Optional[str]:
     return text + (" (may be out of date)" if line.get("stale") else "")
 
 
-def _scan_row_text(row: Dict[str, Any], number: int, under: bool) -> List[str]:
+def _scan_row_text(row: Dict[str, Any], number: int, under: bool, card: Optional[Dict[str, Any]] = None) -> List[str]:
+    """One scan row: its number, name, matchup and status, then the projection (never for a yes/no event: its chance
+    is the answer), the chance, the L10 and season hits and the posted line and price, the edge on a row ranked by
+    it, the last 5 against the season for hot and cold, and the row's own stat, side and line among the best edges;
+    then a short why. A named player ruled out says so."""
     esc = html.escape
+    card = card or {}
+    edges = scan_mode(card) == "edges"
     head = f"{row.get('rank') or number}. <b>{esc(str(row.get('name') or 'A player'))}</b>"
     matchup = scan_matchup(row)
     if matchup:
@@ -381,11 +460,23 @@ def _scan_row_text(row: Dict[str, Any], number: int, under: bool) -> List[str]:
     status = str(row.get("status") or "")
     if status and status.lower() not in ("active", "healthy", "available"):
         head += f" · {esc(status)}"
+    if row.get("ruled_out"):
+        return [head, "   <i>ruled out</i>"]
+    side = str(row.get("side") or "over") if edges else ("under" if under else "over")
     bits = []
-    if isinstance(row.get("projection"), (int, float)):
+    if edges:
+        bits.append(esc(scan_edge_label(row)))  # "points over 29.5", "double-double (yes)"
+    if card.get("sort") in ("hot", "cold"):
+        trend = scan_trend_text(row.get("trend"))
+        if trend:
+            bits.append(esc(trend))
+    if isinstance(row.get("projection"), (int, float)) and not scan_yes_no(row, card):
         bits.append(f"{row['projection']:.1f} proj")
-    if isinstance(row.get("chance"), (int, float)):
-        bits.append(pct(row["chance"]) + (" to stay under" if under else ""))
+    chance = scan_chance_text(row, card, side == "under")  # "55% for 30+" on a hot or cold row (m2)
+    if chance and not (edges and scan_yes_no(row, card)):
+        bits.append(esc(chance))
+    elif chance:
+        bits.append(pct(row["chance"]))
     hits = row.get("hits") or {}
     for window, name in (("l10", "L10"), ("season", "season")):
         pair = hits.get(window) if isinstance(hits, dict) else None
@@ -394,6 +485,9 @@ def _scan_row_text(row: Dict[str, Any], number: int, under: bool) -> List[str]:
     line = scan_line_text(row.get("line"))
     if line:
         bits.append(esc(line))
+    edge = edge_text(row.get("edge")) if scan_by_edge(card) else None
+    if edge:
+        bits.append(edge)
     lines = [head]
     if bits:
         lines.append("   " + " · ".join(bits))
@@ -406,31 +500,58 @@ def _scan_row_text(row: Dict[str, Any], number: int, under: bool) -> List[str]:
     return lines
 
 
+def _scan_short(row: Dict[str, Any], card: Dict[str, Any]) -> str:
+    """A row in a few words for "Also:" and "Also close:": "Paolo Banchero (18.9, 44%)" (a yes/no event's chance
+    only; the edge on a row ranked by it). One of the best edges leads with its own bet, "Bryce Nash points + rebounds +
+    assists under 33.5 (35.1, 48%, edge +25.2%)", as the numbered rows do (M8); a hot or cold one with its last 5 and
+    what its chance is for, "Jalen Duren (L5 14.2 vs 11 season, 12.1, 55% for 12+)"."""
+    esc = html.escape
+    bit = esc(str(row.get("name") or "A player"))
+    if scan_mode(card) == "edges":
+        bit += f" {esc(scan_edge_label(row))}"
+    trend = scan_trend_text(row.get("trend")) if card.get("sort") in ("hot", "cold") else None
+    under = row.get("side") == "under" if scan_mode(card) == "edges" else card.get("side") == "under"
+    numbers = [trend,
+               f"{row['projection']:.1f}" if isinstance(row.get("projection"), (int, float))
+               and not scan_yes_no(row, card) else None,
+               (scan_chance_text(row, card, under) if card.get("sort") in ("hot", "cold") else pct(row["chance"]))
+               if isinstance(row.get("chance"), (int, float)) else None,
+               edge_text(row.get("edge")) if scan_by_edge(card) else None]
+    numbers = [esc(part) for part in numbers if part]
+    return bit + (f" ({', '.join(numbers)})" if numbers else "")
+
+
 def _scan_text(card: Dict[str, Any]) -> str:
     """A player scan (players_scan's card), as a numbered list strongest first: each player's matchup, status, the
     projection, the chance, the L10 and season hits and the posted line and price, a short why, and "from recent
-    form" for the form model's rows; then who is close and, while the board builds, how many games are loaded.
-    The first rows get "View player" buttons (reply_markup); props aren't added to the slip."""
+    form" for the form model's rows; then every other row the scan returned ("Also: ...", as the app's card lists
+    them) and how many further rows it ranked (the tool's ``more``, worded by mode: "229 more players are ranked: open
+    the Player finder.", with a button that opens it: reply_markup), or who is close when every qualifier is shown;
+    and, while the board builds, how many games are loaded. An empty scan says why ("NFL: no games"); a day with none
+    moved to tomorrow says so. The first rows get "View player" buttons (reply_markup); props aren't added to the
+    slip."""
     esc = html.escape
-    under = card.get("side") == "under"
+    under = card.get("side") == "under" and scan_mode(card) != "edges"
     lines = [f"📊 <b>{esc(str(card.get('title') or 'Player scan'))}</b>"]
+    moved = [str(league) for league in card.get("no_games_today") or []]
+    if moved:
+        lines.append(f"<i>No {esc(names_text(moved))} games today, so here's tomorrow.</i>")
     players = [row for row in card.get("players") or [] if isinstance(row, dict)]
     for number, row in enumerate(players[:MAX_SCAN_SHOWN], 1):
-        lines += _scan_row_text(row, number, under)
-    if len(players) > MAX_SCAN_SHOWN:
-        lines.append(f"… and {len(players) - MAX_SCAN_SHOWN} more (📱 open the app to see them all)")
+        lines += _scan_row_text(row, number, under, card)
+    also = players[MAX_SCAN_SHOWN:]
+    if also:
+        lines.append("Also: " + "; ".join(_scan_short(row, card) for row in also))
+    more = scan_more_text(card)  # the tool's own count (contract 4), never counted again here
+    if more:
+        lines.append(f"📱 {esc(more)}")
     close = [row for row in card.get("close") or [] if isinstance(row, dict)]
-    if close:
-        names = []
-        for row in close[:5]:
-            bit = esc(str(row.get("name") or "A player"))
-            numbers = [f"{row['projection']:.1f}" if isinstance(row.get("projection"), (int, float)) else None,
-                       pct(row["chance"]) if isinstance(row.get("chance"), (int, float)) else None]
-            numbers = [part for part in numbers if part]
-            names.append(bit + (f" ({', '.join(numbers)})" if numbers else ""))
-        lines.append(("Also close: " if players else "Closest: ") + "; ".join(names))
-    if not players and not close:
-        lines.append("Nobody qualifies yet.")
+    if close and not also and not more:
+        lines.append(("Also close: " if players else "Closest: ") + "; ".join(_scan_short(row, card)
+                                                                              for row in close[:5]))
+    if not players and not close and scan_says_empty(card):
+        lines += [esc(line) for line in scan_empty_text(card)]
+    lines += [f"<i>{esc(note)}</i>" for note in scan_notes(card)]
     loading = scan_loading_text(card.get("loading"))
     if loading:
         lines.append(f"<i>⏳ {esc(loading)}</i>")
@@ -532,6 +653,12 @@ def reply_markup(result: Dict[str, Any], config: Optional[Config], private: bool
         rows += [chips[i:i + 2] for i in range(0, len(chips), 2)]
     url = getattr(config, "mini_app_url", None)
     if url and private:  # Telegram refuses Mini App buttons outside private chats
+        # "N more qualify: open the Player finder.": a button that opens it on the same scan (m1)
+        for card in (reply.get("cards") or [])[:MAX_CARDS]:
+            hash_ = finder_hash(card) if card.get("type") == "player_scan" and scan_more_text(card) else None
+            if hash_:
+                rows.append([InlineKeyboardButton(FINDER_BUTTON, web_app=WebAppInfo(f"{url}/{hash_}"))])
+                break
         rows.append([InlineKeyboardButton("📱 Open in app", web_app=WebAppInfo(f"{url}/#ask"))])
     return InlineKeyboardMarkup(rows) if rows else None
 

@@ -3,11 +3,13 @@
 - scores: log loss and Brier (binary), ranked probability score, count log score, discrete CRPS, the
   non-randomised PIT histogram for counts and the variance ratio (Czado, Gneiting & Held 2009);
 - distributions: Student t tail (regularised incomplete beta), a vectorised log-gamma (Lanczos), the negative
-  binomial pmf/cdf with ``size`` (variance = mean + mean^2 / size);
+  binomial pmf/cdf with ``size`` (NB2: variance = mean + mean^2 / size; engine/calls.py's player-stat model is NB1,
+  a variance ratio, instead);
 - paired tests: Diebold-Mariano on daily sums with a Newey-West variance and the Harvey-Leybourne-Newbold
   correction, the day-block bootstrap, Holm's step-down adjustment and a one-sided CUSUM (Page 1954);
-- calibration: CORP reliability (isotonic regression by pool-adjacent-violators) with a consistency band from
-  resampling a perfectly calibrated forecaster, and the calibration slope and intercept with 95% ranges (Cox 1958);
+- calibration: CORP reliability (isotonic regression by pool-adjacent-violators over the unique forecast values,
+  so tied forecasts share one recalibrated value) with a consistency band from resampling a perfectly calibrated
+  forecaster, and the calibration slope with both intercepts, joint and in-the-large, with 95% ranges (Cox 1958);
 - fitting: Newton's method with a numeric Hessian and the lower-confidence-bound step (``ai/learning.py``'s
   "keep only what's 95% sure").
 """
@@ -22,6 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 P_FLOOR = 1e-4  # engine/consensus.P_FLOOR: chances are kept inside [P_FLOOR, 1 - P_FLOOR] before logs
+NB_FAMILY = "nb2"  # nb_logpmf's convention (a size); engine/calls.NB_FAMILY is "nb1" (a variance ratio)
 Z95 = 1.959963984540054
 SURE = 1.645  # ai/learning.SURE: standard errors taken off a fitted move
 _N = NormalDist()
@@ -109,7 +112,12 @@ def lgamma(x: Any) -> np.ndarray:
 
 
 def nb_logpmf(y: Any, mu: Any, size: Any) -> np.ndarray:
-    """log P(Y = y) for a negative binomial with mean ``mu`` and ``size`` r (variance mu + mu^2 / r)."""
+    """log P(Y = y) for a negative binomial with mean ``mu`` and ``size`` r (variance mu + mu^2 / r).
+
+    This is NB2 (statsmodels' alpha = 1 / r; R's dnbinom(size, mu); scipy's nbinom(n=r, p=r / (r + mu))). The
+    player-stat model in engine/calls.py is NB1, set by a variance ratio (variance = ratio x mean): with the same
+    alpha = 0.125 the two give variances 22.5 (NB2) and 11.25 (NB1) at mean 10, so a "dispersion" means nothing
+    without its family."""
     y = np.asarray(y, dtype=float)
     mu = np.maximum(np.asarray(mu, dtype=float), 1e-9)
     r = np.asarray(size, dtype=float)
@@ -392,9 +400,35 @@ def pav(y: Any, w: Optional[Any] = None) -> np.ndarray:
     return np.repeat(values, sizes)
 
 
+def _ties(sorted_p: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """(first index, count) of each run of equal values in sorted forecasts."""
+    starts = np.flatnonzero(np.concatenate(([True], sorted_p[1:] != sorted_p[:-1])))
+    return starts, np.diff(np.append(starts, sorted_p.size))
+
+
+def _pooled_pav(outcomes: np.ndarray, starts: np.ndarray, counts: np.ndarray) -> np.ndarray:
+    """CORP's PAV of ``outcomes`` sorted by forecast: over the unique forecast values (``_ties``), each one's mean
+    outcome weighted by its count, spread back over its cases, so tied forecasts get one value whatever their order.
+    With no ties it is ``pav(outcomes)`` exactly."""
+    return np.repeat(pav(np.add.reduceat(outcomes, starts) / counts, counts), counts)
+
+
+def corp_cep(p: Any, y: Any) -> np.ndarray:
+    """The CORP conditional event probability of each case, in the input order: outcomes ``y`` recalibrated on the
+    forecasts ``p`` by PAV with tied forecasts pooled (Dimitriadis, Gneiting & Jordan 2021)."""
+    p = np.asarray(p, dtype=float)
+    y = np.asarray(y, dtype=float)
+    out = np.empty(p.size)
+    if p.size:
+        order = np.argsort(p, kind="mergesort")
+        out[order] = _pooled_pav(y[order], *_ties(p[order]))
+    return out
+
+
 def reliability(p: Any, y: Any, points: int = 21, reps: int = 200, seed: int = 0) -> Dict[str, Any]:
     """CORP reliability (Dimitriadis, Gneiting & Jordan 2021): the isotonic recalibration of outcomes ``y`` on the
-    forecasts ``p``, read at ``points`` evenly spaced quantiles of ``p``, with a 90% consistency band from ``reps``
+    forecasts ``p`` (PAV over the unique forecast values with their counts as weights: tied forecasts share one
+    value), read at ``points`` evenly spaced quantiles of ``p``, with a 90% consistency band from ``reps``
     resamples of a perfectly calibrated forecaster (y* ~ Bernoulli(p)). Also the CORP Brier decomposition:
     miscalibration (MCB), discrimination (DSC) and uncertainty (UNC), mean Brier = MCB - DSC + UNC."""
     p = np.asarray(p, dtype=float)
@@ -404,14 +438,15 @@ def reliability(p: Any, y: Any, points: int = 21, reps: int = 200, seed: int = 0
         return {"n": n, "x": [], "y": [], "lo": [], "hi": [], "mcb": None, "dsc": None, "unc": None}
     order = np.argsort(p, kind="mergesort")
     ps, ys = p[order], y[order]
-    cep = pav(ys)
+    starts, counts = _ties(ps)
+    cep = _pooled_pav(ys, starts, counts)
     grid = np.quantile(ps, np.linspace(0, 1, points))
     at = np.clip(np.searchsorted(ps, grid, side="right") - 1, 0, n - 1)
     rng = np.random.default_rng(seed)
     sims = np.empty((reps, points))
     for r in range(reps):
         fake = (rng.random(n) < ps).astype(float)
-        sims[r] = pav(fake)[at]
+        sims[r] = _pooled_pav(fake, starts, counts)[at]
     lo, hi = np.quantile(sims, [0.05, 0.95], axis=0)
     clim = float(ys.mean())
     score = lambda q: float(np.mean((q - ys) ** 2))  # noqa: E731
@@ -448,13 +483,19 @@ def _logistic_fit(x: np.ndarray, y: np.ndarray, offset: np.ndarray, iters: int =
 
 
 def calibration(p: Any, y: Any) -> Dict[str, Optional[float]]:
-    """Calibration slope b from logit P(y) = a + b logit(p) (b < 1: too confident, b > 1: too timid) and the
-    calibration-in-the-large intercept (a with b fixed at 1: above 0 means events happen more often than said), each
-    with a 95% range from the inverse Hessian. Nones with fewer than 30 games or no events of either kind."""
+    """Calibration slope b and two different intercepts, each with a 95% range from the inverse Hessian:
+
+    - the joint fit logit P(y) = a + b logit(p): ``slope`` b (b < 1: too confident, b > 1: too timid) and
+      ``cal_a_joint`` a (rms val.prob's "Intercept");
+    - calibration-in-the-large, a separate fit with b fixed at 1 (an offset): ``citl`` (above 0 means events happen
+      more often than said). ``intercept`` is the same number under its old name (the progress page reads it).
+
+    Nones with fewer than 30 games or no events of either kind."""
     p = np.asarray(p, dtype=float)
     y = np.asarray(y, dtype=float)
     empty = {"n": int(p.size), "slope": None, "slope_lo": None, "slope_hi": None, "intercept": None,
-             "intercept_lo": None, "intercept_hi": None}
+             "intercept_lo": None, "intercept_hi": None, "citl": None, "citl_lo": None, "citl_hi": None,
+             "cal_a_joint": None, "cal_a_joint_lo": None, "cal_a_joint_hi": None}
     if p.size < 30 or y.min() == y.max():
         return empty
     lp = logit(p)
@@ -464,8 +505,15 @@ def calibration(p: Any, y: Any) -> Dict[str, Optional[float]]:
     a, se_a = float(alpha[0]), math.sqrt(max(float(cov_a[0, 0]), 0.0))
     if not (math.isfinite(b) and math.isfinite(se_b) and math.isfinite(a) and math.isfinite(se_a)):
         return empty
-    return {"n": int(p.size), "slope": b, "slope_lo": b - Z95 * se_b, "slope_hi": b + Z95 * se_b, "intercept": a,
-            "intercept_lo": a - Z95 * se_a, "intercept_hi": a + Z95 * se_a}
+    out = {"n": int(p.size), "slope": b, "slope_lo": b - Z95 * se_b, "slope_hi": b + Z95 * se_b, "intercept": a,
+           "intercept_lo": a - Z95 * se_a, "intercept_hi": a + Z95 * se_a}
+    out.update({"citl": a, "citl_lo": out["intercept_lo"], "citl_hi": out["intercept_hi"]})
+    a_joint, se_joint = float(beta[0]), math.sqrt(max(float(cov[0, 0]), 0.0))
+    joint = math.isfinite(a_joint) and math.isfinite(se_joint)
+    out.update({"cal_a_joint": a_joint if joint else None,
+                "cal_a_joint_lo": a_joint - Z95 * se_joint if joint else None,
+                "cal_a_joint_hi": a_joint + Z95 * se_joint if joint else None})
+    return out
 
 
 # --- fitting -------------------------------------------------------------------------------------------------------

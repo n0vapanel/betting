@@ -518,7 +518,7 @@ const EXTRAS = {
     related: ["bankroll", "rollover", "expected_result"], see: "#/build/rollover", seeLabel: "Compare staking plans",
   },
   player_finder: {
-    group: "players", aka: ["player scan", "prop finder"], aliases: ["player finder", "finder", "player scan", "scan", "props", "prop finder", "20+", "projected", "projection", "who will score", "milestone", "ladder", "hit rate", "recent form", "edge"],
+    group: "players", aka: ["player scan", "prop finder"], aliases: ["player finder", "finder", "player scan", "scan", "props", "prop finder", "20+", "projected", "projection", "who will score", "milestone", "ladder", "hit rate", "recent form", "edge", "who's hot", "who's cold", "best props", "best edges"],
     worked: ["You pick NBA, points, at least 20, tonight.",
       "A player went 20+ in 9 of his last 10, is projected for 31.2 and has an 82% chance: he ranks near the top.",
       "His 20+ milestone is posted at −250 (1.40): edge = 0.82 × 1.40 − 1 = +14.8%.",

@@ -417,8 +417,15 @@ def _soccer_rates(supremacy: float, total: float) -> Tuple[float, float]:
     return (total + s) / 2, (total - s) / 2
 
 
+def _soccer_grid(home: float, away: float) -> soccer.Matrix:
+    """The goals model's grid at its default rho, narrowed into the valid range for these rates (as the model's own
+    rate fit does): the searches here try totals far past any real match (up to 15 goals), and above a 7.69-goal
+    rate -0.13 is out of range, where soccer.grid raises. Below that it is exactly soccer.grid(home, away)."""
+    return soccer.grid(home, away, soccer.narrow_rho(soccer.DC_RHO, home, away))
+
+
 def _soccer_outcomes(supremacy: float, total: float) -> Tuple[float, float, float]:
-    return soccer.outcome_probs(soccer.grid(*_soccer_rates(supremacy, total)))
+    return soccer.outcome_probs(_soccer_grid(*_soccer_rates(supremacy, total)))
 
 
 def _soccer_total(total: Optional[float]) -> float:
@@ -1286,7 +1293,7 @@ def weather_adjustment(sport: Any, venue: Optional[Mapping[str, Any]], condition
 
 
 def _soccer_over(share: float, total: float, line: float) -> float:
-    return soccer.over_prob(soccer.grid(share * total, (1 - share) * total), line)
+    return soccer.over_prob(_soccer_grid(share * total, (1 - share) * total), line)
 
 
 def adjusted_over(sport: Any, line: float, p_over: float, applied: float, *,

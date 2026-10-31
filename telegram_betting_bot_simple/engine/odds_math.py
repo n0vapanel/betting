@@ -87,9 +87,33 @@ def shin_probabilities(implied: Sequence[float]) -> List[float]:
     return [p / total for p in probabilities]
 
 
+POWER_BRACKET = (1.0, 50.0)  # the power exponent k of a book with a margin: above 1, and below 50 for real prices
+
+
+def power_exponent(implied: Sequence[float]) -> float:
+    """The power method's exponent: the k with sum(q_i^k) = 1 for implied chances q_i that add up to more than 1.
+
+    Solved on POWER_BRACKET (1, 50) by a 200-step bisection, after a bracket check: ValueError when no k inside
+    works (no margin, or prices so short that sum(q_i^50) is still at least 1). k is the exponent applied to the
+    implied chances, as penaltyblog's; the R package ``implied`` reports 1/k, and Clarke (2016) writes pi = x^k with
+    his k = 1/ours. For 1.90 / 3.50 / 4.20, k = 1.04966."""
+    low, high = POWER_BRACKET
+
+    def excess(k: float) -> float:
+        return sum(q ** k for q in implied) - 1
+
+    if not excess(low) > 0:
+        raise ValueError(f"The power method needs a book with a margin (implied chances {list(implied)!r} add up "
+                         "to 1 or less)")
+    if not excess(high) < 0:
+        raise ValueError(f"No power exponent up to {high:g} takes the margin out of implied chances "
+                         f"{list(implied)!r}")
+    return _solve(excess, low, high)
+
+
 def power_probabilities(implied: Sequence[float]) -> List[float]:
-    """The power method: p_i = q_i^k with k chosen so the p_i add up to 1."""
-    k = _solve(lambda k: sum(q ** k for q in implied) - 1, 1.0, 10.0)
+    """The power method: p_i = q_i^k with k chosen so the p_i add up to 1 (``power_exponent``)."""
+    k = power_exponent(implied)
     probabilities = [q ** k for q in implied]
     total = sum(probabilities)
     return [p / total for p in probabilities]

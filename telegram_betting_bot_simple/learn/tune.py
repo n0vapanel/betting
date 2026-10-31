@@ -613,7 +613,7 @@ def refit(family: str, sport: str, rows: Sequence[Any], champion: Mapping[str, f
         if n < MIN_TRAIN:
             return None
         r0 = champion["soccer.rho"]
-        low, high = registry.KNOBS["soccer.rho"].bounds(sport)
+        low, high = registry.rho_bounds(ev.rates_many(rows, r0))  # the knob's bounds, valid for every match's rates
         r_hat, se = fit_rho(rows, r0, low, high, champion["soccer.btts_nudge"])
         return _finish(family, sport, champion, {"soccer.rho": lcb_scalar(r0, r_hat, se)}, n,
                        f"Dixon-Coles rho fitted at {r_hat:.3f} (standard error {se:.3f}) on the exact scores",

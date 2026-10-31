@@ -383,3 +383,101 @@ def test_the_player_finders_stat_menu_mirrors_the_engines_table() -> None:
             if spec["threshold"] is not None:
                 assert stat["start"] == spec["threshold"], (league, stat["key"])
             engine.make_ask(league, stat["key"], stat["start"])  # every menu entry makes an ask
+
+
+# --- v4 P0: names, sorts, edges mode, and what a day's board says ---------------------------------------------------
+
+def test_the_lab_scans_named_players_whether_they_qualify_or_not(stack) -> None:
+    assert stack.board().wait(NHL, "today", 60)
+    out = stack.lab.player_scan(UID, NHL, "sog", 3, names=["draisaitl", "Wayne Gretzky"])
+    assert out["mode"] == "scan" and out["names"] == ["draisaitl", "Wayne Gretzky"]
+    assert [row["name"] for row in out["players"]] == ["Leon Draisaitl"] and out["close"] == []
+    assert out["players"][0]["qualifies"] is True and out["players"][0]["league"] == NHL
+    assert out["missing_names"] == ["Wayne Gretzky"]
+    # Without a league, the first league with games where a name is found: "points" is the NBA's first, but
+    # Draisaitl plays in the NHL
+    assert stack.board().wait(NBA, "today", 60)
+    found = stack.lab.player_scan(UID, None, "points", 1, names=["Leon Draisaitl"])
+    assert found["leagues"] == [NHL] and [row["name"] for row in found["players"]] == ["Leon Draisaitl"]
+    assert found["missing_names"] == [] and found["stat"] == "points" and found["threshold"] == 1
+    nobody = stack.lab.player_scan(UID, None, "points", 20, names=["Wayne Gretzky"])
+    assert nobody["leagues"] == [NBA] and nobody["players"] == [] and nobody["missing_names"] == ["Wayne Gretzky"]
+
+
+def test_hot_and_cold_read_the_leagues_own_stat_when_none_is_named(stack) -> None:
+    # A trend needs 5 games this season (v4 P0 fix, contract 2): the captured 28 October has 4, so the world moves on
+    # to 12 games, the last 5 against this season's other 7
+    from tests.test_p0_fix_data import move_on
+    move_on(stack.nba, 12)
+    assert stack.board().wait(NBA, "today", 60)
+    hot = stack.lab.player_scan(UID, NBA, None, None, sort="hot", n=25)
+    assert hot["stat"] == "pts" and hot["sort"] == "hot" and hot["players"] and hot["close"] == []
+    diffs = [row["trend"]["diff"] for row in hot["players"]]
+    assert diffs == sorted(diffs, reverse=True) and {row["trend"]["vs"] for row in hot["players"]} == {"season"}
+    assert all(row["hits"]["l10"][1] >= 5 and row["status"] not in ("Out", "Doubtful") for row in hot["players"])
+    cold = stack.lab.player_scan(UID, NBA, None, None, sort="cold", n=25)
+    assert [row["trend"]["diff"] for row in cold["players"]] == sorted(row["trend"]["diff"] for row in cold["players"])
+    # A row keeps its own numbers whichever order it is in
+    by_id = {row["athlete_id"]: row for row in stack.lab.player_scan(UID, NBA, "pts", 20, n=25)["players"]}
+    for row in hot["players"]:
+        if row["athlete_id"] in by_id and row["threshold"] == 20:
+            assert row["chance"] == by_id[row["athlete_id"]]["chance"]
+
+
+def test_edges_mode_ranks_every_stats_posted_lines_through_the_lab_and_the_route(stack) -> None:
+    assert stack.board().wait(NBA, "today", 60)
+    out = stack.lab.player_scan(UID, NBA, None, None, None, "today", 25, sort="edge")
+    assert out["mode"] == "edges" and out["stat"] is None and out["side"] is None
+    assert out["ask"] == "posted lines by edge" and out["leagues"] == [NBA] and out["sort"] == "edge"
+    rows = out["players"]
+    assert rows and [row["edge"] for row in rows] == sorted((row["edge"] for row in rows), reverse=True)
+    assert all(row["edge"] > 0 and row["stat"] in engine.STATS[NBA] and row["side"] in ("over", "under")
+               and row["stat_label"] == engine.STATS[NBA][row["stat"]]["label"] and row["league"] == NBA
+               and row["line"]["matches"] for row in rows)
+    overs = stack.lab.player_scan(UID, NBA, None, None, "over", "today", 25, sort="edge")
+    assert overs["side"] == "over" and overs["ask"] == "overs by edge" and all(r["side"] == "over" for r in overs["players"])
+    # The route: no stat with sort=edge, and no side, is edges mode over both sides
+    api = stack.client().get("/api/players/scan", params={"league": NBA, "sort": "edge", "n": 25})
+    assert api.status_code == 200, api.text
+    body = api.json()
+    assert body["mode"] == "edges" and body["side"] is None
+    assert [(r["athlete_id"], r["stat"], r["edge"]) for r in body["players"]] == \
+        [(r["athlete_id"], r["stat"], r["edge"]) for r in rows]
+    # Named players: only their lines
+    who = rows[0]["name"]
+    named = stack.lab.player_scan(UID, NBA, None, None, None, "today", 25, names=[who, "Wayne Gretzky"], sort="edge")
+    assert named["players"] and {row["name"] for row in named["players"]} == {who}
+    assert named["missing_names"] == ["Wayne Gretzky"] and named["names"] == [who, "Wayne Gretzky"]
+    # No Odds API request, never more than four at once
+    assert not any("the-odds-api" in call["url"] for call in stack.web.calls) and stack.web.peak <= 4
+
+
+def test_the_route_takes_players_a_sort_and_no_stat_only_with_a_sort(stack) -> None:
+    assert stack.board().wait(NHL, "today", 60)
+    client = stack.client()
+    named = client.get("/api/players/scan", params=[("league", NHL), ("stat", "sog"), ("threshold", 3),
+                                                    ("player", "Draisaitl"), ("player", "Nobody Here"),
+                                                    ("sort", "l10")])
+    assert named.status_code == 200, named.text
+    body = named.json()
+    assert [row["name"] for row in body["players"]] == ["Leon Draisaitl"] and body["missing_names"] == ["Nobody Here"]
+    assert body["sort"] == "l10" and body["names"] == ["Draisaitl", "Nobody Here"]
+    assert body["games_started"] == 0 and body["no_games"] is False and "error" not in body
+    hot = client.get("/api/players/scan", params={"league": NHL, "sort": "hot"})
+    assert hot.status_code == 200 and hot.json()["stat"] == "points"  # the NHL's own stat
+    for bad in ([("stat", "sog"), *[("player", f"Player {i}") for i in range(6)]],  # at most 5 names
+                [("stat", "sog"), ("player", "x" * 61)], [("stat", "sog"), ("player", "<b>")],
+                [("stat", "sog"), ("sort", "sideways")], [("league", NHL)], [("stat", "sog"), ("side", "both")]):
+        assert client.get("/api/players/scan", params=bad).status_code == 422, bad
+
+
+def test_the_lab_refuses_bad_names_and_sorts_in_plain_words(stack) -> None:
+    from telegram_betting_bot_simple.dashboard.service import CallRejected
+    for options, words in (({"names": [f"P{i}" for i in range(6)]}, "up to 5 players"),
+                           ({"names": ["x" * 61]}, "at most 60 characters"), ({"sort": "loudest"}, "Sort must be"),
+                           ({"names": 42}, "a name or a list")):
+        with pytest.raises(CallRejected) as raised:
+            stack.lab.player_scan(UID, NHL, "sog", 3, **options)
+        assert words in str(raised.value), (options, str(raised.value))
+    with pytest.raises(CallRejected, match="which stat"):
+        stack.lab.player_scan(UID, NHL, None, 3, sort="chance")

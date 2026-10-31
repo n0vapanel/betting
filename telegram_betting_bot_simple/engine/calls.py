@@ -16,8 +16,8 @@ better; copying the AI scores exactly 0 on it:
   bullseye when both teams' scores are within 2.
 - player lines: the winner rule at 40% weight (+10 to -30); the AI is scored
   on its own chance for the same side (from a negative binomial with each
-  stat's measured spread); a player who doesn't play, or an exact whole-number
-  line, voids it.
+  stat's measured variance ratio: NB1, see STAT_VARIANCE_RATIO); a player who
+  doesn't play, or an exact whole-number line, voids it.
 
 The AI and the market are scored on their last numbers before tip-off.
 """
@@ -94,30 +94,40 @@ def compare_confidence(yours: float, ai: float) -> str:
 
 # --- player stat probabilities ------------------------------------------------------------
 
+# The negative binomial here is NB1, set by a variance ratio (variance / mean): variance = ratio x mean =
+# mean x (1 + alpha) with alpha = ratio - 1, i.e. scipy's nbinom(n=mean / alpha, p=1 / ratio). learn/stats.nb_logpmf is
+# NB2 instead (a size r: variance = mean + mean^2 / r). The same alpha 0.125 gives variance 11.25 here and 22.5 in NB2
+# at mean 10 (5.625 against 8.125 at mean 5), so a ratio from here is never a size there, or the other way round.
+NB_FAMILY = "nb1"
 # Game-to-game variance / mean of each stat for rotation players (2025-26 residuals, matching fitted
 # repos and DraftKings' alt ladders): points vary far more than a Poisson count, mostly because minutes do
-STAT_DISPERSION = {"pts": 2.9, "reb": 1.4, "ast": 1.4, "fg3m": 1.3, "stl": 1.1, "blk": 1.15, "tov": 1.07, "pra": 3.5}
+STAT_VARIANCE_RATIO = {"pts": 2.9, "reb": 1.4, "ast": 1.4, "fg3m": 1.3, "stl": 1.1, "blk": 1.15, "tov": 1.07,
+                       "pra": 3.5}
+STAT_DISPERSION = STAT_VARIANCE_RATIO  # the old name of the same dict (engine/scan.py imports it): a variance ratio
 # Points also have a "short night" (early foul trouble, injury, blowout): about 4% of games at ~30% of normal
 SHORT_NIGHT = (0.04, 0.3)
-BENCH_DISPERSION = 1.3  # extra spread for players projected under 20 minutes
+BENCH_VARIANCE_RATIO = 1.3  # the variance ratio is multiplied by this for players projected under 20 minutes
+BENCH_DISPERSION = BENCH_VARIANCE_RATIO  # the old name
 
 
 def stat_probabilities(stat: str, mean: float, line: float, minutes: Optional[float] = None) -> Tuple[float, float, float]:
-    """(over, under, push) chances for a player stat line, from a negative binomial around ``mean``.
+    """(over, under, push) chances for a player stat line, from a negative binomial (NB1: the stat's variance
+    ratio) around ``mean``.
 
     Half-point lines can't push; on a whole-number line the exact number is a
     push (the bet is void), so over means line + 1 or more.
     """
     if mean <= 0:
         return 0.0, 1.0, 0.0
-    dispersion = STAT_DISPERSION.get(stat, 1.3) * (BENCH_DISPERSION if minutes is not None and minutes < 20 else 1.0)
+    variance_ratio = STAT_VARIANCE_RATIO.get(stat, 1.3) * (
+        BENCH_VARIANCE_RATIO if minutes is not None and minutes < 20 else 1.0)
 
     def cdf(k: int) -> float:
         if stat == "pts":
             weight, scale = SHORT_NIGHT
-            return ((1 - weight) * _negative_binomial_cdf(k, mean / (1 - weight + weight * scale), dispersion)
-                    + weight * _negative_binomial_cdf(k, mean * scale / (1 - weight + weight * scale), dispersion))
-        return _negative_binomial_cdf(k, mean, dispersion)
+            return ((1 - weight) * _negative_binomial_cdf(k, mean / (1 - weight + weight * scale), variance_ratio)
+                    + weight * _negative_binomial_cdf(k, mean * scale / (1 - weight + weight * scale), variance_ratio))
+        return _negative_binomial_cdf(k, mean, variance_ratio)
 
     if float(line).is_integer():
         k = int(line)
@@ -132,7 +142,9 @@ def stat_over_prob(stat: str, mean: float, line: float, minutes: Optional[float]
 
 
 def _negative_binomial_cdf(k: int, mean: float, variance_ratio: float) -> float:
-    """P(X <= k) for a count with this mean and variance = variance_ratio x mean."""
+    """P(X <= k) for a count with this mean and variance = variance_ratio x mean: NB1 with alpha = variance_ratio - 1
+    (success chance p = 1 / variance_ratio, size r = mean / alpha); a Poisson at a ratio up to 1.0001. Not an NB2
+    size: see NB_FAMILY."""
     if k < 0:
         return 0.0
     if variance_ratio <= 1.0001:

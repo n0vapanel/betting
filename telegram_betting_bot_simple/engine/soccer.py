@@ -12,11 +12,14 @@ both-teams-to-score "yes" gets a +1.5-point nudge.
   log rates. The fit is on the same Dixon-Coles grid the markets are read from, so the derived draw-no-bet and
   double chance agree with the 1X2 the person sees (typically within 0.5 points).
 - ``grid`` is the score matrix P(home goals = x, away goals = y) for 0..max_goals each: independent Poissons
-  times Dixon and Coles' (1997) low-score correction tau:
+  times Dixon and Coles' (1997) low-score correction tau, with lambda the home rate (rows) and mu the away rate:
       tau(0,0) = 1 - lambda*mu*rho    tau(0,1) = 1 + lambda*rho
       tau(1,0) = 1 + mu*rho           tau(1,1) = 1 - rho          (1 elsewhere)
   The correction moves no probability in or out (its terms cancel), and the grid is renormalised for the
-  scores past max_goals, so it sums to 1.
+  scores past max_goals, so it sums to 1. rho is only valid inside the paper's range for the two rates,
+  max(-1/lambda, -1/mu) <= rho <= min(1/(lambda*mu), 1) (``rho_bounds``), where every tau is at least 0:
+  ``grid`` raises outside it rather than clip a tau. ``derive`` (serving) instead narrows a rho that the fitted
+  rates put outside it to the nearest end, and says so in its result (``rho_clamped``).
 - ``markets`` reads every derived market off one grid: both teams to score (nudged), draw no bet (the draw is a
   push), double chance, team totals, game totals, clean sheets, expected goals and the top 6 correct scores.
 
@@ -57,12 +60,34 @@ def _pmf(rate: float, max_goals: int) -> List[float]:
     return out
 
 
-def grid(lam_home: float, lam_away: float, rho: float = DC_RHO, max_goals: int = MAX_GOALS) -> Matrix:
-    """P(home scores x, away scores y) for x, y in 0..max_goals, rows by home goals; sums to 1."""
-    if not (lam_home > 0 and lam_away > 0 and math.isfinite(lam_home) and math.isfinite(lam_away)):
-        raise ValueError(f"Goal rates must be positive numbers, got {lam_home}, {lam_away}")
+def rho_bounds(lam_home: float, lam_away: float) -> Tuple[float, float]:
+    """Dixon and Coles' (1997, p. 270) valid range of rho for a home rate ``lam_home`` (lambda) and an away rate
+    ``lam_away`` (mu): max(-1/lambda, -1/mu) <= rho <= min(1/(lambda*mu), 1), the range where all four tau factors
+    are at least 0. At lambda 1.5, mu 1.1 it is [-0.667, 0.606]; the default -0.13 holds for rates up to 7.69."""
+    return max(-1.0 / lam_home, -1.0 / lam_away), min(1.0 / (lam_home * lam_away), 1.0)
+
+
+def narrow_rho(rho: float, lam_home: float, lam_away: float) -> float:
+    """``rho`` moved to the nearest end of ``rho_bounds`` for these rates; the same value when it is inside."""
+    low, high = rho_bounds(lam_home, lam_away)
+    return min(max(rho, low), high)
+
+
+def _check_rho(rho: Any) -> None:
+    """A rho the goals model can be asked for at all (any rates): a number between -1 and 1."""
     if not -1.0 <= rho <= 1.0:
         raise ValueError(f"rho must be between -1 and 1, got {rho}")
+
+
+def grid(lam_home: float, lam_away: float, rho: float = DC_RHO, max_goals: int = MAX_GOALS) -> Matrix:
+    """P(home scores x, away scores y) for x, y in 0..max_goals, rows by home goals; sums to 1. ValueError when
+    ``rho`` is outside ``rho_bounds`` for the two rates (a tau would be negative: never clipped)."""
+    if not (lam_home > 0 and lam_away > 0 and math.isfinite(lam_home) and math.isfinite(lam_away)):
+        raise ValueError(f"Goal rates must be positive numbers, got {lam_home}, {lam_away}")
+    low, high = rho_bounds(lam_home, lam_away)
+    if not low <= rho <= high:
+        raise ValueError(f"rho {rho} is outside Dixon and Coles' valid range [{low:.4g}, {high:.4g}] for goal rates "
+                         f"{lam_home:g} and {lam_away:g}")
     if not 1 <= int(max_goals) <= 30:
         raise ValueError(f"max_goals must be 1 to 30, got {max_goals}")
     max_goals = int(max_goals)
@@ -71,6 +96,7 @@ def grid(lam_home: float, lam_away: float, rho: float = DC_RHO, max_goals: int =
     tau = {(0, 0): 1 - lam_home * lam_away * rho, (0, 1): 1 + lam_home * rho,
            (1, 0): 1 + lam_away * rho, (1, 1): 1 - rho}
     for (x, y), factor in tau.items():
+        # Inside rho_bounds every factor is at least 0: this only absorbs rounding at the exact end of the range
         cells[x][y] *= max(factor, 0.0)
     total = math.fsum(math.fsum(row) for row in cells)
     return [[value / total for value in row] for row in cells]
@@ -96,7 +122,9 @@ def over_prob(matrix: Matrix, line: float) -> float:
 
 
 def _fit_values(lam_home: float, lam_away: float, rho: float, max_goals: int) -> Tuple[float, float, float, float]:
-    matrix = grid(lam_home, lam_away, rho, max_goals)
+    # The fit tries rates up to 6 goals, where a tuned rho can leave its valid range (-0.25 needs both rates at most
+    # 4): each candidate is priced with rho narrowed into its own range, as ``derive`` narrows it for the final grid
+    matrix = grid(lam_home, lam_away, narrow_rho(rho, lam_home, lam_away), max_goals)
     home, draw, away = outcome_probs(matrix)
     return home, draw, away, over_prob(matrix, 2.5)
 
@@ -125,10 +153,12 @@ def rates_from_odds(p_home: float, p_draw: float, p_away: float, p_over_2_5: flo
 
     The 1X2 chances are rescaled to sum to 1 first (so a price set with its margin still works). Least
     squares over the four chances, by Levenberg-Marquardt on the log rates from a coarse start; rates are kept
-    between 0.05 and 6 goals. ``rho=0`` gives the plain independent-Poisson inversion.
+    between 0.05 and 6 goals. ``rho=0`` gives the plain independent-Poisson inversion. ``rho`` must be between -1
+    and 1; each candidate pair of rates is priced with it narrowed into that pair's ``rho_bounds``.
     """
     h, d, a = (_check_chance(p_home, "p_home"), _check_chance(p_draw, "p_draw"), _check_chance(p_away, "p_away"))
     over = _check_chance(p_over_2_5, "p_over_2_5")
+    _check_rho(rho)
     total = h + d + a
     target = (h / total, d / total, a / total, over)
 
@@ -246,12 +276,15 @@ def derive(p_home: float, p_draw: float, p_away: float, p_over_2_5: float, rho: 
     """Rates, the fit against the inputs (model minus input, in points) and every derived market.
 
     ``rho`` and ``nudge`` default to DC_RHO and BTTS_NUDGE; the learning loop (learn/registry.py) passes its tuned
-    values."""
+    values. When the fitted rates put ``rho`` outside its valid range (``rho_bounds``: a tuned -0.25 with a rate
+    above 4) the grid uses the nearest end of that range instead; the result's "rho" is then the value used, with
+    "rho_clamped": True and "rho_requested" the value asked for (both keys absent when nothing was narrowed)."""
     nudge = float(nudge)
     if not math.isfinite(nudge) or abs(nudge) > 0.2:
         raise ValueError(f"nudge must be a small chance, got {nudge!r}")
     lam_home, lam_away = rates_from_odds(p_home, p_draw, p_away, p_over_2_5, rho, max_goals)
-    matrix = grid(lam_home, lam_away, rho, max_goals)
+    used = narrow_rho(rho, lam_home, lam_away)
+    matrix = grid(lam_home, lam_away, used, max_goals)
     derived = markets(matrix, nudge)
     total = p_home + p_draw + p_away
     fitted = (*outcome_probs(matrix), over_prob(matrix, 2.5))
@@ -259,8 +292,11 @@ def derive(p_home: float, p_draw: float, p_away: float, p_over_2_5: float, rho: 
     fit = {name: round((model - given) * 100, 3)
            for name, model, given in zip(("home", "draw", "away", "over_2_5"), fitted, inputs)}
     worst = max(abs(v) for v in fit.values())
-    return {"rates": {"home": lam_home, "away": lam_away}, "rho": rho, "btts_nudge": nudge, "fit": fit,
-            "max_error_pp": worst, "fit_ok": worst <= FIT_OK_PP, "markets": derived}
+    out = {"rates": {"home": lam_home, "away": lam_away}, "rho": used, "btts_nudge": nudge, "fit": fit,
+           "max_error_pp": worst, "fit_ok": worst <= FIT_OK_PP, "markets": derived}
+    if used != rho:
+        out.update({"rho_clamped": True, "rho_requested": rho})
+    return out
 
 
 def fair_odds(chance: float, push: float = 0.0) -> Optional[float]:

@@ -16,6 +16,13 @@
 // price, the model ("Recent form" for the form model), "View player" (and "Add to slip" only where the row allows
 // it). "Also close" is collapsed; a board still loading says "8 of 10 games loaded" with a Refresh chip that runs
 // the scan again (ask.js: GET /api/players/scan, no AI allowance) and redraws the card in place.
+// P0: the first five rows, then the rest that qualify under "Also:" and "N more qualify: open the Player finder" (as
+// the chat's answer says them); a yes/no stat shows only its chance; rows ranked by edge (posted lines, "best edges"
+// across every stat, each row with its own stat) show the edge beside the chance; hot and cold carry the trend chip
+// ("L5 28.4 vs 24.1 season", or "… last season"); a name filter says whether each player qualifies and has a note for
+// each name it couldn't rank (ambiguous_names, started_names, missing_names); and the board's state is said (games
+// still missing data, games already started, ESPN's scoreboard down). The card's own ``sort`` and ``names`` (when the
+// server sends them) keep Refresh and "Open in Player finder" on the same scan.
 
 import { esc, pct, chanceText, money, signedMoney, priceText, shortName, timeLabel, ago, badge, injuryBadge, notice, explain } from "../../ui.js";
 import { slip } from "../../app.js";
@@ -24,7 +31,8 @@ import { pastedCardHtml } from "./pasted.js";
 import { optionOf, fitParts, relaxedText } from "../build/builder/fit.js";
 import { unitsFor } from "../context/units.js";
 import {
-  rowItemHtml, rowLeg, loadingText, ensureScanStyles, finderHash, scanLeague, askText, whenText,
+  rowItemHtml, rowLeg, ensureScanStyles, finderHash, scanLeague, statOf, askText, whenText, rowListsHtml, alsoLabel, moreText,
+  nameNotes, boardNotes, allStarted, notesHtml, statusText, cleanNames, TOP, TREND_SORTS, EDGES,
 } from "../players/scan.js";
 
 // --- tickets: legs and bodies -------------------------------------------------------------------------
@@ -451,26 +459,48 @@ export function playerCardHtml(card) {
 
 // --- the player scan (players_scan) -------------------------------------------------------------------------
 
-/** The card's ask for GET /api/players/scan and the Player finder: {league, stat, threshold, side, day, n}. */
+/** The names a card's scan was filtered by (the server's ``names``, or the tool's ``player``); [] for a ranked scan. */
+export function cardNames(card) {
+  if (Array.isArray(card?.names) || typeof card?.names === "string") return cleanNames(card.names);
+  return typeof card?.player === "string" && card.player.trim() ? cleanNames([card.player]) : [];
+}
+
+/**
+ * The card's ask for GET /api/players/scan and the Player finder: {league, stat, threshold, side, day, n, sort, names,
+ * edgeSide} (``sort`` "hot" or "cold" as the card was ranked, "edges" for a best-edges card, else ""). A best-edges
+ * card keeps its players' names ("best props for Luka": his lines only) and the side it was asked for (``edgeSide``:
+ * "any good overs" is the overs only; "" is both), so Refresh runs the same scan.
+ */
 export function scanAsk(card) {
   const league = (card?.leagues || [])[0] || (card?.players || [])[0]?.league || null;
   const threshold = card?.threshold == null || card?.threshold === "" ? null : Number(card.threshold);
+  const edges = card?.mode === "edges";
   return {
-    league, stat: card?.stat || "pts", threshold: Number.isFinite(threshold) ? threshold : null,
+    league, stat: card?.stat || "pts", threshold: !edges && Number.isFinite(threshold) ? threshold : null,
     side: card?.side === "under" ? "under" : "over", day: card?.day === "tomorrow" ? "tomorrow" : "today",
     n: Math.max(10, (card?.players || []).length),
+    sort: edges ? EDGES : TREND_SORTS.includes(card?.sort) ? card.sort : "",
+    names: cardNames(card),
+    edgeSide: edges && (card?.side === "over" || card?.side === "under") ? card.side : "",
   };
 }
 
-/** A fresh GET /api/players/scan result laid over the card (its title and source stay). */
+// What a fresh scan replaces on the card, and what it takes away when it no longer says it
+const SCAN_KEYS = ["ask", "stat", "stat_label", "threshold", "side", "day", "leagues", "players", "close", "as_of",
+  "leagues_without_games", "note", "mode", "more", "games", "games_started", "error", "missing_names", "ambiguous_names",
+  "started_names"];
+const SCAN_GONE = ["loading", "leagues_without_games", "error", "missing_names", "ambiguous_names", "started_names"];
+
+/** A fresh GET /api/players/scan result laid over the card (its title, source, sort and names stay). */
 export function refreshedScan(card, fresh) {
   const out = { ...card };
-  for (const key of ["ask", "stat", "stat_label", "threshold", "side", "day", "leagues", "players", "close", "as_of", "leagues_without_games", "note"]) {
+  for (const key of SCAN_KEYS) {
     if (fresh?.[key] !== undefined) out[key] = fresh[key];
   }
   if (fresh?.loading) out.loading = fresh.loading;
-  else delete out.loading;
-  if (!fresh?.leagues_without_games) delete out.leagues_without_games;
+  for (const key of SCAN_GONE) {
+    if (!fresh?.[key]) delete out[key];
+  }
   return out;
 }
 
@@ -491,36 +521,72 @@ export function scanRowAt(card, i) {
 }
 
 function scanLoadingHtml(card, key, refreshing) {
-  const words = loadingText(card.loading);
+  const words = statusText(card);
   if (!words) return "";
   return `<p class="ps-loading" role="status">${icon("clock", { size: 14 })}<span>${esc(words)}</span>
     <button type="button" class="chip" data-scan-refresh="${esc(key)}"${refreshing ? " disabled aria-busy=\"true\"" : ""}>${icon("refresh", { size: 16 })}${refreshing ? "Refreshing…" : "Refresh"}</button></p>`;
 }
 
-/** Players ranked for a stat and a number: the strongest first, "Also close" collapsed, a loading line with Refresh. */
+/** The line under the card's title: how the rows are ranked and what each one shows. */
+function scanSubtitle(view) {
+  if (view.edges) return "Every stat's posted lines, biggest edge first: the edge, chance, hits and the line";
+  if (view.trend) return `${view.trend === "hot" ? "Hottest" : "Coldest"} first: the last 5 games' average against the season's`;
+  if (view.names) return "Your players: whether each qualifies, the chance, hits and the posted line";
+  if (view.posted) return "Biggest edge first: the edge, chance, hits and each player's posted line";
+  return view.yesNo ? "Strongest first: chance, hits and the posted line" : "Strongest first: projection, chance, hits and the posted line";
+}
+
+/**
+ * Players ranked for a stat and a number: the strongest five first, the rest that qualify under "Also:", how many
+ * more qualify (the result's ``more``: open the Player finder for them), "Also close" collapsed, a loading line with
+ * Refresh, and the notes: each name it couldn't rank (not found, more than one match, game already started), games
+ * already started and ESPN's scoreboard down, worded as the chat's answer and the bot word them.
+ */
 export function scanCardHtml(card, key, { stale = "", refreshing = false } = {}) {
   ensureScanStyles();
   const side = card.side === "under" ? "under" : "over";
   const players = (card.players || []).filter((row) => row && typeof row === "object");
   const close = (card.close || []).filter((row) => row && typeof row === "object");
   const where = (card.leagues || []).map((l) => scanLeague(l)?.title || String(l).split("_").pop().toUpperCase()).join(" + ");
-  const title = card.title || `Projected for ${askText(card)} · ${whenText(card)}`;
   const ask = scanAsk(card);
+  const edges = ask.sort === EDGES;
+  const when = whenText(card);
+  const title = card.title || (edges ? `Best edges (all stats) · ${when}` : `Projected for ${askText(card)} · ${when}`);
   const without = (card.leagues_without_games || []).filter(Boolean);
-  const item = (row, i) => rowItemHtml({ league: ask.league, ...row }, i, { side, addButton: (r, n) => scanAddButton(r, key, n) });
+  const trend = TREND_SORTS.includes(ask.sort) ? ask.sort : "";
+  const view = {
+    // each player's posted line ranks by edge (hot and cold rank by the trend, whatever the number)
+    edges, posted: !edges && !trend && ask.threshold == null, trend,
+    names: ask.names.length > 0, league: ask.league, yesNo: !edges && Boolean(statOf(ask.league, ask.stat)?.yes),
+  };
+  const item = (row, i) => rowItemHtml({ league: ask.league, ...row }, i, { side, addButton: (r, n) => scanAddButton(r, key, n), view });
+  const names = nameNotes(card, when);
+  // No games today in the league asked: the scan moved to tomorrow's (or found none tomorrow either)
+  const moved = (Array.isArray(card.no_games_today) ? card.no_games_today : []).filter(Boolean).map(String);
+  const notes = [...(moved.length ? [{ kind: "info", text: `No games today in ${moved.join(", ")}, so these are tomorrow's.` }] : []),
+    ...names, ...boardNotes(card, { when })];
+  // The card's own more: how many beyond the rows the result returned, as the chat's answer and the bot say it
+  const more = moreText(card, { sort: ask.sort });
+  // An empty card's notes may say why already (ESPN down, every game started, the names it couldn't rank)
+  const explained = Boolean(card.error) || allStarted(card) || (view.names && names.length > 0);
+  const empty = close.length ? "Nobody is projected to get there yet: the closest are below."
+    : explained ? "" : edges ? "No posted line has an edge right now." : trend ? "No hot or cold reads yet." : "No player qualifies yet.";
   return `<article class="card ask-card ask-scan" data-card-key="${esc(key)}" aria-label="${esc(title)}">
     <header class="ask-card-head"><div class="grow"><span class="eyebrow">Player scan${where ? ` · ${esc(where)}` : ""}</span>
       <h3>${esc(title)}</h3>
-      <span class="muted small">Strongest first: projection, chance, hits and the posted line</span></div></header>
+      <span class="muted small">${esc(scanSubtitle(view))}</span></div></header>
     ${scanLoadingHtml(card, key, refreshing)}
-    ${without.length ? `<p class="ps-note">No games ${esc(whenText(card))} in ${esc(without.join(", "))}.</p>` : ""}
-    ${players.length ? `<ol class="ps-list" aria-label="${esc(`Players for ${askText(card)}`)}">${players.map(item).join("")}</ol>`
-      : `<p class="small">${close.length ? "Nobody is projected to get there yet: the closest are below." : "No player qualifies yet."}</p>`}
+    ${without.length ? `<p class="ps-note">No games ${esc(when)} in ${esc(without.join(", "))}${card.checked_tomorrow ? " (or tomorrow)" : ""}.</p>` : ""}
+    ${notesHtml(notes)}
+    ${players.length ? rowListsHtml(players, item, { label: `Players for ${askText(card)}`, also: alsoLabel(players.length - TOP, { sort: ask.sort, edges }), split: !view.names })
+      : empty ? `<p class="small">${esc(empty)}</p>` : ""}
     ${close.length ? `<details class="ps-close"${players.length ? "" : " open"}><summary>${icon("chevron", { size: 16 })}Also close (${close.length})</summary>
       <ol class="ps-list" aria-label="Also close">${close.map((row, i) => item(row, players.length + i)).join("")}</ol></details>` : ""}
     ${stale ? `<p class="ask-stale">${icon("clock", { size: 14 })}${esc(stale)}</p>` : ""}
-    <p class="ps-note">${esc(card.slip_note || "Player props are for reading here; the slip takes game picks.")} L5, L10 and Season count the games at the number.${
+    <p class="ps-note">${esc(card.slip_note || "Player props are for reading here; the slip takes game picks.")} L5, L10 and Season count the games at ${edges ? "each line" : "the number"}.${
+      view.trend ? " L5 against season is the stat's average over this season's last 5 games against the rest of the season (or against last season's, early in a season)." : ""}${
       [...players, ...close].some((r) => r.model === "form") ? " \"Recent form\" rows are projected from the game log." : ""} Lines: DraftKings via ESPN.</p>
+    ${more ? `<p class="ps-note ps-more">${esc(more)}</p>` : ""}
     ${ask.league && scanLeague(ask.league) ? `<div class="ask-card-actions"><a class="btn btn-secondary small" href="${esc(finderHash(ask))}">${icon("search", { size: 16 })}Open in Player finder</a></div>` : ""}
   </article>`;
 }

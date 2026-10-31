@@ -59,7 +59,9 @@ across the Telegram Mini App, the bot and a browser ("tg:<id>" or "web:<id>"):
   /api/players/scan, the AI's players_scan and the bot rank today's or
   tomorrow's players for a stat and a number ("20+ points": the history in
   the last 5, the last 10 and the season, the projection, the chance and the
-  posted line) through Lab.player_scan, behind the player pages' gates. It
+  posted line) through Lab.player_scan, behind the player pages' gates; it
+  also takes named players, an order (hot and cold: the last 5 games against
+  the season) and, with no stat, every stat's posted lines by edge. It
   reads ESPN through the shared cache only and never spends Odds API quota;
   a row is for reading (the slip takes game picks).
 
@@ -182,11 +184,16 @@ WINDOW_STEP = 300  # window edges are widened to 5 minutes, so people asking in 
 SCAN_DAYS = ("today", "tomorrow")
 SCAN_N = 10
 MAX_SCAN_N = 25
+SCAN_SORTS = ("chance", "projection", "l10", "edge", "hot", "cold")  # engine/scan.py's SORTS
+SCAN_NAMES = 5  # player names one scan takes ...
+SCAN_NAME_CHARS = 60  # ... each at most this long
+EDGE_ASKS = {"": "posted lines by edge", "over": "overs by edge", "under": "unders by edge"}  # edges mode's ask
 MAX_SCAN_THRESHOLD = 999  # engine/scan.py's threshold_for takes numbers under 1000
 # A scan without a league looks at the leagues whose tables name the stat (Lab._scan_candidates, in engine/scan.py's
 # league order: the NBA first for points, the NFL for yards and TDs, the NHL for shots and goals) and scans the first
-# with games that day
-MAX_SCAN_CHECKS = 3  # leagues a scan without one looks at for games before it says none has any
+# with games that day; the modes without a stat (edges mode, hot and cold) look at every league but soccer, those with
+# games that day first (Lab._stat_less_leagues), with no cap
+MAX_SCAN_CHECKS = 3  # leagues a scan with a stat and no league looks at for games before it says none has any
 YES_STATS = ("anytime_td", "anytime_goal", "dd", "td")  # asks that are a yes or no ("anytime TD", "double-double")
 SCAN_TITLES = {"basketball_nba": "NBA", "basketball_wnba": "WNBA", "americanfootball_nfl": "NFL", "icehockey_nhl": "NHL",
                "baseball_mlb": "MLB", "soccer_epl": "EPL", "soccer_spain_la_liga": "La Liga",
@@ -2425,8 +2432,9 @@ class Lab(Gates):
 
     # --- the player scan -----------------------------------------------------------------------------
 
-    def player_scan(self, uid: str, league: Optional[str] = None, stat: str = "pts", threshold: Any = None,
-                    side: str = "over", day: str = "today", n: int = SCAN_N) -> Dict[str, Any]:
+    def player_scan(self, uid: str, league: Optional[str] = None, stat: Optional[str] = "pts", threshold: Any = None,
+                    side: Optional[str] = None, day: str = "today", n: int = SCAN_N, *,
+                    names: Optional[Sequence[str]] = None, sort: Optional[str] = None) -> Dict[str, Any]:
         """Today's (or tomorrow's) players ranked for a stat and a number: engine/scan.py over the player board
         (data/player_board.py: ESPN game logs, the NBA model's projections, injuries and ESPN's DraftKings props, all
         through the shared cache; no Odds API quota). ``stat`` is a key of the engine's STATS or a phrase its aliases
@@ -2436,59 +2444,95 @@ class Lab(Gates):
         looked at in order and the first with games that day is scanned. Behind the same gates as the player pages
         (age confirmed, not on a break).
 
-        Returns {ask ("20+ points"), stat, stat_label, threshold, side, day, leagues, players: [row], close: [row],
-        more, games, loading?: {games_ready, games_total}, as_of, leagues_without_games?}; each row is the engine's
-        ({rank, athlete_id, name, team, opponent, home, game, event_id, start, status, status_tag, minutes?,
-        threshold, projection, chance, chance_source, model, model_label, hits, avg, line?, edge?, why}) with its
-        league and ``addable`` (False: the slip takes game picks). A partial board answers at once with what's ready
-        and ``loading``. Raises CallRejected for a stat, league, side, day or number the scan can't take, and while
-        picks are paused after a warning sign (like the Builder)."""
+        ``names`` (up to SCAN_NAMES player names, each at most SCAN_NAME_CHARS): only those players, qualifying or not
+        (``qualifies``; ruled-out ones too, ``ruled_out``), and each name the scan couldn't rank in one list:
+        ``missing_names`` (no player of the day's games), ``ambiguous_names`` [{name, candidates}] (more than one
+        player), ``started_names`` [{name, player, game}] (his game has started); without a league, the first league
+        with games where a name is found (else one that knows a name, else the first with games). ``sort``
+        (engine.SORTS): "chance", "projection", "l10", "edge", "hot" or "cold" (this season's last 5 games against a
+        baseline: every player with a ``trend``). No stat with sort "edge" is edges mode: engine.scan_edges, the posted
+        lines with the best edge over every stat of the league (the named one, else the first with games of every
+        league but soccer, those with games that day first), ``side`` "over" or "under" only that side, left out
+        (None) both; no stat with hot or cold reads one league (the named one, else the first with games, in the same
+        order) on its default stat (engine.default_stat: points for the NBA). Everywhere else a side left out is
+        "over".
+
+        Returns {mode ("scan" | "edges"), ask ("20+ points"), stat, stat_label, threshold, side, day, leagues,
+        players: [row], close: [row], more, games, games_started, no_games, as_of, sort, names, loading?:
+        {games_ready, games_total, failed?}, error?, missing_names?, ambiguous_names?, started_names?,
+        leagues_without_games?}; each row is the engine's ({rank, athlete_id, name, team, opponent, home, game,
+        event_id, start, status, status_tag, minutes?, threshold, projection, chance, chance_source, model,
+        model_label, hits, avg, kind, trend? {l5, season, diff, vs}, line?, edge?, why}, an edges row also stat,
+        stat_label and side) with its league and ``addable`` (False: the slip takes game
+        picks). ``loading`` is there while the board builds (games_ready below games_total) or while a game is missing
+        a part that failed (``failed`` games, reported once every game has loaded too). ``no_games`` is true only for
+        a day with no game at all: none to come, none started, no error (``games_started`` and ``error`` say why a day
+        with games has nothing left to scan). A partial board answers at once with what's ready. Raises CallRejected
+        for a stat, league, side, day, sort, name or number the scan can't take, and while picks are paused after a
+        warning sign (like the Builder)."""
         self.ready(uid, picks=True)
         day = str(day or "today").strip().lower()
         day = "today" if day == "tonight" else day
         if day not in SCAN_DAYS:
             raise CallRejected("The player scan covers today and tomorrow.")
-        side = str(side or "over").strip().lower()
-        if side not in ("over", "under"):
-            raise CallRejected("Side must be over or under.")
+        if side is not None:
+            side = str(side).strip().lower() or None  # "" is no side: "over", or both sides in edges mode
+            if side is not None and side not in ("over", "under"):
+                raise CallRejected("Side must be over or under.")
         reach = self._scan_threshold(threshold)
         try:
             n = max(1, min(int(n or SCAN_N), MAX_SCAN_N))
         except (TypeError, ValueError):
             raise CallRejected(f"n must be 1 to {MAX_SCAN_N}.") from None
+        sort = self._scan_sort(sort)
+        asked_names = self._scan_names(names)
         try:
             engine = _engine_scan()
         except ImportError:  # a server running without the scan's engine
             raise CallRejected("The player scan isn't available on this server yet.") from None
+        if league and (not LEAGUE_KEY.fullmatch(str(league)) or league not in engine.STATS):
+            raise CallRejected("The player scan covers the NBA, WNBA, NFL, NHL, MLB and soccer.")
         phrase = " ".join(str(stat or "").split())[:40]
-        if not phrase:
-            raise CallRejected("Say which stat to scan (points, rebounds, threes, ...).")
-        if league:
-            if not LEAGUE_KEY.fullmatch(str(league)) or league not in engine.STATS:
-                raise CallRejected("The player scan covers the NBA, WNBA, NFL, NHL, MLB and soccer.")
-            key = engine.resolve_stat(league, phrase)
-            if key is None:
-                raise CallRejected(f"The scan doesn't know {phrase!r} for {_scan_title(engine, league)}.")
-            candidates = [(league, key)]
+        if not phrase and sort == "edge":
+            return self._edges_scan(engine, league, side, day, n, asked_names)
+        side = side or "over"
+        if phrase:
+            candidates = self._scan_stat(engine, league, phrase)[:MAX_SCAN_CHECKS]
+        elif sort in ("hot", "cold"):
+            # "who's hot": one league, the first with games (every non-soccer league, those with games that day
+            # first), read on its own default stat (points for the NBA): never two stats in one ranking
+            leagues = [league] if league else self._stat_less_leagues(engine, day)
+            candidates = [(key, engine.default_stat(key)) for key in leagues]
         else:
-            candidates = self._scan_candidates(engine, phrase)
-            if not candidates:
-                raise CallRejected(f"The scan doesn't know {phrase!r}: try points, rebounds, assists, threes, PRA, "
-                                   "passing yards, anytime TD, shots on goal or strikeouts.")
+            raise CallRejected("Say which stat to scan (points, rebounds, threes, ...).")
         without: List[str] = []
         chosen: Optional[Tuple[str, str, Dict[str, Any]]] = None
+        resolved: Optional[Tuple[str, str, Dict[str, Any]]] = None
+        first: Optional[Tuple[str, str, Dict[str, Any]]] = None
         board = self.player_board
-        for name, key in candidates[:MAX_SCAN_CHECKS]:
+        for name, key in candidates:
             try:
-                out = board.scan(name, key, reach, side, day, n)
+                if asked_names is None and sort is None:
+                    out = board.scan(name, key, reach, side, day, n)
+                else:
+                    out = board.scan(name, key, reach, side, day, n, names=asked_names, sort=sort)
             except ValueError as exc:  # an ask the engine can't make (make_ask's reason)
                 raise CallRejected(str(exc)) from None
             out = dict(out) if isinstance(out, Mapping) else {}
             if self._no_games(out):
                 without.append(name)
                 continue
+            if asked_names is not None and not out.get("players"):
+                # Nobody named plays here: the next league with games may have them. A league that knows a name (in
+                # a game under way, or as more than one player) is kept over one where every name is missing
+                if out.get("started_names") or out.get("ambiguous_names"):
+                    resolved = resolved or (name, key, out)
+                else:
+                    first = first or (name, key, out)
+                continue
             chosen = (name, key, out)
             break
+        chosen = chosen or resolved or first
         name, key, out = chosen or (candidates[0][0], candidates[0][1], {})
         spec = engine.STATS[name][key]
         asked = out.get("ask") if isinstance(out.get("ask"), Mapping) else {}
@@ -2498,20 +2542,160 @@ class Lab(Gates):
             except ValueError as exc:
                 raise CallRejected(str(exc)) from None
         view: Dict[str, Any] = {
+            "mode": out.get("mode") or "scan",
             "ask": asked.get("label") or scan_words(spec.get("label") or key, key, reach, side),
             "stat": key, "stat_label": spec.get("label") or key, "threshold": asked.get("threshold", reach),
             "side": asked.get("side") or side, "day": day, "leagues": [name] if chosen else [],
             "players": [self._scan_row(row, name) for row in out.get("players") or [] if isinstance(row, Mapping)],
             "close": [self._scan_row(row, name) for row in out.get("close") or [] if isinstance(row, Mapping)],
-            "more": int(out.get("more") or 0), "games": int(out.get("games") or 0),
-            "as_of": out.get("as_of") or _iso_z(self._now()),
         }
+        self._scan_facts(view, out, without, engine, sort, asked_names, chosen is not None)
+        if asked_names is not None:
+            self._scan_name_lists(view, out, asked_names)
+        return view
+
+    @staticmethod
+    def _scan_name_lists(view: Dict[str, Any], out: Mapping[str, Any], names: Sequence[str]) -> None:
+        """The names a scan couldn't rank, each in one list (engine.sort_names): ``missing_names`` (no league's board
+        has him: every name, when no league was scanned), ``ambiguous_names`` [{name, candidates}] and
+        ``started_names`` [{name, player, game}]."""
+        view["missing_names"] = list(out.get("missing_names") if "missing_names" in out else names)
+        view["ambiguous_names"] = [dict(item) for item in out.get("ambiguous_names") or [] if isinstance(item, Mapping)]
+        view["started_names"] = [dict(item) for item in out.get("started_names") or [] if isinstance(item, Mapping)]
+
+    def _stat_less_leagues(self, engine: Any, day: str) -> List[str]:
+        """The leagues the modes without a stat (edges mode, hot and cold) try, in order: every league but soccer
+        (engine.LEAGUE_ORDER), those known to have games that day first, then those not known yet, then those known
+        to have none. What is known costs nothing: the player board's boards already built (PlayerBoard.games_on),
+        else the slate's scoreboards held in memory (never fetched here)."""
+        leagues = [key for key in engine.LEAGUE_ORDER if not key.startswith("soccer_")]
+        board = self.player_board
+        games_on = getattr(board, "games_on", None)
+        slate = getattr(self.service, "slate", None)
+        held = getattr(slate, "scoreboards", None)
+        try:
+            date = board.day_of(day) if callable(getattr(board, "day_of", None)) else None
+        except Exception:
+            date = None
+
+        def rank(key: str) -> int:
+            count = None
+            try:
+                if callable(games_on):
+                    count = games_on(key, day)
+                if count is None and callable(held) and date is not None:
+                    found = held(key, [date])
+                    count = len(found[date] or []) if date in found else None
+            except Exception:
+                count = None
+            return 1 if count is None else 0 if count > 0 else 2
+
+        return sorted(leagues, key=rank)  # stable: engine.LEAGUE_ORDER within each group
+
+    def _edges_scan(self, engine: Any, league: Optional[str], side: Optional[str], day: str, n: int,
+                    names: Optional[List[str]] = None) -> Dict[str, Any]:
+        """player_scan's edges mode (no stat, sort "edge"): engine.scan_edges over the named league's board, else the
+        first league with games (every league but soccer, those with games that day first: _stat_less_leagues); with
+        ``names``, only those players' lines, from the first league with games that knows one of the names."""
+        leagues = [league] if league else self._stat_less_leagues(engine, day)
+        without: List[str] = []
+        chosen: Optional[Tuple[str, Dict[str, Any]]] = None
+        first: Optional[Tuple[str, Dict[str, Any]]] = None
+        board = self.player_board
+        for name in leagues:
+            try:
+                if names is None:  # keywords: any argument order
+                    out = board.scan_edges(name, side=side, day=day, n=n)
+                else:
+                    out = board.scan_edges(name, side=side, day=day, n=n, names=names)
+            except ValueError as exc:
+                raise CallRejected(str(exc)) from None
+            out = dict(out) if isinstance(out, Mapping) else {}
+            if self._no_games(out):
+                without.append(name)
+                continue
+            if names is not None and len(out.get("missing_names") or []) == len(names):
+                first = first or (name, out)  # none of them plays here: the next league with games may have them
+                continue
+            chosen = (name, out)
+            break
+        name, out = chosen or first or (leagues[0], {})
+        chosen = chosen or first
+        view: Dict[str, Any] = {
+            "mode": "edges", "ask": EDGE_ASKS.get(side or "", EDGE_ASKS[""]), "stat": None, "stat_label": None,
+            "threshold": None, "side": side, "day": day, "leagues": [name] if chosen else [],
+            "players": [self._scan_row(row, name) for row in out.get("players") or [] if isinstance(row, Mapping)],
+            "close": [],
+        }
+        self._scan_facts(view, out, without, engine, "edge", names, chosen is not None)
+        if names is not None:
+            self._scan_name_lists(view, out, names)
+        return view
+
+    def _scan_facts(self, view: Dict[str, Any], out: Mapping[str, Any], without: Sequence[str], engine: Any,
+                    sort: Optional[str], names: Optional[Sequence[str]], chosen: bool) -> None:
+        """The counts, state and words every scan view carries: more, games, games_started, no_games, as_of, sort,
+        names, loading?, error?, leagues_without_games?."""
+        view.update({
+            "more": int(out.get("more") or 0), "games": int(out.get("games") or 0),
+            "games_started": int(out.get("games_started") or 0),
+            "no_games": bool(self._no_games(out)) if chosen else bool(without),
+            "as_of": out.get("as_of") or _iso_z(self._now()), "sort": sort, "names": list(names or []),
+        })
         loading = out.get("loading")
         if isinstance(loading, Mapping):
             view["loading"] = {"games_ready": loading.get("games_ready"), "games_total": loading.get("games_total")}
+            if loading.get("failed"):
+                view["loading"]["failed"] = int(loading["failed"])
+        if out.get("error"):
+            view["error"] = str(out["error"])
         if without:
             view["leagues_without_games"] = [_scan_title(engine, league_key) for league_key in without]
-        return view
+
+    def _scan_stat(self, engine: Any, league: Optional[str], phrase: str) -> List[Tuple[str, str]]:
+        """[(league, stat key)] to scan for a stat phrase: the named league's key, else _scan_candidates."""
+        if league:
+            key = engine.resolve_stat(league, phrase)
+            if key is None:
+                raise CallRejected(f"The scan doesn't know {phrase!r} for {_scan_title(engine, league)}.")
+            return [(league, key)]
+        candidates = self._scan_candidates(engine, phrase)
+        if not candidates:
+            raise CallRejected(f"The scan doesn't know {phrase!r}: try points, rebounds, assists, threes, PRA, "
+                               "passing yards, anytime TD, shots on goal or strikeouts.")
+        return candidates
+
+    @staticmethod
+    def _scan_sort(sort: Any) -> Optional[str]:
+        """The scan's order (engine.SORTS), or None for the ask's own."""
+        if sort is None or sort == "":
+            return None
+        value = str(sort).strip().lower()
+        if value not in SCAN_SORTS:
+            raise CallRejected(f"Sort must be one of {', '.join(SCAN_SORTS)}.")
+        return value
+
+    @staticmethod
+    def _scan_names(names: Any) -> Optional[List[str]]:
+        """The players a scan is asked about (a name, or a list of up to SCAN_NAMES), each at most SCAN_NAME_CHARS;
+        None for none."""
+        if names is None:
+            return None
+        listed = [names] if isinstance(names, str) else list(names) if isinstance(names, (list, tuple)) else None
+        if listed is None:
+            raise CallRejected("Players are a name or a list of names.")
+        cleaned = []
+        for name in listed:
+            text = " ".join(str(name or "").split())
+            if not text:
+                continue
+            if len(text) > SCAN_NAME_CHARS:
+                raise CallRejected(f"A player's name is at most {SCAN_NAME_CHARS} characters.")
+            if text not in cleaned:
+                cleaned.append(text)
+        if len(cleaned) > SCAN_NAMES:
+            raise CallRejected(f"A scan looks at up to {SCAN_NAMES} players at once.")
+        return cleaned or None
 
     @staticmethod
     def _scan_threshold(threshold: Any) -> Optional[int]:
@@ -2538,11 +2722,14 @@ class Lab(Gates):
 
     @staticmethod
     def _no_games(out: Mapping[str, Any]) -> bool:
-        """Whether a league's scan found no games that day: the board's own word (``no_games``), else none to load
-        and no rows. A board still reading the day's games is not "no games"."""
+        """Whether a league's scan found no games that day: the board's own word (``no_games``: only when nothing is
+        to come, nothing has started and the scoreboard was read), else none to load and no rows. A board still
+        reading the day's games is not "no games"; nor is a day whose games have all started, or whose scoreboard
+        ESPN couldn't give (``error``)."""
         if "no_games" in out:
             return bool(out["no_games"])
-        if out.get("players") or out.get("close") or out.get("loading"):
+        if out.get("players") or out.get("close") or out.get("loading") or out.get("games_started") \
+                or out.get("error"):
             return False
         return out.get("games") == 0
 

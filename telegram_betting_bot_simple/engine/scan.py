@@ -9,16 +9,23 @@ For one league and one day's games (the board, data/player_board.py), every play
 - **Chance:** the chance of reaching the number. For the NBA it is ``calls.stat_probabilities`` on the model's
   mean, exactly as the player card works it out, so the two never disagree on the same line.
 - **Posted line:** DraftKings' line and price for the stat (through ESPN, never The Odds API), with the edge
-  when the price is for the number asked (a "20+" milestone, or an over at 19.5).
+  when the price is for the number asked (a "20+" milestone, or an over at 19.5) and the line isn't stale. An
+  under matches only an over/under line (a milestone is an over's bet).
 
-Players are ranked by that chance (then the projection), strongest first.
+Players are ranked by that chance (then the projection), strongest first; ``sort`` asks for another order
+(projection, last-10 hit rate, edge, or "hot" and "cold": this season's last 5 games against a baseline, ``trend``).
+A scan can be for named players only (``names``: each name it can't rank is missing, ambiguous or in a game already
+under way, sort_names), and scan_edges ranks every stat's posted lines by edge.
 
 The form model (every league without the NBA model, and NBA players the model has no projection for): a
 recency-weighted mean of the last 10 games (exponential weights, half-life 5 games), shrunk toward this
-season's per-game average by games played (k = 5). Counts (points, rebounds, shots, strikeouts) use a negative
-binomial whose dispersion is fitted from the log's own variance, never below a Poisson; yards use a normal with
-the log's spread, at least 15% of the mean and 10 yards; "anytime" asks are 1 - P(0) of the count. Every row
-says which model it came from (``model``: "nba" or "form"); the form model is labelled "from recent form".
+season's per-game average by games played (k = min(5, this season's games)). Counts (points, rebounds, shots,
+strikeouts) use a negative binomial whose dispersion is fitted from the log's own variance, never below a Poisson;
+yards use a normal with the log's spread, at least 15% of the mean and 10 yards; "anytime" asks are 1 - P(0) of the
+count, "2+ TDs" is P(2 or more) of the same count. A double- or triple-double is a yes/no event: the
+recency-weighted share of games that reached it, shrunk toward the season's share the same way (a beta-binomial).
+A yes/no row (``kind`` "yes_no") shows only its chance. Every row says which model it came from (``model``: "nba"
+or "form"); the form model is labelled "from recent form".
 
 Thresholds: an ask is a whole number to reach ("20+" is 20). The line behind it is that number minus a half
 (19.5), so a game counts as a hit at 20 or more; an "under" ask counts the games below the number. "Over 19.5"
@@ -29,14 +36,19 @@ Everything here is pure: numbers in, numbers out. Nothing fetches.
 
 from __future__ import annotations
 
+import datetime
 import math
 import re
+import time
 import unicodedata
 from decimal import Decimal
 from statistics import NormalDist
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+from zoneinfo import ZoneInfo
 
 from ..data.espn_players import hit_rates
+# STAT_DISPERSION is engine/calls.STAT_VARIANCE_RATIO under its old name: per-stat variance ratios
+# (variance / mean) of an NB1 negative binomial (calls.NB_FAMILY), not NB2 sizes like learn/stats.nb_logpmf's
 from .calls import STAT_DISPERSION, _negative_binomial_cdf, stat_probabilities
 from .odds_math import decimal_to_american, format_american
 
@@ -214,6 +226,8 @@ RECENT = 10  # games in the form window
 HALF_LIFE = 5.0  # games: the weight halves every 5 games back
 SHRINK_K = 5.0  # games of this season's average the form mean is shrunk toward
 SPREAD_GAMES = 40  # the newest games the spread is fitted on
+# Every "dispersion" in this module is a variance ratio (variance / mean): the NB1 convention of
+# engine/calls._negative_binomial_cdf, alpha = ratio - 1 (variance = mean x ratio), never an NB2 size
 MAX_DISPERSION = 4.0  # a count's variance is at most this many times its mean (a few odd games can't run away)
 YARDS_SD_SHARE = 0.15  # a yards spread is at least 15% of the mean ...
 YARDS_SD_MIN = 10.0  # ... and at least 10 yards
@@ -223,6 +237,28 @@ YES_BAR = 0.30  # for yes/no asks (anytime TD, anytime goal, double-double) almo
 CLOSE = 5  # rows in "close"
 MAX_ROWS = 25  # the most players a scan returns
 MODEL_LABELS = {"nba": "NBA model", "form": "from recent form"}
+# How a scan's rows can be ordered (scan's ``sort``): None keeps the ask's own order (chance, or edge for a
+# posted-line ask); "hot" and "cold" rank by this season's last 5 games against a baseline (trend.diff)
+SORTS = ("chance", "projection", "l10", "edge", "hot", "cold")
+# A trend (trend(); hot and cold rank only rows with one): this season's last TREND_GAMES logged games against a
+# baseline, this season's other games once it has TREND_BASE, else last season's average when it had TREND_BASE
+TREND_GAMES = 5
+TREND_BASE = 10
+# An edge above +50% is the model's tail (negative binomial or normal) disagreeing with a long price, not an edge: a
+# row with one carries ``edge_suspect`` and no edge number, and never ranks by it
+EDGE_CAP = 0.5
+RUNG_WINDOW = 0.25  # edges mode prices milestone rungs within 25% of the projection (the nearest one either side)
+# The stat a scan with no stat named reads for hot and cold (the Lab's and the tool's default); a league not named here
+# (the soccer leagues) reads the first of its table (goals)
+DEFAULT_STAT = {NBA: "pts", WNBA: "pts", NHL: "points", NFL: "rush_rec_yds", MLB: "tb"}
+# Left off a last name ("Jaren Jackson Jr.") and off a typed name ("Payton II", "Marvin Bagley 3rd")
+NAME_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv", "v", "2nd", "3rd"})
+NAME_CANDIDATES = 5  # an ambiguous name's candidates listed (ambiguous_names), in alphabetical order
+# A typed name ending in a team, as two players with one full name are listed: "Marcus Sutton (MIA)", "... MIA"
+_TEAM_QUALIFIER = re.compile(r"^(.*?)[\s,]*\(?\b([A-Za-z]{2,4})\)?\s*$")
+WEEKDAYS = {"monday": 0, "tuesday": 1, "tues": 1, "wednesday": 2, "weds": 2, "thursday": 3, "thurs": 3,
+            "friday": 4, "saturday": 5, "sunday": 6}
+DAY_TZ = ZoneInfo("America/New_York")  # ESPN's day, when a reading has no zone of its own
 
 
 # --- asks -------------------------------------------------------------------------------------------------
@@ -294,8 +330,10 @@ def threshold_for(value: Any) -> Optional[int]:
 
 def make_ask(league: str, stat: Any, threshold: Any = None, side: str = "over", day: str = "today") -> Dict[str, Any]:
     """A checked ask: {league, stat, threshold, side, day, line, label, yes}. ``stat`` is a key or an alias;
-    ``threshold`` the number to reach (None: each player's own posted line); a yes/no stat (anytime TD, double-double)
-    has its own. Raises ValueError for anything that doesn't make an ask."""
+    ``threshold`` the number to reach (None: each player's own posted line). A double- or triple-double has its own
+    number; so has an anytime ask (1+) with no number or 1, while 2 or more is that count ("2+ TDs", "5+ goals": the
+    negative binomial, never answered as anytime) and an under the games below it ("under 0.5 TDs"). Raises
+    ValueError for anything that doesn't make an ask."""
     if league not in STATS:
         raise ValueError(f"The player scan doesn't cover {league!r}")
     key = resolve_stat(league, stat)
@@ -307,9 +345,20 @@ def make_ask(league: str, stat: Any, threshold: Any = None, side: str = "over", 
         raise ValueError("side is over or under")
     if day not in ("today", "tomorrow"):
         raise ValueError("day is today or tomorrow")
-    number = spec["threshold"] if spec["threshold"] is not None else threshold_for(threshold)
-    if spec["yes"]:
-        side = "over"
+    if spec["threshold"] is None:
+        number = threshold_for(threshold)
+    elif spec["kind"] != "anytime":
+        number, side = spec["threshold"], "over"  # a double- or triple-double: its own number
+    else:
+        number = threshold_for(threshold)
+        if number is None or (number == spec["threshold"] and side == "over"):
+            number, side = spec["threshold"], "over"
+    return _ask(league, key, number, side, day)
+
+
+def _ask(league: str, key: str, number: Optional[int], side: str, day: str = "today") -> Dict[str, Any]:
+    """make_ask's shape for a stat key and a whole number already checked."""
+    spec = STATS[league][key]
     ask = {"league": league, "stat": key, "threshold": number, "side": side, "day": day,
            "line": None if number is None else number - 0.5, "yes": spec["yes"], "unit": spec["unit"]}
     ask["label"] = ask_label(league, key, number, side)
@@ -317,16 +366,35 @@ def make_ask(league: str, stat: Any, threshold: Any = None, side: str = "over", 
 
 
 def ask_label(league: str, stat: str, threshold: Optional[int], side: str = "over") -> str:
-    """How an ask reads: "20+ points", "under 9.5 rebounds", "anytime TD", "double-double", "PRA overs"."""
+    """How an ask reads: "20+ points", "under 9.5 rebounds", "anytime TD", "double-double", "PRA overs", "2+ TDs"."""
     spec = STATS[league][stat]
-    if spec["kind"] == "double" or (spec["kind"] == "anytime" and threshold in (None, 1)):
+    if spec["kind"] == "double" or (spec["kind"] == "anytime" and threshold in (None, 1) and side == "over"):
         return spec["label"]
     name = spec["short"] if spec["short"] != spec["label"] else spec["label"]
+    if spec["kind"] == "anytime":
+        name = spec["per"]  # "2+ TDs", "under 0.5 goals"
     if threshold is None:
         return f"{name} {'unders' if side == 'under' else 'overs'} (posted lines)"
     if side == "under":
         return f"under {threshold - 0.5:g} {name}"
     return f"{threshold}+ {name}"
+
+
+def row_kind(spec: Mapping[str, Any]) -> str:
+    """A row's ``kind``: "yes_no" (anytime TD or goal, double- and triple-doubles: only the chance means something),
+    "yards" or "count"."""
+    if spec["yes"]:
+        return "yes_no"
+    return "yards" if spec["kind"] == "yards" else "count"
+
+
+def default_stat(league: str) -> str:
+    """The stat a scan with none named reads for hot and cold (DEFAULT_STAT: points for the NBA and WNBA, points
+    for the NHL, rushing + receiving yards for the NFL, total bases for MLB; else the first of the league's table,
+    goals in soccer)."""
+    if league not in STATS:
+        raise ValueError(f"The player scan doesn't cover {league!r}")
+    return DEFAULT_STAT.get(league) or next(iter(STATS[league]))
 
 
 _NUMBER = r"(\d{1,3}(?:\.\d+)?)"
@@ -354,15 +422,46 @@ def _from_number(text: str, how: str) -> int:
     return max(1, int(math.ceil(number - 1e-9)))  # "20+", "over 19.5", "fewer than 10", "under 9.5"
 
 
-def parse_ask(text: Any) -> Dict[str, Any]:
+def weekday_named(text: Any) -> Optional[int]:
+    """The weekday a message names (Monday 0 ... Sunday 6: "sunday", "sundays", "thurs"), or None."""
+    for word in _words(_norm(text)).split():
+        found = WEEKDAYS.get(word[:-1] if word.endswith("days") else word)
+        if found is not None:
+            return found
+    return None
+
+
+def day_for_weekday(text: Any, now: Any, tz: Any = None) -> Optional[str]:
+    """"today" or "tomorrow" for a weekday named in ``text`` ("touchdown sunday") that falls on today or tomorrow in
+    ``tz`` (a zone or its name; ESPN's US Eastern day by default) at ``now`` (epoch seconds or a datetime); None when
+    no weekday is named or it is further off."""
+    wanted = weekday_named(text)
+    if wanted is None:
+        return None
+    zone = ZoneInfo(tz) if isinstance(tz, str) else (tz or DAY_TZ)
+    if isinstance(now, datetime.datetime):
+        moment = now.astimezone(zone) if now.tzinfo else now.replace(tzinfo=zone)
+    else:
+        moment = datetime.datetime.fromtimestamp(float(time.time() if now is None else now), zone)
+    ahead = (wanted - moment.weekday()) % 7
+    return {0: "today", 1: "tomorrow"}.get(ahead)
+
+
+def parse_ask(text: Any, *, now: Any = None, tz: Any = None) -> Dict[str, Any]:
     """A deterministic reading of a scan ask, for tests and templates (the router does the real reading):
     {stat, league, leagues, stats, threshold, side, day}. "20+", "at least 20", "over 19.5" and "20 or more" give
-    20 over; "under 9.5 rebounds" gives 10 under; "1+" and "anytime" give 1. ``league`` is the league named (None
-    when none is); ``stats`` maps each league that knows the stat to its key, in LEAGUE_ORDER (or the named league
-    only), and ``stat`` is the first one's key."""
+    20 over; "under 9.5 rebounds" gives 10 under; "1+" and "anytime" give 1; "2+ TDs" gives 2. ``league`` is the
+    league named (None when none is); ``stats`` maps each league that knows the stat to its key, in LEAGUE_ORDER (or
+    the named league only), and ``stat`` is the first one's key. ``day`` is "today", "tomorrow" (also a weekday
+    that is tomorrow at ``now`` in ``tz``: day_for_weekday) or "later" (a weekday further off: no scan covers it)."""
     raw = _norm(text)
     plain = re.sub(r"[?!,;]", " ", raw)
-    day = "tomorrow" if re.search(r"\btomorrow\b|\btmrw\b|\btmr\b", plain) else "today"
+    if re.search(r"\btomorrow\b|\btmrw\b|\btmr\b", plain):
+        day = "tomorrow"
+    elif weekday_named(plain) is not None:
+        day = day_for_weekday(plain, now, tz) or "later"
+    else:
+        day = "today"
     league = None
     for key, names in LEAGUE_NAMES.items():
         if any(re.search(rf"\b{re.escape(name)}\b", plain) for name in names):
@@ -394,8 +493,12 @@ def parse_ask(text: Any) -> Dict[str, Any]:
     stat = first[1]
     spec = STATS[first[0]][stat] if stat else None
     if spec is not None and spec["threshold"] is not None:
-        threshold = spec["threshold"]
-        side = "over"
+        # A double-double, or an anytime ask, has its own number; "2+ TDs" (a count) keeps its own
+        counted = spec["kind"] == "anytime" and threshold is not None \
+            and (threshold > spec["threshold"] or side == "under")
+        if not counted:
+            threshold = spec["threshold"]
+            side = "over"
     elif spec is not None and re.search(r"\banytime\b", plain) and threshold is None:
         threshold = 1
     return {"stat": stat, "league": league, "leagues": list(stats), "stats": stats, "threshold": threshold,
@@ -464,17 +567,30 @@ def history(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any], threshol
 
 def form_mean(values: Sequence[float], season: Sequence[float]) -> Optional[float]:
     """Recency-weighted mean of the last 10 values (newest first; half-life 5 games), shrunk toward this
-    season's average by games played: (n x recent + 5 x season) / (n + 5). None without values."""
+    season's average by games played: (n x recent + k x season) / (n + k), the season weighing as many games as it
+    stands on, at most 5 (k = min(5, season games): a one-game season doesn't outweigh the last ten). None without
+    values."""
     recent = list(values[:RECENT])
     if not recent:
         return None
     weights = [0.5 ** (i / HALF_LIFE) for i in range(len(recent))]
     weighted = sum(w * v for w, v in zip(weights, recent)) / sum(weights)
     base = sum(season) / len(season) if season else weighted
+    k = min(SHRINK_K, float(len(season))) if season else SHRINK_K
     n = len(recent)
-    return (n * weighted + SHRINK_K * base) / (n + SHRINK_K)
+    return (n * weighted + k * base) / (n + k)
 
 
+def yes_share(values: Sequence[float], season: Sequence[float], threshold: float) -> Optional[float]:
+    """The chance of a yes/no event from the log (a double- or triple-double without the NBA model): the
+    recency-weighted share of the last 10 games that reached ``threshold``, shrunk toward this season's share with
+    k = min(5, season games), the beta-binomial's posterior mean (form_mean on the games' 1s and 0s). None without
+    games."""
+    return form_mean([1.0 if value >= threshold else 0.0 for value in values],
+                     [1.0 if value >= threshold else 0.0 for value in season])
+
+
+# NB1: the variance ratio count_chance hands to calls._negative_binomial_cdf (not an NB2 size)
 def dispersion(values: Sequence[float]) -> float:
     """A count's variance over its mean from the log (the newest SPREAD_GAMES values), never below 1 (a Poisson)
     and at most MAX_DISPERSION; 1 with fewer than 3 games or a zero mean."""
@@ -513,21 +629,31 @@ def yards_chance(mean: float, threshold: int, sd: float, side: str = "over") -> 
     return 1.0 - below if side == "over" else below
 
 
-def form_projection(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
-    """The form model for one player and stat: {mean, dispersion or sd, games} or None without games."""
+def _played(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]) -> Tuple[List[float], List[float]]:
+    """(the stat's values, newest first; this season's of them: the newest row's season)."""
     played = [(row.get("season"), log_value(row, spec)) for row in rows]
     played = [(season, value) for season, value in played if value is not None]
     if not played:
-        return None
-    values = [value for _, value in played]
+        return [], []
     newest = played[0][0]
-    season = [value for s, value in played if s == newest]
+    return [value for _, value in played], [value for s, value in played if s == newest]
+
+
+def form_projection(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """The form model for one player and stat: {mean, dispersion or sd, games} or None without games. A double- or
+    triple-double is a yes/no event: ``share`` is its chance (yes_share), and ``mean`` the double-digit categories
+    a game (what the candidate filter reads)."""
+    values, season = _played(rows, spec)
+    if not values:
+        return None
     mean = form_mean(values, season)
     if mean is None:
         return None
     out: Dict[str, Any] = {"mean": mean, "games": len(values)}
     if spec["kind"] == "yards":
         out["sd"] = yards_sd(values, mean)
+    elif spec["kind"] == "double":
+        out["share"] = yes_share(values, season, spec["threshold"])
     else:
         out["dispersion"] = dispersion(values)
     return out
@@ -536,6 +662,8 @@ def form_projection(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]) 
 def form_chance(form: Mapping[str, Any], spec: Mapping[str, Any], threshold: int, side: str = "over") -> float:
     if spec["kind"] == "yards":
         return yards_chance(form["mean"], threshold, form["sd"], side)
+    if spec["kind"] == "double":
+        return form["share"] if side == "over" else 1.0 - form["share"]
     return count_chance(form["mean"], threshold, form["dispersion"], side)
 
 
@@ -617,11 +745,13 @@ def pick_line(props: Sequence[Mapping[str, Any]], spec: Mapping[str, Any], thres
               ) -> Optional[Dict[str, Any]]:
     """The posted prop that best answers the ask: the exact rung (a "20+" milestone, an over/under at 19.5, the yes
     bet of an anytime or double-double ask), else the main over/under line, else the nearest milestone.
-    {prop, matches} or None when nothing for this stat is posted."""
+    {prop, matches} or None when nothing for this stat is posted. An under matches only an over/under line at its
+    number (a milestone or a yes bet is an over-only bet: "under 11.5" is never "12+"), else falls back to the
+    main line, not matching; a yes stat asked at another number ("2+ TDs") never takes the anytime price."""
     mine = [p for p in props if p.get("market") in spec["markets"]]
     if not mine:
         return None
-    if spec["yes"]:
+    if spec["yes"] and side == "over" and threshold in (None, spec["threshold"]):
         yes = [p for p in mine if p.get("kind") == "yes"]
         if yes:
             return {"prop": yes[0], "matches": True}
@@ -634,6 +764,7 @@ def pick_line(props: Sequence[Mapping[str, Any]], spec: Mapping[str, Any], thres
         if side == "over":
             priced = [p for p in exact if p.get("over_price") is not None]
         else:
+            exact = [p for p in exact if p.get("kind") == "over_under"]
             priced = [p for p in exact if p.get("under_price") is not None]
         if priced or exact:
             ranked = sorted(priced or exact, key=lambda p: p.get("kind") != "milestone")
@@ -641,9 +772,11 @@ def pick_line(props: Sequence[Mapping[str, Any]], spec: Mapping[str, Any], thres
     main = [p for p in mine if p.get("kind") == "over_under" and p.get("line") is not None]
     if main:
         return {"prop": main[0], "matches": False}
+    if side == "under":
+        return None
     ladder = [p for p in mine if p.get("line") is not None]
     if not ladder:
-        return {"prop": mine[0], "matches": False}
+        return None if spec["yes"] else {"prop": mine[0], "matches": False}
     target = (threshold - 0.5) if threshold is not None else 0.0
     return {"prop": min(ladder, key=lambda p: abs(float(p["line"]) - target)), "matches": False}
 
@@ -696,10 +829,53 @@ def posted_line(props: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]) -> 
     return None
 
 
+def trend(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any],
+          last_season: Optional[Sequence[Mapping[str, Any]]] = None) -> Optional[Dict[str, Any]]:
+    """{l5, season, diff, vs}, each number to one decimal (diff from the two as shown): ``l5`` the stat's average over
+    this season's last TREND_GAMES logged games (never last season's); ``season`` the baseline, this season's other
+    games once it has TREND_BASE (``vs`` "season"), else last season's average when it had TREND_BASE (``vs``
+    "last_season"); ``diff`` l5 - season. A double- or triple-double counts the games that reached it (a share).
+    None without TREND_GAMES games this season, or without a baseline.
+
+    ``rows`` are the board's game-log rows, newest first (this season's is the newest row's season, as everywhere in
+    this module); ``last_season`` last season's whole log (the board reads it while this season is short of
+    TREND_BASE games; without it, the rows' own tail of last season is all there is). A newest row from last season
+    means no game this season."""
+    played = [(row.get("season"), log_value(row, spec)) for row in rows]
+    played = [(season, value) for season, value in played if value is not None]
+    if not played:
+        return None
+    current = played[0][0]
+    if last_season is not None:
+        older = [(row.get("season"), log_value(row, spec)) for row in last_season]
+        older = [(season, value) for season, value in older if value is not None]
+        if current in {row.get("season") for row in last_season}:
+            return None  # his newest game is last season's: none this season yet
+    else:
+        older = [(season, value) for season, value in played if season != current]
+    this = [value for season, value in played if season == current]
+    before = [value for _, value in older]
+    if spec["kind"] == "double":
+        this = [1.0 if value >= spec["threshold"] else 0.0 for value in this]
+        before = [1.0 if value >= spec["threshold"] else 0.0 for value in before]
+    if len(this) < TREND_GAMES:
+        return None
+    if len(this) >= TREND_BASE:
+        base, vs = this[TREND_GAMES:], "season"
+    elif len(before) >= TREND_BASE:
+        base, vs = before, "last_season"
+    else:
+        return None
+    l5 = round(sum(this[:TREND_GAMES]) / TREND_GAMES, 1)
+    average = round(sum(base) / len(base), 1)
+    return {"l5": l5, "season": average, "diff": round(l5 - average, 1), "vs": vs}
+
+
 def _row(player: Mapping[str, Any], ask: Mapping[str, Any], spec: Mapping[str, Any], game: Mapping[str, Any],
-         props_meta: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+         props_meta: Mapping[str, Any], season_number: bool = False) -> Optional[Dict[str, Any]]:
     """One player's numbers for the ask, or None when there is nothing to project him from (or, with no number
-    asked, no line posted for him)."""
+    asked, no line posted for him; with ``season_number``, hot and cold's reading, his season average rounded up is
+    the number instead)."""
     rows = player.get("rows") or []
     side = ask["side"]
     props = player.get("props") or []
@@ -707,9 +883,15 @@ def _row(player: Mapping[str, Any], ask: Mapping[str, Any], spec: Mapping[str, A
     if threshold is None:
         # "PRA overs": his own posted line is the number (24.5 -> 25+)
         choice = posted_line(props, spec)
-        if choice is None:
+        if choice is not None:
+            threshold = int(math.floor(float(choice["prop"]["line"]))) + 1
+        elif season_number:
+            _, season = _played(rows, spec)
+            if not season:
+                return None
+            threshold = max(1, int(math.floor(sum(season) / len(season))) + 1)
+        else:
             return None
-        threshold = int(math.floor(float(choice["prop"]["line"]))) + 1
     else:
         choice = pick_line(props, spec, threshold, side)
     hits, averages, values = history(rows, spec, threshold, side)
@@ -728,22 +910,31 @@ def _row(player: Mapping[str, Any], ask: Mapping[str, Any], spec: Mapping[str, A
         projection, chance, source, model = form["mean"], form_chance(form, spec, threshold, side), "form", "form"
         minutes = None
     status = player.get("status") or None
+    kind = row_kind(spec)
     row: Dict[str, Any] = {
         "athlete_id": str(player.get("athlete_id")), "name": player.get("name"), "team": player.get("team"),
         "opponent": player.get("opponent"), "home": player.get("home"), "position": player.get("position"),
         "game": game.get("label"), "event_id": str(player.get("event_id") or game.get("event_id") or ""),
         "start": game.get("start"), "status": status, "status_tag": status_tag(status),
-        "threshold": threshold, "projection": None if projection is None else round(projection, 1),
+        "threshold": threshold,
+        # A yes/no stat's only number is its chance (a double-double's "1.6 projected" means nothing to anyone)
+        "projection": None if projection is None or kind == "yes_no" else round(projection, 1),
         "chance": round(min(max(chance, 0.0), 1.0), 4), "chance_source": source, "model": model,
-        "model_label": MODEL_LABELS[model], "hits": hits, "avg": averages,
+        "model_label": MODEL_LABELS[model], "hits": hits, "avg": averages, "kind": kind,
     }
     if minutes is not None:
         row["minutes"] = round(float(minutes), 1)
+    moved = trend(rows, spec, player.get("last_season_rows"))
+    if moved is not None:
+        row["trend"] = moved
     view = line_view(choice, props_meta)
     if view is not None:
         row["line"] = view
-        edge = edge_for(choice, row["chance"], side, spec["yes"])
-        if edge is not None:
+        # A stale line (DraftKings' copy older than the props' time to live) is shown, never priced for an edge
+        edge = None if view["stale"] else edge_for(choice, row["chance"], side, spec["yes"])
+        if edge is not None and edge > EDGE_CAP:
+            row["edge_suspect"] = True  # the model's tail against a long price: no number, no ranking
+        elif edge is not None:
             row["edge"] = edge
     row["_projection"] = projection
     row["_values"] = values
@@ -781,7 +972,11 @@ def why(row: Mapping[str, Any], spec: Mapping[str, Any], side: str, outs: Sequen
     hits, games = row["hits"]["l10"]
     if games:
         last = f"last {games}" if games != 1 else "last game"
-        if spec["hit_word"] and (spec["yes"] or threshold == 1):
+        if spec["hit_word"] and threshold == 1 and side == "under":
+            # "under 0.5 goals" counts the games without one: "no goal in 8 of last 10"
+            word = re.sub(r"^an? ", "", spec["hit_word"])
+            reasons.append(f"no {word} in {hits} of {last}")
+        elif spec["hit_word"] and (threshold == 1 or (spec["yes"] and threshold == spec["threshold"])):
             reasons.append(f"{spec['hit_word']} in {hits} of {last}")
         elif side == "under":
             reasons.append(f"under {threshold - 0.5:g} in {hits} of {last}")
@@ -801,8 +996,9 @@ def why(row: Mapping[str, Any], spec: Mapping[str, Any], side: str, outs: Sequen
     if outs and spec["key"] in USAGE_STATS:
         extras.append(f"{', '.join(outs[:2])} out")
     line = row.get("line")
-    # The price itself is the row's line (shown in the person's own odds format), never written into a reason
-    if line and line.get("matches") and line.get("kind") == "milestone":
+    # The price itself is the row's line (shown in the person's own odds format), never written into a reason; a
+    # milestone ("12+") is an over's bet, never an under's reason
+    if line and line.get("matches") and line.get("kind") == "milestone" and side == "over":
         extras.append(f"{line.get('label') or f'{threshold}+'} posted")
     elif line and line.get("kind") == "yes" and line.get("yes"):
         extras.append(f"{spec['label']} posted")
@@ -831,56 +1027,405 @@ def _rank_key(row: Mapping[str, Any], side: str, by_edge: bool) -> Tuple[Any, ..
     return head + (-row["chance"], -projection if side == "over" else projection, str(row.get("name") or ""))
 
 
-def scan(board: Mapping[str, Any], ask: Mapping[str, Any], n: int = 10) -> Dict[str, Any]:
+def _sort_key(row: Mapping[str, Any], side: str, sort: str) -> Tuple[Any, ...]:
+    """The order ``sort`` asks for, strongest first (scan's docstring); ties go to the chance, then the name."""
+    if sort in ("chance", "edge"):
+        return _rank_key(row, side, sort == "edge")
+    chance, name = -row["chance"], str(row.get("name") or "")
+    if sort == "projection":
+        projection = row["_projection"] if row["_projection"] is not None else 0.0
+        return (-projection if side == "over" else projection, chance, name)
+    if sort == "l10":
+        hits, games = row["hits"]["l10"]
+        return (-(hits / games) if games else 1.0, -games, chance, name)
+    # Hot and cold: by trend.diff; a row without a trend (named players only: hot and cold rank no other) goes last
+    moved = row.get("trend")
+    diff = float((moved or {}).get("diff") or 0.0)
+    return (moved is None, -diff if sort == "hot" else diff, chance, name)
+
+
+# --- names ------------------------------------------------------------------------------------------------
+
+def _name_words(text: Any) -> List[str]:
+    """A name's words, lower case, accents, dots and apostrophes off ("De'Aaron Fox" -> ["deaaron", "fox"])."""
+    plain = unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode().lower()
+    plain = re.sub(r"[.'’`]", "", plain)
+    return [word for word in re.split(r"[\s,]+", plain) if word]
+
+
+def _name_key(words: Sequence[str]) -> str:
+    """Words compared without spaces or hyphens: "Gilgeous-Alexander" is "gilgeous alexander" is "gilgeousalexander"."""
+    return "".join(re.sub(r"[^a-z0-9]", "", word) for word in words)
+
+
+def _name_keys(name: Any) -> Tuple[Set[str], str, str]:
+    """({full name, with and without a suffix}, first name, last name) of a player, as compared."""
+    words = _name_words(name)
+    bare = list(words)
+    while len(bare) > 2 and bare[-1] in NAME_SUFFIXES:
+        bare.pop()
+    full = {key for key in (_name_key(words), _name_key(bare)) if key}
+    return full, _name_key(bare[:1]), _name_key(bare[1:]) if len(bare) > 1 else ""
+
+
+def _bare(words: Sequence[str]) -> List[str]:
+    """The words with any trailing suffix left off ("payton ii" -> "payton"); one word always stays."""
+    out = list(words)
+    while len(out) > 1 and out[-1] in NAME_SUFFIXES:
+        out.pop()
+    return out
+
+
+def _query_forms(asked: Any) -> List[List[str]]:
+    """The word lists a typed name is tried as, in order, each without a trailing suffix ("Payton II", "Porter Jr.",
+    "Marvin Bagley 3rd"): "Last, First" read as "First Last" ("Doncic, Luka", "Porter Jr., Michael"; a suffix after
+    the comma is just a suffix: "Michael Porter, Jr."), then the words as typed."""
+    text = str(asked or "")
+    forms: List[List[str]] = []
+    if text.count(",") == 1:
+        before, after = (_name_words(part) for part in text.split(","))
+        first = [word for word in after if word not in NAME_SUFFIXES]
+        last = [word for word in before if word not in NAME_SUFFIXES]
+        if first and last:
+            forms.append(first + last)
+    typed = _bare(_name_words(text))
+    if typed and typed not in forms:
+        forms.append(typed)
+    return forms
+
+
+def _matches(keyed: Sequence[Tuple[str, Set[str], str, str]], words: Sequence[str]) -> List[str]:
+    """The ids one form of a typed name matches, by the first rule that matches anyone: the full name, the last name,
+    an initial or a first name's start with the last name ("L Doncic", "Steph Curry"), the first name."""
+    query = _name_key(words)
+    if not query:
+        return []
+    ids = [pid for pid, full, _, _ in keyed if query in full] \
+        or [pid for pid, _, _, last in keyed if last and query == last]
+    if not ids and len(words) > 1:
+        head, tail = _name_key(words[:1]), _name_key([word for word in words[1:] if word not in NAME_SUFFIXES])
+        ids = [pid for pid, _, first, last in keyed if tail and last == tail and head and first.startswith(head)]
+    if not ids:
+        ids = [pid for pid, _, first, _ in keyed if first == query]
+    return list(dict.fromkeys(ids))
+
+
+def match_names(players: Iterable[Mapping[str, Any]], names: Iterable[Any]) -> Tuple[Dict[str, List[str]], List[str]]:
+    """({name asked: [athlete ids]}, [names matching nobody]) against a board's players. Case, accents, dots and a
+    suffix don't count; a name matches a player's full name ("Luka Doncic", "Doncic, Luka", "Marvin Bagley 3rd"), his
+    last name ("Doncic", "Payton II", "Gilgeous-Alexander"), an initial or a first name's start with the last name
+    ("L. Doncic", "Steph Curry"), or his first name ("Shai"). A name several players answer to ("Curry", "Jalen")
+    gets every one's id: sort_names calls it ambiguous. A name that matches nobody as typed may end in a team
+    ("Marcus Sutton (MIA)", "Marcus Sutton MIA": how an ambiguous name's candidates read): that team's players only."""
+    players = list(players)
+    keyed = [(str(player.get("athlete_id")), *_name_keys(player.get("name"))) for player in players]
+    teams = {str(player.get("athlete_id")): str(player.get("team") or "").upper() for player in players}
+    found: Dict[str, List[str]] = {}
+    missing: List[str] = []
+    for asked in names:
+        ids: List[str] = []
+        for words in _query_forms(asked):
+            ids = _matches(keyed, words)
+            if ids:
+                break
+        qualified = None if ids else _TEAM_QUALIFIER.match(str(asked or ""))
+        if qualified and qualified.group(1).strip():
+            for words in _query_forms(qualified.group(1)):
+                ids = [pid for pid in _matches(keyed, words) if teams.get(pid) == qualified.group(2).upper()]
+                if ids:
+                    break
+        if ids:
+            found[str(asked)] = ids
+        elif str(asked) not in missing:
+            missing.append(str(asked))
+    return found, missing
+
+
+def sort_names(players: Iterable[Mapping[str, Any]], started: Iterable[Mapping[str, Any]], names: Iterable[Any]
+               ) -> Dict[str, Any]:
+    """Each asked name in exactly one place (scan's and scan_edges's ``names``), matched (match_names) against the
+    board's players and the players of the day's games already under way (``started``: the snapshot's
+    started_players, {athlete_id, name, game}): {"found": {name: [athlete id]} (one player, in a game still to come),
+    "missing": [names matching nobody, in a game to come or one under way], "ambiguous": [{"name", "candidates"}] (more
+    than one player: up to NAME_CANDIDATES full names, in alphabetical order, each with its team when two players
+    share one: "Marcus Sutton (MIA)"; one player in two games, a doubleheader, is one player), "started": [{"name",
+    "player", "game"}] (one player, whose game has started: ``game`` its label)}. Each list keeps the order the names
+    were asked in."""
+    later = {str(player.get("athlete_id")): player for player in players}
+    begun: Dict[str, Mapping[str, Any]] = {}
+    for player in started:
+        begun.setdefault(str(player.get("athlete_id")), player)
+    for athlete_id in later:  # a doubleheader's player whose second game is still to come is in that game
+        begun.pop(athlete_id, None)
+    found, missing = match_names(list(later.values()) + list(begun.values()), names)
+    out: Dict[str, Any] = {"found": {}, "missing": missing, "ambiguous": [], "started": []}
+    for asked, ids in found.items():
+        if len(ids) > 1:
+            entries = [later.get(pid) or begun.get(pid) or {} for pid in ids]
+            keys = [_name_key(_name_words(entry.get("name"))) for entry in entries]
+            # Two players with one full name are told apart by team: "Marcus Sutton (MIA)", not the name twice
+            full = [f"{entry.get('name')} ({entry.get('team')})" if keys.count(key) > 1 and entry.get("team")
+                    else str(entry.get("name")) for entry, key in zip(entries, keys) if entry.get("name")]
+            full = sorted(full, key=lambda name: (_name_key(_name_words(name)), name))
+            out["ambiguous"].append({"name": asked, "candidates": full[:NAME_CANDIDATES]})
+        elif ids[0] in later:
+            out["found"][asked] = ids
+        else:
+            player = begun[ids[0]]
+            out["started"].append({"name": asked, "player": str(player.get("name") or asked),
+                                   "game": str(player.get("game") or "")})
+    return out
+
+
+# --- ranking a board ------------------------------------------------------------------------------------
+
+def _loading(board: Mapping[str, Any]) -> Optional[Dict[str, int]]:
+    """{games_ready, games_total} while the board is still building, with ``failed`` (games with a part that
+    failed and is still missing) when there are any, built or not; None when neither."""
+    ready, total = int(board.get("games_ready") or 0), int(board.get("games_total") or 0)
+    failed = int(board.get("games_failed") or 0)
+    if ready >= total and not failed:
+        return None
+    loading = {"games_ready": ready, "games_total": total}
+    if failed:
+        loading["failed"] = failed
+    return loading
+
+
+def _finish(rows: Sequence[Dict[str, Any]], games: Mapping[str, Any], specs: Any, sides: Any) -> None:
+    """Rank, reasons ("why") and no working fields, for the rows a scan returns."""
+    for rank, row in enumerate(rows, start=1):
+        spec = specs(row)
+        game = games.get(row["event_id"]) or {}
+        outs = [name for name in (game.get("outs") or {}).get(str(row.get("team")), []) if name != row.get("name")]
+        row["rank"] = rank
+        row["why"] = why(row, spec, sides(row), outs)
+        row.pop("_projection", None)
+        row.pop("_values", None)
+
+
+def scan(board: Mapping[str, Any], ask: Mapping[str, Any], n: int = 10, *, names: Optional[Iterable[Any]] = None,
+         sort: Optional[str] = None) -> Dict[str, Any]:
     """Rank one board's players for an ask (make_ask's shape).
 
     ``board`` is data/player_board.py's snapshot: {league, day, as_of, games: {event_id: {event_id, label, start,
     outs: {team: [names]}, props: {book, as_of, stale}}}, players: [{athlete_id, name, team, opponent, home,
-    position, event_id, status, projection: {means, minutes} | None, rows, props}], games_ready, games_total,
-    games_started}.
+    position, event_id, status, projection: {means, minutes} | None, rows, last_season_rows?, props}],
+    started_players: [{athlete_id, name, team, event_id, game}], games_ready, games_total, games_started,
+    games_failed}.
 
-    Returns {ask, players, close, more, as_of, games, games_started, loading?}: ``players`` are the candidates
-    projected to reach the number or at least 50% to (30% for a yes/no ask), strongest first, at most ``n``;
-    ``close`` up to five more just below; ``more`` how many more qualified beyond ``n``; ``loading`` {games_ready,
-    games_total} while the board is still building. Ruled-out players (out, doubtful) are dropped; questionable
-    ones carry their status and ``status_tag``. With no number (``threshold`` None) each player's posted line is
-    the number and rows rank by edge, then chance."""
+    Returns {ask, players, close, more, as_of, games, games_started, loading?, missing_names?, ambiguous_names?,
+    started_names?, mode: "scan"}: ``players`` are the candidates projected to reach the number or at least 50% to
+    (30% for a yes/no ask), strongest first, at most ``n``; ``close`` up to five more just below; ``more`` how many
+    more qualified beyond ``n``; ``loading`` {games_ready, games_total, failed?} while the board is still building or
+    a game is missing a part that failed. Ruled-out players (out, doubtful) are dropped; questionable ones carry their
+    status and ``status_tag``. With no number (``threshold`` None) each player's posted line is the number and rows
+    rank by edge, then chance. Every row has ``kind`` ("yes_no": its projection is None, the chance says it all;
+    "count"; "yards") and, when his log allows one (TREND_GAMES games this season and a baseline), ``trend`` {l5,
+    season, diff, vs}.
+
+    Every row says whether it qualifies (``qualifies``: projected for the number, or likely enough; in a plain scan
+    every row of ``players`` does and no row of ``close``).
+
+    ``names`` (a list): only those players, each whether he qualifies or not, ruled-out ones too (``ruled_out``: True,
+    after the others), ranked by chance; ``close`` is empty, and each name is in one place (sort_names): its player's
+    rows; ``missing_names`` (matching nobody, or nothing to project him from); ``ambiguous_names`` [{name,
+    candidates}] (more than one player); ``started_names`` [{name, player, game}] (his game has started). ``sort``
+    (SORTS) reorders: "chance", "projection", "l10" (last-10 hit rate), "edge"; "hot" and "cold" rank every player
+    with a ``trend`` by trend.diff, highest or lowest first, without the candidate filter (``close`` empty). With no
+    number, hot, cold and named players without a posted line are read against their season average rounded up."""
     league, key, side = ask["league"], ask["stat"], ask["side"]
     spec = STATS[league][key]
+    if sort is not None and sort not in SORTS:
+        raise ValueError(f"sort is one of {', '.join(SORTS)}")
     n = max(1, min(int(n or 10), MAX_ROWS))
     games = board.get("games") or {}
+    players = list(board.get("players") or [])
+    named: Optional[Dict[str, List[str]]] = None
+    missing: List[str] = []
+    sorted_names: Dict[str, Any] = {}
+    if names is not None:
+        sorted_names = sort_names(players, board.get("started_players") or [],
+                                  [name for name in names if str(name or "").strip()])
+        named, missing = sorted_names["found"], sorted_names["missing"]
+    wanted = {pid for ids in (named or {}).values() for pid in ids}
+    trending = named is None and sort in ("hot", "cold")
+    by_edge = ask.get("threshold") is None
     rows: List[Dict[str, Any]] = []
-    for player in board.get("players") or []:
-        if ruled_out(player.get("status")):
+    for player in players:
+        out = ruled_out(player.get("status"))
+        if named is not None:
+            if str(player.get("athlete_id")) not in wanted:
+                continue
+        elif out:
             continue
         game = games.get(str(player.get("event_id"))) or {}
-        row = _row(player, ask, spec, game, game.get("props") or {})
-        if row is not None and _candidate(row):
+        row = _row(player, ask, spec, game, game.get("props") or {}, season_number=trending or named is not None)
+        if row is None:
+            continue
+        chosen = ((row.get("edge") or 0) > 0 or row["chance"] >= LIKELY) if by_edge else _qualifies(row, spec, side)
+        row["qualifies"] = bool(chosen) and not out
+        if named is not None:
+            if out:
+                row["ruled_out"] = True
             rows.append(row)
-    by_edge = ask.get("threshold") is None
-    rows.sort(key=lambda row: _rank_key(row, side, by_edge))
-    if by_edge:
-        chosen = [row for row in rows if (row.get("edge") or 0) > 0 or row["chance"] >= LIKELY]
+        elif trending:
+            if row.get("trend") is not None:  # only rows with a trend: TREND_GAMES games this season and a baseline
+                rows.append(row)
+        elif _candidate(row):
+            rows.append(row)
+    if sort is not None:
+        rows.sort(key=lambda row: _sort_key(row, side, sort))
     else:
-        chosen = [row for row in rows if _qualifies(row, spec, side)]
-    picked = {id(row) for row in chosen}
-    shown = chosen[:n]
-    close = [row for row in rows if id(row) not in picked][:CLOSE]
-    for rank, row in enumerate(shown + close, start=1):
-        game = games.get(row["event_id"]) or {}
-        outs = [name for name in (game.get("outs") or {}).get(str(row.get("team")), []) if name != row.get("name")]
-        row["rank"] = rank
-        row["why"] = why(row, spec, side, outs)
-        row.pop("_projection", None)
-        row.pop("_values", None)
+        rows.sort(key=lambda row: _rank_key(row, side, by_edge and named is None))
+    if named is not None:
+        rows.sort(key=lambda row: bool(row.get("ruled_out")))  # stable: a ruled-out player after those who play
+        shown, close, chosen_count = rows[:MAX_ROWS], [], len(rows)
+        returned = {row["athlete_id"] for row in rows}
+        for asked, ids in named.items():
+            if not returned & set(ids) and asked not in missing:
+                missing.append(asked)
+    elif trending:
+        shown, close, chosen_count = rows[:n], [], len(rows)
+    else:
+        chosen = [row for row in rows if row["qualifies"]]
+        picked = {id(row) for row in chosen}
+        shown, chosen_count = chosen[:n], len(chosen)
+        close = [row for row in rows if id(row) not in picked][:CLOSE]
+    _finish(shown + close, games, lambda row: spec, lambda row: side)
     result: Dict[str, Any] = {
-        "ask": dict(ask), "players": shown, "close": close, "more": max(0, len(chosen) - len(shown)),
+        "ask": dict(ask), "players": shown, "close": close, "more": max(0, chosen_count - len(shown)),
         "as_of": board.get("as_of"), "games": int(board.get("games_total") or 0),
-        "games_started": int(board.get("games_started") or 0),
+        "games_started": int(board.get("games_started") or 0), "mode": "scan",
     }
-    ready, total = int(board.get("games_ready") or 0), int(board.get("games_total") or 0)
-    if ready < total:
-        result["loading"] = {"games_ready": ready, "games_total": total}
+    loading = _loading(board)
+    if loading is not None:
+        result["loading"] = loading
+    if named is not None:
+        result.update(missing_names=missing, ambiguous_names=sorted_names["ambiguous"],
+                      started_names=sorted_names["started"])
+    return result
+
+
+def _ladder(props: Sequence[Mapping[str, Any]]) -> List[Mapping[str, Any]]:
+    """A market's priced milestone rungs ("15+", "20+", ...) whose prices keep the ladder's order: a rung priced
+    longer than one above it (a 2+ at 2.16 under a 5+ at 2.01) can't be right (a capture or feed error), so it is
+    left out rather than shown as a huge edge."""
+    rungs = sorted(((float(prop["line"]), _raw_price(prop.get("over_price")), prop) for prop in props
+                    if prop.get("kind") == "milestone" and prop.get("line") is not None),
+                   key=lambda rung: rung[0])
+    rungs = [rung for rung in rungs if rung[1] is not None]
+    kept = []
+    for index, (_, price, prop) in enumerate(rungs):
+        if all(price <= higher for _, higher, _ in rungs[index + 1:]):
+            kept.append(prop)
+    return kept
+
+
+def _projection_of(player: Mapping[str, Any], spec: Mapping[str, Any]) -> Optional[float]:
+    """A player's projection for a stat, whatever the number: the NBA model's mean when it has one, else the form
+    model's (as _row works it out)."""
+    projected = player.get("projection") or None
+    if projected and projected.get("means"):
+        mean = nba_mean(projected["means"], spec)
+        if mean is not None:
+            return mean
+    form = form_projection(player.get("rows") or [], spec)
+    return None if form is None else form["mean"]
+
+
+def _near_rungs(rungs: Sequence[Mapping[str, Any]], projection: Optional[float]) -> List[int]:
+    """The numbers of the milestone rungs edges mode prices for a player: within RUNG_WINDOW of his projection, at
+    most the nearest one at or below it and the nearest one above (a far rung's "edge" is the model's tail)."""
+    if projection is None or projection <= 0:
+        return []
+    numbers = sorted({int(math.floor(float(prop["line"]))) + 1 for prop in rungs})
+    near = [number for number in numbers if abs(number - projection) <= RUNG_WINDOW * projection]
+    below = [number for number in near if number <= projection]
+    above = [number for number in near if number > projection]
+    return ([below[-1]] if below else []) + ([above[0]] if above else [])
+
+
+def scan_edges(board: Mapping[str, Any], league: str, n: int = 10, *, side: Optional[str] = None,
+               names: Optional[Iterable[Any]] = None) -> Dict[str, Any]:
+    """The posted lines the numbers like best, every stat of the league at once ("best player props tonight", "any
+    good overs"): for each player and stat with lines posted that aren't stale (the main over/under line, either
+    side; the yes bet of an anytime or double-double stat; the priced milestone rungs near his projection, "20+", an
+    over: within RUNG_WINDOW of it, the nearest one either side), the line and side with the biggest positive edge
+    (``side`` "over" or "under": only that side). ESPN's DraftKings over/under items mostly carry no prices, so the
+    near milestones and yes bets are most of what can be priced. A far rung is never priced (its "edge" is the model's
+    tail against a long price), nor is a rung priced out of its ladder's order (_ladder), and an edge above EDGE_CAP
+    is suspect (the row's ``edge_suspect``, no number): it never ranks.
+
+    Returns {mode: "edges", players, more, as_of, games, games_started, loading?, missing_names?, ambiguous_names?,
+    started_names?}: one row per player and stat at most, with a positive edge, highest first, at most ``n``; each
+    the scan's row for that line's number plus ``stat``, ``stat_label`` and ``side``. There is no candidate filter: a
+    long rung the numbers like is there. ``names``: only those players' lines, each name in one place as in scan
+    (sort_names: his lines, ``missing_names``, ``ambiguous_names`` or ``started_names``)."""
+    if league not in STATS:
+        raise ValueError(f"The player scan doesn't cover {league!r}")
+    if side is not None:
+        side = str(side).lower()
+        if side not in ("over", "under"):
+            raise ValueError("side is over or under")
+    n = max(1, min(int(n or 10), MAX_ROWS))
+    sides = ("over", "under") if side is None else (side,)
+    games = board.get("games") or {}
+    players = list(board.get("players") or [])
+    sorted_names: Optional[Dict[str, Any]] = None
+    if names is not None:
+        sorted_names = sort_names(players, board.get("started_players") or [],
+                                  [name for name in names if str(name or "").strip()])
+        wanted = {pid for ids in sorted_names["found"].values() for pid in ids}
+        players = [player for player in players if str(player.get("athlete_id")) in wanted]
+    asks: Dict[Tuple[str, Optional[int], str], Dict[str, Any]] = {}
+    rows: List[Dict[str, Any]] = []
+    for player in players:
+        props = player.get("props") or []
+        if ruled_out(player.get("status")) or not props:
+            continue
+        game = games.get(str(player.get("event_id"))) or {}
+        meta = game.get("props") or {}
+        if meta.get("stale"):
+            continue
+        for key, spec in STATS[league].items():
+            mine = [prop for prop in props if prop.get("market") in spec["markets"]]
+            if not mine:
+                continue
+            tries: List[Tuple[Optional[int], str]] = []
+            main = posted_line(mine, spec)
+            if main is not None:
+                tries += [(int(math.floor(float(main["prop"]["line"]))) + 1, which) for which in sides]
+            if "over" in sides:
+                if spec["yes"] and any(prop.get("kind") == "yes" for prop in mine):
+                    tries.append((spec["threshold"], "over"))
+                if not spec["yes"]:
+                    tries += [(number, "over") for number in _near_rungs(_ladder(mine), _projection_of(player, spec))]
+            best: Optional[Dict[str, Any]] = None
+            for number, which in dict.fromkeys(tries):
+                ask = asks.get((key, number, which))
+                if ask is None:
+                    ask = asks[(key, number, which)] = _ask(league, key, number, which)
+                row = _row(player, ask, spec, game, meta)
+                if row is not None and (row.get("edge") or 0) > 0 and (best is None or row["edge"] > best["edge"]):
+                    row.update(stat=key, stat_label=spec["label"], side=which)
+                    best = row
+            if best is not None:
+                rows.append(best)
+    rows.sort(key=lambda row: (-row["edge"], -row["chance"], str(row.get("name") or ""), row["stat"]))
+    shown = rows[:n]
+    table = STATS[league]
+    _finish(shown, games, lambda row: table[row["stat"]], lambda row: row["side"])
+    result: Dict[str, Any] = {
+        "mode": "edges", "players": shown, "more": max(0, len(rows) - len(shown)), "as_of": board.get("as_of"),
+        "games": int(board.get("games_total") or 0), "games_started": int(board.get("games_started") or 0),
+    }
+    loading = _loading(board)
+    if loading is not None:
+        result["loading"] = loading
+    if sorted_names is not None:
+        result.update(missing_names=sorted_names["missing"], ambiguous_names=sorted_names["ambiguous"],
+                      started_names=sorted_names["started"])
     return result
 
 
