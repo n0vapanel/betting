@@ -971,6 +971,7 @@ class SlateBuilder:
             self._apply_context(games)
             self._schedule_context(games, now)
             self._prewarm_players(games, now)
+            self._recheck_quota()
             self._publish(leagues, games, as_of, now, self._quota())
             return self._next_delay(season, today, self._now())
 
@@ -1413,6 +1414,17 @@ class SlateBuilder:
                     quota: Optional[Mapping[str, int]] = None) -> bytes:
         return json.dumps({"leagues": leagues, "games": games, "quota": quota}, ensure_ascii=False,
                           separators=(",", ":"), allow_nan=False).encode("utf-8", "replace")
+
+    def _recheck_quota(self) -> None:
+        """Let the odds service check its count of requests left again (free, at most hourly, and only while the
+        saved count is under its reserve), so the header's "N odds left" follows a new key or the month's reset."""
+        recheck = getattr(self.odds, "recheck_quota", None)
+        if not callable(recheck):
+            return
+        try:
+            recheck()
+        except Exception as exc:  # the quota check must never cost the slate
+            self._log_failure("odds quota", exc)
 
     def _quota(self) -> Optional[Dict[str, int]]:
         """The month's Odds API requests left and used, as last reported (the odds service reads the shared

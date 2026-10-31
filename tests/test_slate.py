@@ -344,6 +344,37 @@ def test_the_slate_carries_the_month_s_odds_quota_for_the_header(store) -> None:
     assert "quota" not in json.loads(builder.current().raw)
 
 
+def test_each_round_lets_the_odds_service_check_a_low_count_again(store) -> None:
+    """Under the reserve the odds service fetches nothing, so the header would keep an old key's count (or last
+    month's) for good: each round asks it to check again (free, at most hourly, its own rule)."""
+    espn = FakeEspn({(NBA, TODAY): [espn_game("e1", "Boston Celtics", "New York Knicks", at(2))]})
+    odds = FakeOdds(store, remaining=48)
+    checks = []
+
+    def recheck_quota():
+        checks.append(1)
+        odds.quota = {"remaining": 500, "used": 0}  # a new key's account
+        return True
+
+    odds.recheck_quota = recheck_quota
+    builder = builder_for(store, espn, odds)
+    builder.refresh()
+    assert checks == [1] and json.loads(builder.current().raw)["quota"] == {"remaining": 500, "used": 0}
+
+
+def test_a_failing_quota_check_never_costs_the_slate(store) -> None:
+    espn = FakeEspn({(NBA, TODAY): [espn_game("e1", "Boston Celtics", "New York Knicks", at(2))]})
+    odds = FakeOdds(store, remaining=48)
+
+    def recheck_quota():
+        raise RuntimeError("Couldn't reach The Odds API for /sports (ConnectionError)")
+
+    odds.recheck_quota = recheck_quota
+    builder = builder_for(store, espn, odds)
+    builder.refresh()
+    assert games_of(builder) and json.loads(builder.current().raw)["quota"]["remaining"] == 48
+
+
 # --- the refresh schedule: one wake-up per round, backing off while ESPN fails, the listing off the path ----------
 
 class ClockedEspn:

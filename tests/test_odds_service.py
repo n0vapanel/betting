@@ -148,3 +148,84 @@ def test_ttl_cache_serves_stale_value_when_refresh_fails() -> None:
     assert cache.get("k", 0, broken) == "fresh"
     with pytest.raises(RuntimeError):
         cache.get("other", 60, broken)
+
+
+# --- a count under the reserve is checked again for free (a new key, the month's reset) ----------------------------
+
+def _counting_api(monkeypatch: pytest.MonkeyPatch, calls: list, remaining: list) -> None:
+    """/sports costs nothing and reports the count; a board costs 3. remaining[0] is the account's count now."""
+    def fake_get(url, params=None, timeout=None):
+        calls.append(url)
+        board = "/odds" in url
+        if board:
+            remaining[0] -= 3
+        return SimpleNamespace(
+            ok=True, status_code=200, json=lambda: [EVENT] if board else [{"key": "basketball_nba"}],
+            headers={"x-requests-remaining": str(remaining[0]), "x-requests-used": str(500 - remaining[0]),
+                     "x-requests-last": "3" if board else "0"},
+        )
+
+    monkeypatch.setattr(odds_service.requests, "get", fake_get)
+
+
+def _low_store(path: str) -> Store:
+    store = Store(path)
+    store.save_odds_snapshot("basketball_nba", [normalize_event(EVENT)], time.time() - 10 * 3600)  # stale
+    store.record_usage("/sports/basketball_nba/odds", 3, 48, 452)  # the old key's last count: under the reserve
+    return store
+
+
+def test_a_new_key_is_seen_although_the_old_key_left_the_count_under_the_reserve(tmp_path, monkeypatch) -> None:
+    calls, remaining = [], [500]  # the new key's account
+    _counting_api(monkeypatch, calls, remaining)
+    service = OddsService("new-key", store=_low_store(str(tmp_path / "betting.db")), reserve=50)
+    service.league_games("basketball_nba")
+    assert calls == []  # the saved count (48) says low: saved odds, nothing fetched, and it would stay so
+    assert service.recheck_quota() is True
+    assert calls == [f"{odds_service.BASE_URL}/sports"]  # one free read, no board
+    assert service.quota == {"remaining": 500, "used": 0}
+    service.league_games("basketball_nba", refresh=True)
+    assert calls[-1] == f"{odds_service.BASE_URL}/sports/basketball_nba/odds"  # boards are fetched again
+    assert service.quota["remaining"] == 497
+
+
+def test_a_count_really_under_the_reserve_is_read_at_most_hourly_by_one_process(tmp_path, monkeypatch) -> None:
+    calls, remaining = [], [40]
+    _counting_api(monkeypatch, calls, remaining)
+    path = str(tmp_path / "betting.db")
+    dashboard = OddsService("k", store=_low_store(path), reserve=50)
+    other = Store(path)
+    other.holder = "bot-process"
+    bot = OddsService("k", store=other, reserve=50)
+    assert dashboard.recheck_quota() is True and dashboard.quota["remaining"] == 40
+    assert dashboard.recheck_quota() is False  # within the hour
+    assert bot.recheck_quota() is False  # the other process read it for both
+    dashboard.league_games("basketball_nba", refresh=True)
+    assert calls == [f"{odds_service.BASE_URL}/sports"]  # still low: no board, one free read in all
+    later = time.time() + odds_service.QUOTA_RECHECK_SECONDS + 1
+    monkeypatch.setattr(time, "time", lambda: later)
+    assert bot.recheck_quota() is True  # an hour on: read again (by whichever process asks first)
+    assert calls == [f"{odds_service.BASE_URL}/sports"] * 2
+
+
+def test_no_free_read_while_the_count_is_unknown_or_above_the_reserve(tmp_path, monkeypatch) -> None:
+    calls, remaining = [], [400]
+    _counting_api(monkeypatch, calls, remaining)
+    store = Store(str(tmp_path / "betting.db"))
+    service = OddsService("k", store=store, reserve=50)
+    assert service.recheck_quota() is False  # unknown (a fresh install): the first board reads it
+    store.record_usage("/sports/basketball_nba/odds", 3, 400, 100)
+    assert service.recheck_quota() is False
+    assert calls == []
+
+
+def test_a_failed_free_read_keeps_the_saved_count_and_never_shows_the_key(tmp_path, monkeypatch, caplog) -> None:
+    def down(url, params=None, timeout=None):
+        raise odds_service.requests.ConnectionError(f"{url}?apiKey={params['apiKey']} refused")
+
+    monkeypatch.setattr(odds_service.requests, "get", down)
+    service = OddsService("SECRET123", store=_low_store(str(tmp_path / "betting.db")), reserve=50)
+    with caplog.at_level("WARNING"):
+        assert service.recheck_quota() is True
+    assert service.quota["remaining"] == 48 and service.league_games("basketball_nba")[0]["id"] == "e1"
+    assert "quota" in caplog.text and "SECRET123" not in caplog.text

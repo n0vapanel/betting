@@ -51,6 +51,9 @@ BASE_URL = "https://api.the-odds-api.com/v4"
 MARKETS = ("h2h", "spreads", "totals")
 # Bookmakers update about once a minute, so forced refreshes closer together than this waste quota
 MIN_REFRESH_SECONDS = 300
+# While the saved count of requests left is under the reserve nothing is fetched, so a new API key or the month's
+# reset would never show: the free /sports list (no quota, the same usage headers) checks it again this often
+QUOTA_RECHECK_SECONDS = 3600.0
 # The board's bookmakers (config.py's ODDS_BOOKMAKERS default; checked against The Odds API's bookmaker list on
 # 27 October 2026). Ten books are one region: 3 credits a board, as regions=us was
 DEFAULT_BOOKMAKERS: Tuple[str, ...] = ("pinnacle", "betfair_ex_eu", "matchbook", "draftkings", "fanduel", "betmgm",
@@ -213,6 +216,7 @@ class OddsService:
         self.reserve = reserve
         self._quota: Dict[str, Optional[int]] = {"remaining": None, "used": None}
         self._fetched_at: Dict[str, float] = {}
+        self._quota_checked: Optional[float] = None  # when recheck_quota last read the free /sports list
 
     @property
     def quota(self) -> Dict[str, Optional[int]]:
@@ -222,6 +226,26 @@ class OddsService:
             if stored["remaining"] is not None:
                 return stored
         return dict(self._quota)
+
+    def recheck_quota(self) -> bool:
+        """Check the count of requests left again while the saved one is under the reserve. Nothing is fetched then,
+        so nothing else would ever notice a new API key or the month's reset. The /sports list costs no quota and
+        carries the same usage headers; it is read at most once every QUOTA_RECHECK_SECONDS, by one process (the
+        store's lease). Returns whether it was read."""
+        remaining = self.quota["remaining"]
+        if remaining is None or remaining >= self.reserve:
+            return False
+        now = time.time()
+        if self._quota_checked is not None and now - self._quota_checked < QUOTA_RECHECK_SECONDS:
+            return False
+        if self.store and not self.store.try_lease("odds:quota-check", QUOTA_RECHECK_SECONDS):
+            return False
+        self._quota_checked = now
+        try:
+            self._get("/sports", {})
+        except Exception as exc:  # unreachable or refused: the saved count stands until the next check
+            log.warning("Couldn't check The Odds API's quota again (%s)", type(exc).__name__)
+        return True
 
     def _get(self, path: str, params: Dict[str, Any]) -> Any:
         try:

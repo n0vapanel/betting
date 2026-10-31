@@ -173,8 +173,11 @@ class Recorder:
 
 
 def allowlisted(call: Call) -> bool:
-    """The AI clients, and the odds snapshot loader (OddsService.league_games' board, saved as a snapshot)."""
-    return call.site.split(":")[0] in AI_FILES or any(frame == "data/odds_service.py:_board" for frame in call.stack)
+    """The AI clients, the odds snapshot loader (OddsService.league_games' board, saved as a snapshot), and the odds
+    quota's re-check (OddsService.recheck_quota reads the free /sports list for its usage headers, so it must reach
+    the API, not a cached copy: at most hourly, one process, and only while the saved count is under the reserve)."""
+    return call.site.split(":")[0] in AI_FILES or any(
+        frame in ("data/odds_service.py:_board", "data/odds_service.py:recheck_quota") for frame in call.stack)
 
 
 @pytest.fixture
@@ -204,7 +207,7 @@ FETCHES = {
     "EspnClient": {"scoreboard", "fetch_scoreboard", "summary", "standings", "roster", "player_seasons", "find_game",
                    "game_result", "box_score", "closing_line", "played_on"},
     "PlayerData": {"search", "overview", "gamelog", "splits", "news", "props", "card"},
-    "OddsService": {"sports", "league_games"},
+    "OddsService": {"sports", "league_games", "recheck_quota"},
     "ApiSportsClient": {"get_fixtures", "get_team_stats", "get_player_stats", "get_injuries"},
     "Polymarket": {"events", "fetch_moneylines", "fetch_lines"},
     "Kalshi": {"events", "fetch_games", "fetch_lines", "fetch_series", "request"},
@@ -290,6 +293,8 @@ def _drive_everything(cache: TTLCache) -> None:
     odds = OddsService("odds-key-not-real-123", cache)
     odds.sports()
     odds.league_games(nba)  # the snapshot loader (allowlisted; it runs inside the cache too)
+    odds._quota = {"remaining": 1, "used": 499}  # under the reserve, so the re-check reads /sports (allowlisted)
+    assert odds.recheck_quota()
 
     sports = ApiSportsClient("api-sports-key-not-real", cache=cache)
     sports.get_fixtures("nba", DAY)
