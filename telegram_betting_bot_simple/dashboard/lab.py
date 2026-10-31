@@ -2441,8 +2441,9 @@ class Lab(Gates):
         ({rank, athlete_id, name, team, opponent, home, game, event_id, start, status, status_tag, minutes?,
         threshold, projection, chance, chance_source, model, model_label, hits, avg, line?, edge?, why}) with its
         league and ``addable`` (False: the slip takes game picks). A partial board answers at once with what's ready
-        and ``loading``. Raises CallRejected for a stat, league, side, day or number the scan can't take."""
-        self.ready(uid)
+        and ``loading``. Raises CallRejected for a stat, league, side, day or number the scan can't take, and while
+        picks are paused after a warning sign (like the Builder)."""
+        self.ready(uid, picks=True)
         day = str(day or "today").strip().lower()
         day = "today" if day == "tonight" else day
         if day not in SCAN_DAYS:

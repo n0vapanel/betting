@@ -170,6 +170,8 @@ def _rule_durations() -> "re.Pattern[str]":
 
 RULE_DURATIONS = _rule_durations()
 
+# A reply that points someone to help (the helpline, or Settings' budget and break) rather than to bets
+SUPPORT_TEXT = re.compile(r"1-800-GAMBLER|0808\s*8020\s*133|\bhelpline\b|\bSettings\b[^.]{0,60}\b(?:budget|break)", re.I)
 HELPLINE = "Gambling can be addictive · Help 24/7: 1-800-GAMBLER / 0808 8020 133"
 # Shown above the first answer of a thread (the app's DEFAULT_DISCLOSURE in views/ask.js says the same): what the AI
 # is, that code works out the numbers and that only the person adds bets. It doesn't say "nothing here is a tip":
@@ -1697,13 +1699,16 @@ class Assistant:
         asked = [said, route.fields(), dict(request or {}), dict(slip or {})]
         if view:
             asked.append(slip_numbers(view))
+        # A message with a warning sign (code's strong or soft rules) gets no refusal guard and no code-run scan: a
+        # reply that suggests no bets there is the support rule working, not a refusal
+        support = bool(risk_flags(said) or soft_flags(said))
 
         def check(text: str) -> List[str]:
             """The numbers check, then the refusal and lecture guard (one retry between them)."""
             if not text:
                 return ["no answer"]
             sources = source_numbers([self._quotable(run) for run in runs], *asked)
-            return problems(text, sources, RULE_DURATIONS) + self._guard(text, route, paused, said, runs)
+            return problems(text, sources, RULE_DURATIONS) + self._guard(text, route, paused or support, said, runs)
 
         found = check(reply)
         if found and reply and content is not None:
@@ -1719,7 +1724,7 @@ class Assistant:
             found = check(reply)
             if found:
                 found = first_problems + found
-        if found:
+        if found and not support and not SUPPORT_TEXT.search(reply or ""):
             self._fill_runs(route, toolbox, runs, paused)
         cards = self._cards(runs)
         chips = self._chips(route, cards)
@@ -1733,7 +1738,10 @@ class Assistant:
     def _guard(text: str, route: Route, paused: bool, said: str, runs: Sequence[ToolRun]) -> List[str]:
         """The refusal and lecture guard (ai/explain.py's refusal_problems) on a look-up, build or analyse turn: the
         tools can answer unless picks are paused; a phrase the person used, or one in this turn's tool results (a
-        chance label such as "coin flip"), isn't the reply's own."""
+        chance label such as "coin flip"), isn't the reply's own. A reply pointing to the helpline or to Settings'
+        budget and break is the support rule at work and is never checked."""
+        if paused or SUPPORT_TEXT.search(text or ""):
+            return []
         allowed = json.dumps([run.content for run in runs], default=str)
         return refusal_problems(text, route, not paused, asked=said, allowed=allowed)
 

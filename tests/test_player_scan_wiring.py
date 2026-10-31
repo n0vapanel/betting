@@ -982,3 +982,31 @@ def test_sog_3_plus_runs_through_the_lab_the_tool_and_the_bot_over_the_real_boar
         assert web.hosts() <= ESPN_HOSTS and world.queued == []
     finally:
         board.close()
+
+
+# --- responsible-gambling holes found in review: the pause covers the scan, and the guard never overrides support --
+
+
+def test_the_player_scan_route_honours_the_picks_pause_like_the_builder(world) -> None:
+    from telegram_betting_bot_simple.dashboard.service import CallRejected
+    client = world.client()
+    assert client.get("/api/players/scan", params={"stat": "pts", "threshold": 20}).status_code == 200
+    world.lab.pause_picks(UID, NOW + 24 * 3600)
+    paused = client.get("/api/players/scan", params={"stat": "pts", "threshold": 20})
+    assert paused.status_code == 400, paused.text
+    with pytest.raises(CallRejected):
+        world.lab.player_scan(UID, NBA, "pts", 20)
+
+
+def test_a_reply_that_points_to_help_is_never_called_a_refusal_and_no_scan_is_run_for_it(world) -> None:
+    decline = ("I'd rather not pull picks while you're trying to win back losses. You can set a budget or take a "
+               "break in Settings, and the helpline 1-800-GAMBLER is free 24/7.")
+    claude = ScanClaude(first=decline, again=decline)
+    world.lab.assistant = Assistant(claude, world.lab, world.store, tz=NY, clock=lambda: NOW)
+    out = world.lab.chat(UID, {"message": "lost a lot this week, give me players for 20+ points to make it back"})
+    text = out["reply"]["text"]
+    assert "players_scan" not in json.dumps([c.get("type") for c in out["reply"].get("cards") or []])
+    assert not any(card.get("type") == "player_scan" for card in out["reply"].get("cards") or [])
+    assert "Luka" not in text and "projected" not in text
+    # the guard leaves a help reply alone even on a plain look-up
+    assert Assistant._guard(decline, SimpleNamespace(intent="lookup"), False, "give me players for 20+", []) == []
