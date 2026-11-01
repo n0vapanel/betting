@@ -70,6 +70,25 @@
 #                                 deepseek or off
 #   LEARN_AI_MONTHLY_CENTS=500    a hard cap on that AI's spend a month, in US cents (default 500: $5)
 #   LEARN_BACKFILL_PER_NIGHT=1500  old games' requests a night at most, one every 2 seconds, 01:00-06:00 (default 1500)
+# The raw capture (an untrimmed copy of every game on ESPN's 58 paths, so the brain can recount every event later;
+# free sources only, never an Odds API credit; optional, the defaults are fine; a value that doesn't read is ignored
+# with a warning in the logs, never a reason for the bot or the dashboard not to start):
+#   CAPTURE_ENABLED=0             turn it off (on by default: CAPTURE_ENABLED=1)
+#   RAW_DB_PATH=/var/lib/bettingbot/raw.db  where it is kept (default: raw.db beside betting.db, in the state folder;
+#                                 it must stay inside /var/lib/bettingbot, the services' one writable folder, and is
+#                                 never betting.db itself)
+#   CAPTURE_PER_DAY=3000          requests a day at most (UTC days; default 3000)
+#   CAPTURE_CORE_PLAYS_LEAGUES=soccer_epl,soccer_spain_la_liga  leagues whose matches also keep ESPN's play-by-play
+#                                 pages (default: the ten wave-1 soccer leagues; none for none)
+#   CAPTURE_PROPBETS=0            don't keep ESPN's DraftKings props before NBA, WNBA, NFL, NHL and MLB games (default 1)
+#   CAPTURE_KALSHI_SERIES=KXEPLCORNERS,KXUCLSOT,KXUCLSAVE  Kalshi series kept before their league's games (the
+#                                 default; none for none)
+#   CAPTURE_BACKFILL=0            don't fetch older games' full records (on by default: the last seasons, 01:00-06:00
+#                                 in TIMEZONE, never while the learning loop's own backfill runs)
+#   CAPTURE_BACKFILL_PER_NIGHT=6000  older games' requests a night at most (default 6000)
+#   CAPTURE_BACKFILL_SEASONS=3    how many past seasons the backfill fetches (default 3, at most 10)
+#   CAPTURE_MIN_FREE_GB=2         fetch nothing while the disk has less than this many GiB free, or under 10% of it
+#                                 (default 2), so raw.db never fills the disk betting.db is on
 #
 # Python packages are installed from requirements.lock as wheels, each checked against its pinned hash, so a
 # changed or swapped package is refused. If that install fails (say, on a CPU or Python the lock has no wheels for),
@@ -124,6 +143,16 @@ declare -A PATTERNS=(
   [LEARN_AI]='^(auto|claude|deepseek|off)$'
   [LEARN_AI_MONTHLY_CENTS]='^[0-9]{1,6}$'
   [LEARN_BACKFILL_PER_NIGHT]='^[0-9]{1,5}$'
+  [CAPTURE_ENABLED]='^(0|1|true|false)$'
+  [RAW_DB_PATH]='^/var/lib/bettingbot/[A-Za-z0-9_.-]{1,80}\.db$'
+  [CAPTURE_PER_DAY]='^[0-9]{1,6}$'
+  [CAPTURE_CORE_PLAYS_LEAGUES]='^(none|[a-z0-9][a-z0-9_]{1,59}(,[a-z0-9][a-z0-9_]{1,59}){0,57})$'
+  [CAPTURE_PROPBETS]='^(0|1|true|false)$'
+  [CAPTURE_KALSHI_SERIES]='^(none|KX[A-Z0-9]{2,40}(,KX[A-Z0-9]{2,40}){0,19})$'
+  [CAPTURE_BACKFILL]='^(0|1|true|false)$'
+  [CAPTURE_BACKFILL_PER_NIGHT]='^[0-9]{1,6}$'
+  [CAPTURE_BACKFILL_SEASONS]='^([1-9]|10)$'
+  [CAPTURE_MIN_FREE_GB]='^[0-9]{1,4}(\.[0-9]{1,2})?$'
 )
 # DOMAIN is checked and saved on its own, since it can also be "off"
 DOMAIN_PATTERN='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$'

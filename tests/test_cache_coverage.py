@@ -1,6 +1,7 @@
 """The coverage audit (v3 Stage 2b): every outbound HTTP call in the package goes through the shared TTLCache with a
 kind of data (and, for the data clients, the policy table's time to live), except the AI clients (chats are personal,
-never cached across people) and the odds snapshot loader (the store's odds snapshots are its own persistence).
+never cached across people), the odds snapshot loader (the store's odds snapshots are its own persistence) and the raw
+capture (v4 P1: raw.db is its own store, see ``allowlisted``).
 
 How: the HTTP layer is monkeypatched (requests' Session.request, which requests.get and every Session go through;
 httpx, urllib and http.client fail loudly), TTLCache's read path is wrapped so a loader marks the thread it runs
@@ -43,6 +44,8 @@ AUDITED = {
     "data/mlb_stats.py": "MLB StatsAPI's schedule through the cache (kind mlb_schedule)",
     "learn/sources/http.py": "the history backfill (football-data, nflverse, ESPN, MLB StatsAPI) through the cache "
                              "(kinds hist_file, hist_list, hist_game)",
+    "capture/http.py": "the raw capture's door (PoliteHttp, urllib): allowlisted by design (raw.db keeps every answer "
+                       "untrimmed; per-host token buckets and raw.db's budgets pace it), see allowlisted()",
 }
 AI_FILES = {"ai/claude.py", "ai/explain.py", "ai/assistant.py", "ai/deepseek.py"}  # the anthropic SDK and DeepSeek
 TRANSPORT = {"main.py"}  # python-telegram-bot: the bot's own messaging, not a data fetch (also bot/*)
@@ -137,6 +140,20 @@ class Recorder:
 
         monkeypatch.setattr(requests.sessions.Session, "request", request)
 
+        # The raw capture's door (capture/http.py PoliteHttp) sends with urllib: its one send is recorded the same way
+        # (urllib itself stays refused below, so nothing else can use it unseen)
+        from telegram_betting_bot_simple.capture import http as capture_http
+
+        def polite_send(polite, req):
+            site, stack = _site()
+            frames = getattr(recorder.local, "loaders", [])
+            kind, ttl = frames[-1] if frames else (None, None)
+            recorder.calls.append(Call(str(req.full_url), kind, ttl, site, stack))
+            answer = _answer(str(req.full_url))
+            return capture_http.HttpResponse(answer.status_code, answer.content, {"content-type": "application/json"})
+
+        monkeypatch.setattr(capture_http.PoliteHttp, "_send", polite_send)
+
         def refuse(*args, **kwargs):
             raise AssertionError("an HTTP call outside requests: audit it (and route it through TTLCache)")
 
@@ -172,12 +189,22 @@ class Recorder:
         return [call for call in self.calls if call.kind is None and not allowlisted(call)]
 
 
+# The raw capture (v4 P1) fetches outside the lean cache by design: raw.db (capture/raw_store.py) is its own store, every
+# answer kept untrimmed and deduplicated on its sha256, so a cache copy would be a second store of the same bytes; the
+# capture's door (capture/http.py PoliteHttp) paces each host with a token bucket and raw.db counts the day's and the
+# night's request budgets. EspnClient.summary_raw/scoreboard_raw are the one fetch that serves both stores: the raw body
+# goes to raw.db and the lean copy into the cache from the same response, so the grader's next summary() is a hit.
+CAPTURE_FRAMES = ("capture/http.py:get", "data/espn_client.py:summary_raw", "data/espn_client.py:scoreboard_raw")
+
+
 def allowlisted(call: Call) -> bool:
-    """The AI clients, the odds snapshot loader (OddsService.league_games' board, saved as a snapshot), and the odds
+    """The AI clients, the odds snapshot loader (OddsService.league_games' board, saved as a snapshot), the odds
     quota's re-check (OddsService.recheck_quota reads the free /sports list for its usage headers, so it must reach
-    the API, not a cached copy: at most hourly, one process, and only while the saved count is under the reserve)."""
+    the API, not a cached copy: at most hourly, one process, and only while the saved count is under the reserve),
+    and the raw capture (CAPTURE_FRAMES: raw.db is its own store, see above)."""
     return call.site.split(":")[0] in AI_FILES or any(
-        frame in ("data/odds_service.py:_board", "data/odds_service.py:recheck_quota") for frame in call.stack)
+        frame in ("data/odds_service.py:_board", "data/odds_service.py:recheck_quota") + CAPTURE_FRAMES
+        for frame in call.stack)
 
 
 @pytest.fixture
@@ -204,8 +231,9 @@ DAY = espn_client.datetime.date(2026, 10, 27)
 
 # Public methods of each audited client: the ones that fetch (driven below) and the ones that never do
 FETCHES = {
+    # summary_raw/scoreboard_raw: the raw capture's one fetch that serves both stores (allowlisted, see CAPTURE_FRAMES)
     "EspnClient": {"scoreboard", "fetch_scoreboard", "summary", "standings", "roster", "player_seasons", "find_game",
-                   "game_result", "box_score", "closing_line", "played_on"},
+                   "game_result", "box_score", "closing_line", "played_on", "summary_raw", "scoreboard_raw"},
     "PlayerData": {"search", "overview", "gamelog", "splits", "news", "props", "card"},
     "OddsService": {"sports", "league_games", "recheck_quota"},
     "ApiSportsClient": {"get_fixtures", "get_team_stats", "get_player_stats", "get_injuries"},
@@ -281,6 +309,9 @@ def _drive_everything(cache: TTLCache) -> None:
     espn.box_score(nba, "403")
     espn.closing_line(nba, "404")
     espn.played_on(nba, DAY - espn_client.datetime.timedelta(days=1))
+    # The raw capture's one fetch for both stores (allowlisted: CAPTURE_FRAMES), without and with the capture's door
+    espn.summary_raw(nba, "407")
+    espn.scoreboard_raw(nba, DAY - espn_client.datetime.timedelta(days=1))
 
     players = PlayerData(espn)
     players.search("LeBron James", nba)
@@ -346,6 +377,36 @@ def _drive_everything(cache: TTLCache) -> None:
     except Exception:
         pass  # the canned answer isn't a forecast; the call is what counts
 
+    _drive_capture(cache)
+
+
+def _drive_capture(cache: TTLCache) -> None:
+    """The raw capture's fetchers (v4 P1, capture/sources), each through the capture's own door (PoliteHttp, its sleep
+    a no-op), and the one fetch that serves both stores (summary_raw / scoreboard_raw through it)."""
+    from telegram_betting_bot_simple.capture.http import PoliteHttp
+    from telegram_betting_bot_simple.capture.sources import (espn_core, espn_fightcenter, espn_propbets, espn_site,
+                                                             football_data_raw, greco, kalshi_raw, mcp, nflverse,
+                                                             statsapi)
+    from telegram_betting_bot_simple.data.markets.kalshi import Pacer
+    http = PoliteHttp(sleep=lambda seconds: None)
+    espn_site.summary(http, "basketball_nba", "401")
+    espn_site.scoreboard(http, "basketball_nba", DAY)
+    list(espn_core.plays_all(http, "soccer_epl", "402", max_pages=1))
+    espn_core.status(http, "mma_mixed_martial_arts", "600061267", "401911632")
+    espn_core.competitor_stats(http, "mma_mixed_martial_arts", "600061267", "401911632", "3949584")
+    espn_fightcenter.card(http, "600061267")
+    statsapi.feed_live(http, 777079)
+    nflverse.pbp_season(http, 2025)
+    nflverse.officials(http)
+    list(greco.csvs(http))
+    list(mcp.csvs(http))
+    football_data_raw.season_csv(http, "E0", 2025)
+    list(espn_propbets.propbets_all(http, "basketball_nba", "401"))
+    list(kalshi_raw.series_all(http, "KXEPLCORNERS", pacer=Pacer(0.0, sleep=lambda seconds: None)))
+    espn = EspnClient(cache)
+    espn.summary_raw("basketball_nba", "408", http=http)
+    espn.scoreboard_raw("soccer_epl", DAY, http=http)
+
 
 def test_every_fetch_goes_through_the_cache(recorder: Recorder) -> None:
     _drive_everything(TTLCache(name="coverage"))
@@ -355,12 +416,33 @@ def test_every_fetch_goes_through_the_cache(recorder: Recorder) -> None:
             "v3.football.api-sports.io", "example.test", "newsapi.org", "gamma-api.polymarket.com",
             "api.elections.kalshi.com", "barttorvik.com", "www.tennisabstract.com", "www.eloratings.net",
             "api.deepseek.com", "api.open-meteo.com", "geocoding-api.open-meteo.com",
-            "statsapi.mlb.com", "football-data.co.uk", "raw.githubusercontent.com"} <= hosts, hosts
+            "statsapi.mlb.com", "football-data.co.uk", "raw.githubusercontent.com", "github.com"} <= hosts, hosts
     assert recorder.outside() == [], "fetched outside the cache"
     ai = [call for call in recorder.calls if call.site.split(":")[0] in AI_FILES]
     assert ai and all(call.kind is None for call in ai)  # the AI is never cached
     board = [call for call in recorder.calls if call.site.startswith("data/odds_service.py") and "/odds" in call.url]
     assert board and all(allowlisted(call) and call.kind == "odds_board" for call in board)  # in the cache anyway
+
+
+def test_the_raw_capture_reaches_its_new_hosts_through_its_own_door(recorder: Recorder) -> None:
+    """v4 P1: the capture's fetches go through capture/http.py (PoliteHttp: per-host token buckets, raw.db's budgets)
+    rather than the lean cache, by design (CAPTURE_FRAMES, allowlisted), and reach the new hosts: MLB StatsAPI's live
+    feed, GitHub's raw and release hosts (nflverse, Greco1899, the Match Charting Project), site.web.api.espn.com
+    (fightcenter); never The Odds API."""
+    _drive_capture(TTLCache(name="coverage"))
+    capture = [call for call in recorder.calls if "capture/http.py:get" in call.stack]
+    assert capture and all(allowlisted(call) and call.kind is None for call in capture)
+    assert recorder.outside() == [] and len(capture) == len(recorder.calls)  # every one through the door
+    hosts = {re.sub(r"^https?://([^/]+).*$", r"\1", call.url) for call in capture}
+    assert {"site.api.espn.com", "sports.core.api.espn.com", "site.web.api.espn.com", "statsapi.mlb.com",
+            "github.com", "raw.githubusercontent.com", "football-data.co.uk", "api.elections.kalshi.com"} <= hosts
+    assert any(re.search(r"^https://statsapi\.mlb\.com/api/v1\.1/game/\d+/feed/live$", call.url) for call in capture)
+    assert any(re.search(r"^https://github\.com/nflverse/nflverse-data/releases/download/", call.url) for call in capture)
+    assert any(re.search(r"^https://site\.web\.api\.espn\.com/apis/common/v3/sports/mma/ufc/fightcenter/", call.url)
+               for call in capture)
+    assert not any("the-odds-api" in call.url for call in capture)
+    raw_fetches = [call for call in capture if any(f in call.stack for f in CAPTURE_FRAMES[1:])]
+    assert len(raw_fetches) == 2  # summary_raw and scoreboard_raw, through the same door
 
 
 # The markets Keeper counts each source under its own name; its TTLs are these policy kinds'

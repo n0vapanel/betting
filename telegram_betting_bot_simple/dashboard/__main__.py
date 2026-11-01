@@ -20,6 +20,7 @@ GRADE_EVERY_SECONDS = 600
 LEARN_EVERY_SECONDS = 60  # the learner's tick: its nightly, weekly and monthly runs keep their own schedule
 ANALYZE_EVERY_SECONDS = 600
 CACHE_LOG_EVERY_SECONDS = 3600
+CAPTURE_EVERY_SECONDS = 60  # the capture's tick: its jobs, sweep, static files and backfill keep their own times
 
 
 def grade_forever(service: DashboardService) -> None:
@@ -61,6 +62,27 @@ def learn_forever(learner, every: float = LEARN_EVERY_SECONDS) -> None:  # type:
     run(learner, every=every)
 
 
+def build_capture(config, service: DashboardService):  # type: ignore[no-untyped-def]
+    """The raw capture (capture/worker.py's Capturer: raw.db at RAW_DB_PATH, default beside betting.db), or None when
+    CAPTURE_ENABLED is off or it can't start (the app works without it)."""
+    if not getattr(config, "capture_enabled", True):
+        return None
+    try:
+        from ..capture.worker import build_capturer
+        return build_capturer(config, service)
+    except Exception:
+        logging.exception("The raw capture couldn't start; the app runs without it")
+        return None
+
+
+def capture_forever(capturer, every: float = CAPTURE_EVERY_SECONDS) -> None:  # type: ignore[no-untyped-def]
+    """The "capture" thread: a tick a minute under the store lease "capture" (one process captures): yesterday's
+    sweep, the due jobs, the static files, then the older-games backfill in its night window (never before a due
+    game). It never spends Odds API credits."""
+    from ..capture.worker import capture_forever as run
+    run(capturer, every=every)
+
+
 def log_cache_forever(every: float = CACHE_LOG_EVERY_SECONDS, rounds: Optional[int] = None,
                       sleep: Callable[[float], None] = time.sleep) -> None:
     """Log the shared cache's one-line summary (data/cache.py's stats_line: reads, hit shares, loads, failures,
@@ -99,6 +121,14 @@ def main() -> None:
         slate = build_slate(config, service)
         if slate.load():
             logging.info("Serving the saved slate until the first refresh finishes")
+        # The raw capture (v4): an untrimmed copy of every game in raw.db. The slate hands each round's ESPN games to it
+        # on a thread of its own (never holding the slate up), and its "capture" thread fetches what is due under a
+        # store lease (one process captures); CAPTURE_ENABLED=0 turns it off
+        capturer = build_capture(config, service)
+        if capturer is not None:
+            slate.capturer = capturer
+            threading.Thread(target=capture_forever, args=(capturer,), name="capture", daemon=True).start()
+            logging.info("Raw capture: on, into %s", capturer.raw.path)
         # The markets brain: the slate's own background worker refreshes Kalshi, Polymarket, ESPN's predictor and
         # the ratings (free; MARKETS_ENABLED=0 turns them off), and every game's consensus is logged before its
         # start and graded with the rest (grade_forever)

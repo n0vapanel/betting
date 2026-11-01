@@ -1,8 +1,12 @@
 # telegram_betting_bot_simple/config.py
+import logging
+import math
+import os
 import re
+import tempfile
 from typing import Any, FrozenSet, Literal, Optional, Tuple
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
 
@@ -14,6 +18,37 @@ DEFAULT_BOOKMAKERS = ("pinnacle,betfair_ex_eu,matchbook,draftkings,fanduel,betmg
 DEFAULT_SHARP_BOOKS = "pinnacle,betfair_ex_eu,matchbook"
 MAX_BOOKMAKERS = 10  # every 10 bookmakers count as one region (3 credits a board for three markets)
 BOOK_KEY = re.compile(r"[a-z0-9][a-z0-9_]{1,39}")
+# The raw capture's defaults (capture/plan.py WAVE1_SOCCER; capture/sources/kalshi_raw.py DEFAULT_SERIES: the corner,
+# shot and save series the plan marks confirmed). Kept as text here so the settings load without the capture package
+CORE_PLAYS_DEFAULT = ("soccer_epl,soccer_efl_champ,soccer_spain_la_liga,soccer_germany_bundesliga,soccer_italy_serie_a,"
+                      "soccer_france_ligue_one,soccer_spl,soccer_netherlands_eredivisie,soccer_portugal_primeira_liga,"
+                      "soccer_uefa_champs_league")
+KALSHI_SERIES_DEFAULT = "KXEPLCORNERS,KXUCLSOT,KXUCLSAVE"
+LEAGUE_KEY = re.compile(r"[a-z0-9][a-z0-9_]{1,59}")
+KALSHI_TICKER = re.compile(r"KX[A-Z0-9]{2,40}")
+CAPTURE_DEFAULTS = {"capture_per_day": 3000, "capture_backfill_per_night": 6000, "capture_backfill_seasons": 3,
+                    "capture_min_free_gb": 2.0}
+# The capture's numbers: (type, smallest, largest). A capture setting never stops the bot or the dashboard: a value
+# that doesn't parse or is out of range logs one warning naming the setting and the default is used
+CAPTURE_RANGES = {"capture_per_day": (int, 0, None), "capture_backfill_per_night": (int, 0, None),
+                  "capture_backfill_seasons": (int, 1, 10), "capture_min_free_gb": (float, 0.0, 10000.0)}
+CAPTURE_SWITCHES = ("capture_enabled", "capture_propbets", "capture_backfill")  # on by default
+TRUE_WORDS = frozenset({"1", "true", "t", "yes", "y", "on"})
+FALSE_WORDS = frozenset({"0", "false", "f", "no", "n", "off"})
+INTEGER = re.compile(r"[+-]?\d+")
+
+log = logging.getLogger(__name__)
+
+
+def _entries(count: int) -> str:
+    return "1 entry is" if count == 1 else f"{count} entries are"
+
+
+def _setting_default(name: str, default: Any, why: str) -> Any:
+    """Log that a capture setting's value can't be used (never the value itself: a key pasted into the wrong line
+    would end up in the logs) and give the default."""
+    log.warning("%s %s, so it is ignored: the default (%s) is used", name.upper(), why, default)
+    return default
 
 class Config(BaseSettings):
     telegram_token: str = Field(..., validation_alias="TELEGRAM_BOT_TOKEN")
@@ -108,6 +143,29 @@ class Config(BaseSettings):
     learn_ai: Literal["auto", "claude", "deepseek", "off"] = Field("auto", validation_alias="LEARN_AI")
     learn_ai_monthly_cents: int = Field(500, ge=0, validation_alias="LEARN_AI_MONTHLY_CENTS")
     learn_backfill_per_night: int = Field(1500, ge=0, validation_alias="LEARN_BACKFILL_PER_NIGHT")
+    # The raw capture (v4, capture/): the dashboard's "capture" thread keeps an untrimmed copy of every finished game on
+    # ESPN's 58 paths (and MLB StatsAPI's live feed, ESPN's propBets and Kalshi's corner, shot and save series before
+    # the start, nflverse, Greco1899, the Match Charting Project and football-data's files) in its own SQLite file,
+    # RAW_DB_PATH (default: raw.db beside betting.db, in the state folder), so the brain can recount every event later.
+    # It never spends Odds API credits. CAPTURE_PER_DAY caps its requests a day (UTC); CAPTURE_CORE_PLAYS_LEAGUES are
+    # the leagues whose matches also get ESPN's play-by-play pages (default: the ten wave-1 soccer leagues; "none" for
+    # none); CAPTURE_PROPBETS keeps ESPN's DraftKings props at four times before each NBA, WNBA, NFL, NHL and MLB game;
+    # CAPTURE_KALSHI_SERIES the Kalshi series snapshotted before their league's games ("none" for none).
+    # CAPTURE_BACKFILL fetches the last CAPTURE_BACKFILL_SEASONS seasons' games too, between 01:00 and 06:00 in TIMEZONE
+    # (never while the learning loop's own backfill runs), at most CAPTURE_BACKFILL_PER_NIGHT requests a night, never
+    # before a game that is due. CAPTURE_ENABLED=0 stops it. A capture value that doesn't read is ignored with a warning
+    capture_enabled: bool = Field(True, validation_alias="CAPTURE_ENABLED")
+    raw_db_path: Optional[str] = Field(None, validation_alias="RAW_DB_PATH")
+    capture_per_day: int = Field(3000, ge=0, validation_alias="CAPTURE_PER_DAY")
+    capture_core_plays_leagues: str = Field(CORE_PLAYS_DEFAULT, validation_alias="CAPTURE_CORE_PLAYS_LEAGUES")
+    capture_propbets: bool = Field(True, validation_alias="CAPTURE_PROPBETS")
+    capture_kalshi_series: str = Field(KALSHI_SERIES_DEFAULT, validation_alias="CAPTURE_KALSHI_SERIES")
+    capture_backfill: bool = Field(True, validation_alias="CAPTURE_BACKFILL")
+    capture_backfill_per_night: int = Field(6000, ge=0, validation_alias="CAPTURE_BACKFILL_PER_NIGHT")
+    capture_backfill_seasons: int = Field(3, ge=1, le=10, validation_alias="CAPTURE_BACKFILL_SEASONS")
+    # The capture and the backfill fetch nothing while raw.db's disk has less than this many GiB free (or under 10% of
+    # it), so they can never fill the disk betting.db lives on
+    capture_min_free_gb: float = Field(2.0, ge=0, le=10000, validation_alias="CAPTURE_MIN_FREE_GB")
     # The owner's Telegram chat (a private chat's id is the owner's Telegram id): bot notifications and the
     # learner's weekly summary go there, and that Telegram user may Undo or pause the brain's changes (as may anyone
     # signed in with the dashboard password)
@@ -131,6 +189,133 @@ class Config(BaseSettings):
         # "MARKETS_ENABLED=" (or "WEATHER_ENABLED=", "LEARN_ENABLED=") in .env means the default (on), not a startup
         # error
         return True if isinstance(value, str) and not value.strip() else value
+
+    # The raw capture's settings are lenient (v4 P1): load_config is shared by the Telegram bot, which never uses the
+    # capture, and a typo in an optional capture setting must never stop either service. A value that doesn't parse
+    # or is out of range logs one warning (naming the setting, never echoing the value) and the default is used
+
+    @field_validator(*CAPTURE_SWITCHES, mode="before")
+    @classmethod
+    def _lenient_capture_switch(cls, value: object, info: Any) -> object:
+        # Blank means the default (on); 1/0, true/false, yes/no, on/off in any case
+        if value is None or isinstance(value, bool):
+            return True if value is None else value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        text = str(value).strip().lower()
+        if not text:
+            return True
+        if text in TRUE_WORDS or text in FALSE_WORDS:
+            return text in TRUE_WORDS
+        return _setting_default(info.field_name, True, "should be 1 or 0 (on or off)")
+
+    @field_validator(*CAPTURE_RANGES, mode="before")
+    @classmethod
+    def _lenient_capture_number(cls, value: object, info: Any) -> object:
+        # Blank means the default; a whole number (CAPTURE_MIN_FREE_GB: a number) inside its range
+        name, default = info.field_name, CAPTURE_DEFAULTS[info.field_name]
+        kind, low, high = CAPTURE_RANGES[name]
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return default
+        number: Any = None
+        if isinstance(value, bool):
+            number = None
+        elif isinstance(value, (int, float)):
+            number = value
+        else:
+            text = str(value).strip()
+            try:
+                number = int(text) if INTEGER.fullmatch(text) else (float(text) if kind is float else None)
+            except ValueError:
+                number = None
+        if number is None or (kind is int and isinstance(number, float) and not float(number).is_integer()):
+            return _setting_default(name, default, "should be a whole number" if kind is int else "should be a number")
+        if isinstance(number, float) and not math.isfinite(number):
+            return _setting_default(name, default, "should be a number")
+        if (low is not None and number < low) or (high is not None and number > high):
+            span = f"{low:g} or more" if high is None else f"from {low:g} to {high:g}"
+            return _setting_default(name, default, f"should be {span}")
+        return kind(number)
+
+    @field_validator("raw_db_path", mode="before")
+    @classmethod
+    def _tidy_raw_db_path(cls, value: object) -> object:
+        # "RAW_DB_PATH=" in .env means the default (raw.db beside betting.db)
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    @field_validator("capture_core_plays_leagues", mode="before")
+    @classmethod
+    def _lenient_core_plays_leagues(cls, value: object) -> str:
+        # League keys (data/espn_client.py's 58 paths), comma-separated; blank means the default, "none" none. Keys
+        # that aren't one of the 58 are left out with a warning (the rest are kept; the default when none is left)
+        text = "" if value is None else str(value).strip()
+        if not text:
+            return CORE_PLAYS_DEFAULT
+        if text.lower() == "none":
+            return "none"
+        from .data.espn_client import espn_path
+        keys, dropped = [], 0
+        for part in text.split(","):
+            key = part.strip().lower()
+            if not key:
+                continue
+            if not LEAGUE_KEY.fullmatch(key) or espn_path(key) is None:
+                dropped += 1
+                continue
+            if key not in keys:
+                keys.append(key)
+        if not keys:
+            _setting_default("capture_core_plays_leagues", "the ten wave-1 soccer leagues",
+                             "holds no league key of the 58 ESPN paths")
+            return CORE_PLAYS_DEFAULT
+        if dropped:
+            log.warning("CAPTURE_CORE_PLAYS_LEAGUES: %s not one of the 58 ESPN league keys, so %s left out; kept: %s",
+                        _entries(dropped), "it is" if dropped == 1 else "they are", ",".join(keys))
+        return ",".join(keys)
+
+    @field_validator("capture_kalshi_series", mode="before")
+    @classmethod
+    def _lenient_kalshi_series(cls, value: object) -> str:
+        # Kalshi series tickers (KX...), comma-separated; blank means the default, "none" none (an empty value for the
+        # capture). Words that aren't tickers are left out with a warning (the default when none is left)
+        text = "" if value is None else str(value).strip()
+        if not text:
+            return KALSHI_SERIES_DEFAULT
+        if text.lower() in ("none", "off"):
+            return ""
+        tickers, dropped = [], 0
+        for part in text.split(","):
+            ticker = part.strip().upper()
+            if not ticker:
+                continue
+            if not KALSHI_TICKER.fullmatch(ticker):
+                dropped += 1
+                continue
+            if ticker not in tickers:
+                tickers.append(ticker)
+        if not tickers:
+            return _setting_default("capture_kalshi_series", KALSHI_SERIES_DEFAULT,
+                                    "holds no Kalshi series ticker (KX...)")
+        if dropped:
+            log.warning("CAPTURE_KALSHI_SERIES: %s not a Kalshi series ticker (KX...), so %s left out; kept: %s",
+                        _entries(dropped), "it is" if dropped == 1 else "they are", ",".join(tickers))
+        return ",".join(tickers)
+
+    @model_validator(mode="after")
+    def _raw_db_not_betting_db(self) -> "Config":
+        # RAW_DB_PATH naming betting.db (in the state folder the services use) would put raw blobs into betting.db: it
+        # is ignored with a warning (capture/raw_store.py resolve_raw_db_path also refuses any existing non-raw file)
+        if self.raw_db_path:
+            state = self.state_dir or os.path.join(tempfile.gettempdir(), "sportsbet-ai")
+            target = os.path.abspath(os.path.expanduser(self.raw_db_path))
+            if target == os.path.abspath(os.path.join(state, "betting.db")) or os.path.basename(target) == "betting.db":
+                log.warning("RAW_DB_PATH names betting.db, so it is ignored: raw.db goes beside betting.db (the "
+                            "default)")
+                self.raw_db_path = None
+        return self
 
     @field_validator("learn_ai", mode="before")
     @classmethod

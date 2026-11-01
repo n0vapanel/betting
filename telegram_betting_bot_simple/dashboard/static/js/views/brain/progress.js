@@ -9,9 +9,13 @@
 // Blocks, top to bottom (method.md section 8, as the spec simplifies it):
 //   the honest promise and the learning switch · 1 headline per sport (a button: it picks the sport below) ·
 //   the sport row (the one filter: it scopes 2, 3 and 7) with 2 score over time, 3 calibration (+ PIT, new targets)
-//   and 7 adjustments · 4 what changed and why · 5 held steady · 6 experiments · 8 AI · 9 health.
+//   and 7 adjustments · 4 what changed and why · 5 held steady · 6 experiments · 8 AI · 9 health · 10 raw capture
+//   (v4 P1: finals stored within 36 h per sport and the boards the sweep couldn't read, raw.db and the disk, the day's
+//   requests, forward capture's failed requests and the backfill's apart, the older games' backfill per league and
+//   season, the latest errors, and the server's alarms).
 //
 //   renderBrain(box, {signal, query}) -> draws into ``box``; query: sport=<key> picks the sport first
+//   captureHtml(normalized) -> the raw capture card's HTML ("" when the payload has no capture block)
 // Every figure is the server's; status words come from its fields (model.js); text goes in through esc().
 
 import { api, isQuiet } from "../../api.js";
@@ -307,6 +311,128 @@ function healthHtml(d) {
       h.backlog !== null ? ["Games waiting over 2 days for a grade", String(h.backlog)] : null])}`);
 }
 
+// --- 10 · raw capture (v4 P1) -----------------------------------------------------------------------------------------
+
+/** "4.2 GB" from bytes, as df -h and the server's alarms count them (1024-based); "–" when unknown. */
+function bytesText(n) {
+  if (n === null || n === undefined) return "–";
+  for (const [unit, size] of [["TB", 2 ** 40], ["GB", 2 ** 30], ["MB", 2 ** 20], ["KB", 2 ** 10]]) if (n >= size) return `${(n / size).toFixed(1)} ${unit}`;
+  return `${n} B`;
+}
+/** A share as a percent to one decimal, rounded down so it never shows a whole 100% it isn't ("99.9%"; the 1e-6 keeps
+ * 0.98 from flooring to 97.9 through floating point); "–" when unknown. */
+const shareText = (s) => (s === null ? "–" : s >= 1 ? "100%" : `${(Math.floor(s * 1000 + 1e-6) / 10).toFixed(1)}%`);
+const wholePct = (s) => (s === null ? "–" : `${Math.round(s * 100)}%`);
+const plural = (n, word) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
+/** "Nov 2" for a "YYYY-MM-DD" day as sent (a sweep's ESPN day, a backfill night): that date, never shifted by the
+ * viewer's time zone; "" for anything else. */
+function dateLabel(day) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day || "");
+  return m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).toLocaleDateString([], { month: "short", day: "numeric", timeZone: "UTC" }) : "";
+}
+
+/** A failed-requests tile: forward capture's (counted, or stored answers before counting) or the backfill's own. */
+function failedTile(label, part, word, when) {
+  if (!part) return null;
+  return [label, part.requests ? shareText(part.share) : "–",
+    part.requests ? `${part.errors.toLocaleString()} of ${plural(part.requests, word)}, ${when}` : "none yet"];
+}
+
+/** The backfill's latest night: "tonight so far" or "last night" when it ran in the night that began last (in its own
+ * time zone, as the server keys it), else that night's date. */
+function backfillNightTile(r) {
+  if (!r.backfillNight) return null;
+  const label = r.backfillNight === r.night ? (r.nightOpen ? "Backfill tonight so far" : "Backfill last night")
+    : `Backfill, night of ${dateLabel(r.backfillNight)}`;
+  return [label, r.backfill.toLocaleString(), r.perNight ? `of ${r.perNight.toLocaleString()} requests` : "requests"];
+}
+
+function captureTiles(c) {
+  const t = c.coverage.total;
+  const judged = t.covered + t.missed;
+  const below = t.share !== null && c.coverage.target !== null && t.share < c.coverage.target;
+  const unread = c.coverage.unread.length;
+  const r = c.requests;
+  const stored = c.http && c.http.counted !== "requests";
+  return nums([
+    [`Finals stored within ${c.coverage.hours} h`, shareText(t.share), unread
+      ? [`unknown: ${plural(unread, "board")} unread`, judged ? `${t.covered.toLocaleString()} of ${plural(judged, "final")} it could see` : ""].filter(Boolean).join(" · ")
+      : judged
+        ? `${t.covered.toLocaleString()} of ${plural(judged, "final")}, last ${c.coverage.days} days${below ? ` · below the ${wholePct(c.coverage.target)} target` : ""}`
+        : `none to judge yet${t.pending ? ` (${t.pending.toLocaleString()} inside their ${c.coverage.hours} h)` : ""}`],
+    ["raw.db", bytesText(c.size ? c.size.raw : null), c.size && c.size.full !== null
+      ? `disk ${wholePct(c.size.full)} full, ${bytesText(c.size.free)} free${c.size.paused ? " · capture paused" : ""}` : ""],
+    ["Requests today", r.capture.toLocaleString(), [r.perDay ? `of ${r.perDay.toLocaleString()} a day` : "", r.prices ? `${r.prices.toLocaleString()} for prices` : ""].filter(Boolean).join(" · ")],
+    failedTile("Failed requests", c.http, stored ? "stored answer" : "request", stored ? "last 24 hours" : "today and yesterday (UTC)"),
+    backfillNightTile(r),
+    failedTile("Failed backfill requests", c.backfillHttp, "request", "today and yesterday (UTC)"),
+  ]);
+}
+
+function captureSports(c) {
+  if (!c.coverage.sports.length) return "";
+  return `<h3 class="bp-sub">By sport, last ${esc(c.coverage.days)} days</h3>${kv(c.coverage.sports.map((s) => {
+    const judged = s.covered + s.missed;
+    const seen = judged ? `${s.covered.toLocaleString()} of ${judged.toLocaleString()}${s.unread ? " seen" : ""}` : "";
+    return [s.label, [s.unread ? `unknown · ${plural(s.unread, "board")} unread` : judged ? shareText(s.share) : "", seen,
+      s.pending ? `${s.pending.toLocaleString()} waiting` : ""].filter(Boolean).join(" · ") || "–"];
+  }))}${captureUnread(c)}`;
+}
+
+/** The boards the nightly sweep couldn't read: their games are left out of the coverage unseen. */
+function captureUnread(c) {
+  const unread = c.coverage.unread;
+  if (!unread.length) return "";
+  const items = unread.map((b) => `${leagueTitle(b.league) || b.league} (${[dateLabel(b.day),
+    b.final ? (b.tries ? `after ${b.tries} ${b.tries === 1 ? "try" : "tries"}` : "given up") : "trying again"].filter(Boolean).join(", ")})`);
+  return `<p class="hint bp-cap-unread">${esc(`The sweep couldn't read ${unread.length === 1 ? "this board" : "these boards"}, so ${unread.length === 1 ? "its" : "their"} games aren't counted: ${items.join(" · ")}.`)}</p>`;
+}
+
+function captureBackfill(c) {
+  if (!c.backfill.length) return "";
+  const done = c.backfill.reduce((n, b) => n + b.done, 0);
+  const planned = c.backfill.reduce((n, b) => n + (b.planned ?? b.begun), 0);
+  const stored = c.backfill.reduce((n, b) => n + b.stored, 0);
+  const head = `Older games: ${plural(c.backfill.length, "league")} · ${done.toLocaleString()} of ${plural(planned, "season")} done · ${plural(stored, "game")}`;
+  const rows = c.backfill.map((b) => {
+    const whole = b.planned ?? b.begun;
+    const seasons = b.seasons.map((s) => `${s.season} ${s.done ? "done" : `${s.stored.toLocaleString()} so far`}`).join(" · ");
+    return `<li class="bp-progress">
+      <div class="row-between"><b>${esc(leagueTitle(b.league) || b.league)}</b><span>${esc(`${b.done.toLocaleString()} of ${plural(whole, "season")}`)}</span></div>
+      ${whole ? meter(b.done, whole, `${b.done} of ${whole} seasons loaded`) : ""}
+      <span class="bp-meta">${esc([seasons, `${plural(b.stored, "game")} stored`, b.updated ? `last ${ago(b.updated)}` : ""].filter(Boolean).join(" · "))}</span>
+    </li>`;
+  }).join("");
+  return `<details class="bp-more bp-cap-fold"><summary>${icon("down", { size: 16 })}<span>${esc(head)}</span></summary><ul class="bp-list">${rows}</ul></details>`;
+}
+
+function captureErrors(c) {
+  if (!c.errors.length) return "";
+  return `<details class="bp-more bp-cap-fold"><summary>${icon("down", { size: 16 })}<span>${esc(`Latest errors (${c.errors.length})`)}</span></summary>
+    <ul class="bp-cap-errors">${c.errors.map((e) => `<li><span class="bp-meta">${esc([e.at ? timeLabel(e.at) : "", e.what,
+      e.league ? leagueTitle(e.league) || e.league : "", e.key].filter(Boolean).join(" · "))}</span><p>${esc(e.error || "–")}</p></li>`).join("")}</ul></details>`;
+}
+
+/** The raw capture card (see the header): every figure and alarm is the server's; text goes in through esc(). */
+export function captureHtml(d) {
+  const c = d.capture;
+  if (!c) return "";
+  const n = c.alarms.length;
+  const status = n ? badge(`${n} alarm${n === 1 ? "" : "s"}`, "warn", "alert") : c.stored ? badge("No alarms", "good", "check") : "";
+  const alarms = c.alarms.map((a) => notice(a.text, "warn")).join("");
+  const intro = '<p class="hint" style="margin-top:0">Every finished game\'s full ESPN record (plays, box scores, officials), kept as it came so later versions can recount any event, and free prices (DraftKings props on ESPN, Kalshi) archived before each start.</p>';
+  const options = { id: "bp-capture", className: "bp-cap", aside: status };
+  if (!c.stored) {
+    const why = c.unreadable ? "raw.db couldn't be read just now; the next visit tries again."
+      : c.enabled ? "Nothing captured yet: games are stored from the first finals after capture starts."
+        : "Raw capture is off (CAPTURE_ENABLED=0), so nothing is stored.";
+    return section("Raw capture", `${alarms}${intro}<p class="bp-empty">${esc(why)}</p>`, options);
+  }
+  const off = c.enabled ? "" : notice("Raw capture is off (CAPTURE_ENABLED=0): these are the numbers from when it last ran.", "info");
+  const last = c.lastStored ? `<p class="hint">${esc(`Last stored ${ago(c.lastStored)}.`)}</p>` : "";
+  return section("Raw capture", `${alarms}${off}${intro}${captureTiles(c)}${captureSports(c)}${captureBackfill(c)}${captureErrors(c)}${last}`, options);
+}
+
 // --- the screen -------------------------------------------------------------------------------------------------------
 
 export async function renderBrain(box, { signal, query = new URLSearchParams() } = {}) {
@@ -365,7 +491,7 @@ export async function renderBrain(box, { signal, query = new URLSearchParams() }
   };
 
   const draw = () => {
-    box.innerHTML = `<div class="bp">${introHtml(data)}${headlinesHtml(data, selected)}${sportSection()}${changesHtml(data)}${heldHtml(data)}${experimentsHtml(data)}${aiHtml(data)}${healthHtml(data)}</div>`;
+    box.innerHTML = `<div class="bp">${introHtml(data)}${headlinesHtml(data, selected)}${sportSection()}${changesHtml(data)}${heldHtml(data)}${experimentsHtml(data)}${aiHtml(data)}${healthHtml(data)}${captureHtml(data)}</div>`;
     drawCharts();
   };
 

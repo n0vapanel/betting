@@ -1,0 +1,314 @@
+{
+ "about": "Trimmed copies of the v4 audit's live ESPN payloads (2026-10-31; see each url) for the capture tests. Lists are cut (typed lists keep one item per type), so counts here do not add up to the box totals. Synthetic files are marked synthetic.",
+ "fixtures": [
+  {
+   "name": "core_atp_comp",
+   "file": "core_atp_comp.json",
+   "status": 200,
+   "url": "https://sports.core.api.espn.com/v2/sports/tennis/leagues/atp/events/10-2026/competitions/187149",
+   "bytes_live": 3496,
+   "bytes_kept": 2802,
+   "kept": "trimmed"
+  },
+  {
+   "name": "core_atp_qf_comp",
+   "file": "core_atp_qf_comp.json",
+   "status": 200,
+   "url": "https://sports.core.api.espn.com/v2/sports/tennis/leagues/atp/events/10-2026/competitions/185201/competitors/2383",
+   "bytes_live": 533,
+   "bytes_kept": 533,
+   "kept": "trimmed"
+  },
+  {
+   "name": "core_atp_qf_lines",
+   "file": "core_atp_qf_lines.json",
+   "status": 200,
+   "url": "https://sports.core.api.espn.com/v2/sports/tennis/leagues/atp/events/10-2026/competitions/185201/competitors/2383/linescores",
+   "bytes_live": 461,
+   "bytes_kept": 461,
+   "kept": "trimmed"
+  },
+  {
+   "name": "core_atp_qf_stats",
+   "file": "core_atp_qf_stats.txt",
+   "status": 404,
+   "url": "https://sports.core.api.espn.com/v2/sports/tennis/leagues/atp/events/10-2026/competitions/185201/competitors/2383/statistics",
+   "bytes_live": 25,
+   "bytes_kept": 25,
+   "kept": "as is (the audit tool's error text, not ESPN's body)"
+  },
+  {
+   "name": "core_epl_plays",
+   "file": "core_epl_plays.json",
+   "status": 200,
+   "url": "https://sports.core.api.espn.com/v2/sports/soccer/leagues/eng.1/events/401878765/competitions/401878765/plays?limit=300",
+   "bytes_live": 466725,
+   "bytes_kept": 45974,
+   "kept": "trimmed"
+  },
+  {
+   "name": "core_ufc_comp",
+   "file": "core_ufc_comp.json",
+   "status": 200,
+   "url": "https://sports.core.api.espn.com/v2/sports/mma/leagues/ufc/events/600061267/competitions/401911632",
+   "bytes_live": 4012,
+   "bytes_kept": 3979,
+   "kept": "trimmed"
+  },
+  {
+   "name": "core_ufc_stats",
+   "file": "core_ufc_stats.json",
+   "status": 200,
+   "url": "https://sports.core.api.espn.com/v2/sports/mma/leagues/ufc/events/600061267/competitions/401911632/competitors/3949584/statistics",
+   "bytes_live": 10070,
+   "bytes_kept": 2382,
+   "kept": "trimmed"
+  },
+  {
+   "name": "core_ufc_status",
+   "file": "core_ufc_status.json",
+   "status": 200,
+   "url": "https://sports.core.api.espn.com/v2/sports/mma/leagues/ufc/events/600061267/competitions/401911632/status",
+   "bytes_live": 554,
+   "bytes_kept": 554,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sb_atp",
+   "file": "sb_atp.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard",
+   "bytes_live": 450045,
+   "bytes_kept": 25222,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sb_epl",
+   "file": "sb_epl.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard?dates=20261025",
+   "bytes_live": 54103,
+   "bytes_kept": 13208,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sb_mlb",
+   "file": "sb_mlb.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard?dates=20261028",
+   "bytes_live": 20584,
+   "bytes_kept": 11036,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sb_nba",
+   "file": "sb_nba.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=20261030",
+   "bytes_live": 238110,
+   "bytes_kept": 16240,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sb_nfl",
+   "file": "sb_nfl.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=20261025",
+   "bytes_live": 106944,
+   "bytes_kept": 10774,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sb_nhl",
+   "file": "sb_nhl.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard?dates=20261030",
+   "bytes_live": 94037,
+   "bytes_kept": 25151,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sb_ufc",
+   "file": "sb_ufc.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard?dates=20261024",
+   "bytes_live": 48681,
+   "bytes_kept": 20209,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sum_atp",
+   "file": "sum_atp.txt",
+   "status": 400,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/tennis/atp/summary?event=187149",
+   "bytes_live": 27,
+   "bytes_kept": 27,
+   "kept": "as is (the audit tool's error text, not ESPN's body)"
+  },
+  {
+   "name": "sum_epl",
+   "file": "sum_epl.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/summary?event=401878765",
+   "bytes_live": 408457,
+   "bytes_kept": 38039,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sum_mlb",
+   "file": "sum_mlb.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/summary?event=401908046",
+   "bytes_live": 901754,
+   "bytes_kept": 85567,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sum_nba",
+   "file": "sum_nba.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=401909278",
+   "bytes_live": 499304,
+   "bytes_kept": 53247,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sum_nba2",
+   "file": "sum_nba2.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=401909280",
+   "bytes_live": 435771,
+   "bytes_kept": 34724,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sum_nba3",
+   "file": "sum_nba3.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=401909281",
+   "bytes_live": 435385,
+   "bytes_kept": 35543,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sum_nfl",
+   "file": "sum_nfl.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=401873017",
+   "bytes_live": 556819,
+   "bytes_kept": 57708,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sum_nhl",
+   "file": "sum_nhl.json",
+   "status": 200,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/summary?event=401892612",
+   "bytes_live": 506886,
+   "bytes_kept": 55867,
+   "kept": "trimmed"
+  },
+  {
+   "name": "sum_ufc",
+   "file": "sum_ufc.txt",
+   "status": 404,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/summary?event=600061267",
+   "bytes_live": 25,
+   "bytes_kept": 25,
+   "kept": "as is (the audit tool's error text, not ESPN's body)"
+  },
+  {
+   "name": "sb_range_400",
+   "file": "sb_range_400.json",
+   "status": 400,
+   "url": "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=20240101-20240107",
+   "bytes_live": 55,
+   "bytes_kept": 55,
+   "kept": "as is (P1 probe 2026-11-01: ESPN refuses a date range on the site scoreboard)"
+  },
+  {
+   "name": "syn_play_by_play_2024.csv",
+   "file": "syn_play_by_play_2024.csv.gz",
+   "synthetic": true,
+   "bytes_kept": 230,
+   "kept": "synthetic: the notes' documented columns, made-up rows"
+  },
+  {
+   "name": "syn_officials",
+   "file": "syn_officials.csv",
+   "synthetic": true,
+   "bytes_kept": 149,
+   "kept": "synthetic: the notes' documented columns, made-up rows"
+  },
+  {
+   "name": "syn_ufc_event_details",
+   "file": "syn_ufc_event_details.csv",
+   "synthetic": true,
+   "bytes_kept": 132,
+   "kept": "synthetic: the notes' documented columns, made-up rows"
+  },
+  {
+   "name": "syn_ufc_fight_results",
+   "file": "syn_ufc_fight_results.csv",
+   "synthetic": true,
+   "bytes_kept": 270,
+   "kept": "synthetic: the notes' documented columns, made-up rows"
+  },
+  {
+   "name": "syn_ufc_fight_stats",
+   "file": "syn_ufc_fight_stats.csv",
+   "synthetic": true,
+   "bytes_kept": 287,
+   "kept": "synthetic: the notes' documented columns, made-up rows"
+  },
+  {
+   "name": "syn_ufc_fighter_tott",
+   "file": "syn_ufc_fighter_tott.csv",
+   "synthetic": true,
+   "bytes_kept": 143,
+   "kept": "synthetic: the notes' documented columns, made-up rows"
+  },
+  {
+   "name": "syn_charting-m-matches",
+   "file": "syn_charting-m-matches.csv",
+   "synthetic": true,
+   "bytes_kept": 230,
+   "kept": "synthetic: the notes' documented columns, made-up rows"
+  },
+  {
+   "name": "syn_charting-m-points-2020s",
+   "file": "syn_charting-m-points-2020s.csv",
+   "synthetic": true,
+   "bytes_kept": 140,
+   "kept": "synthetic: the notes' documented columns, made-up rows"
+  },
+  {
+   "name": "syn_charting-m-stats-Overview",
+   "file": "syn_charting-m-stats-Overview.csv",
+   "synthetic": true,
+   "bytes_kept": 226,
+   "kept": "synthetic: the notes' documented columns, made-up rows"
+  },
+  {
+   "name": "syn_E0_2425",
+   "file": "syn_E0_2425.csv",
+   "synthetic": true,
+   "bytes_kept": 319,
+   "kept": "synthetic: the notes' documented columns, made-up rows"
+  },
+  {
+   "name": "syn_fightcenter",
+   "file": "syn_fightcenter.json",
+   "synthetic": true,
+   "bytes_kept": 1448,
+   "kept": "synthetic: the notes' documented paths (the audit has no payload for it)"
+  },
+  {
+   "name": "syn_feed_live",
+   "file": "syn_feed_live.json",
+   "synthetic": true,
+   "bytes_kept": 532,
+   "kept": "synthetic: the notes' documented paths (the audit has no payload for it)"
+  }
+ ]
+}

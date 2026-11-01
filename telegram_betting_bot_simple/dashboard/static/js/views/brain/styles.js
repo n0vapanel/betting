@@ -110,6 +110,18 @@ const CSS = `
 .bp .bp-hyp { margin: 8px 0 0 18px; display: grid; gap: 4px; font-size: 13.5px; }
 .bp tbody th[scope="row"] { min-width: 120px; text-transform: none; letter-spacing: 0; font-size: 13.5px; font-weight: 600; color: var(--text); white-space: normal; }
 .bp .bp-two { display: grid; gap: 12px; }
+.bp .bp-cap .notice { margin: 0 0 8px; overflow-wrap: anywhere; }
+.bp .bp-cap .notice > div { min-width: 0; }
+.bp .bp-cap .bp-meta { font-size: 12.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.bp .bp-cap .bp-cap-unread { overflow-wrap: anywhere; }
+.bp .bp-cap-fold { margin-top: 6px; }
+.bp .bp-cap-fold > summary > span { min-width: 0; overflow-wrap: anywhere; }
+.bp .bp-cap-fold > .bp-list { margin-top: 4px; }
+.bp .bp-cap-fold[open] > summary .icon { transform: rotate(180deg); }
+.bp .bp-cap-errors { list-style: none; display: grid; gap: 8px; margin-top: 4px; }
+.bp .bp-cap-errors li { display: grid; gap: 2px; min-width: 0; padding-top: 8px; border-top: 1px solid var(--line); }
+.bp .bp-cap-errors li:first-child { border-top: 0; padding-top: 0; }
+.bp .bp-cap-errors p { font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 @media (min-width: 1000px) {
   .bp .bp-two { grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
 }

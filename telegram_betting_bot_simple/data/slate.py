@@ -94,6 +94,14 @@ The slate is serialised once per change, kept in memory as raw bytes, gzip bytes
 the bytes), and saved to the store, so a restarted dashboard serves the last slate before its first
 refresh. Nothing in it changes unless the games do, so an unchanged slate keeps its ETag.
 
+The raw capture (v4 P1, capture/worker.py): with a ``capturer`` (the dashboard's Capturer; None when CAPTURE_ENABLED is
+off), each round hands the slate's ESPN games to its ``schedule_from_slate``, which creates their capture jobs and
+pre-start horizons in raw.db. The hand-off runs on a thread of its own, so building the slate never waits for it.
+One runs at a time, and a round that comes while one runs leaves its games for it to take next (the newest win).
+Nothing it does or raises reaches the slate. The same games are handed over again at most every CAPTURE_EVERY
+seconds, a change in any game's status or start at the next round, and after a failed hand-off the next waits
+CAPTURE_RETRY seconds. Without a capturer nothing here changes.
+
 The learning loop (v3, learn/): every blend is made with the live parameter version of its sport
 (learn/registry.py ``current``; version 0, today's constants, until a change passes the gate), and the logged row
 keeps that ``params_version``. Each game also gets one snapshot row a day before its start (kind "t24", logged on
@@ -198,6 +206,11 @@ CONTEXT_EVERY = 60.0  # the context worker's round: each game's venue & conditio
 CONTEXT_SOON = 5.0  # a reader asked for a block not built yet: a round now, at most this often (request_context)
 PLAYERS_EVERY = 5 * 60.0  # the player boards' game-day prewarm (data/player_board.py): at most this often
 PAST_KEPT = 600  # past scoreboards (league, day) the context worker keeps: they don't change
+CAPTURE_EVERY = 10 * 60.0  # the raw capture's hook: unchanged games are handed over again at most this often ...
+CAPTURE_RETRY = 60.0  # ... and after a failed hand-off, the next waits this long
+# What the raw capture's Capturer.schedule_from_slate gets of each ESPN game (copies; the rest is the slate's own)
+CAPTURE_KEYS = ("id", "league", "espn_id", "odds_id", "start", "status", "home", "away", "venue", "_ts", "_time_ok",
+                "_ids", "_neutral")
 
 
 def _iso(ts: Optional[float]) -> Optional[str]:
@@ -739,7 +752,7 @@ class SlateBuilder:
                  ratings: Any = None, markets_every: float = MARKETS_EVERY, log_consensus: bool = True,
                  on_change: Optional[Callable[..., Any]] = None, context: Any = None,
                  context_every: float = CONTEXT_EVERY, player_board: Any = None,
-                 players_every: float = PLAYERS_EVERY, preload: bool = False) -> None:
+                 players_every: float = PLAYERS_EVERY, preload: bool = False, capturer: Any = None) -> None:
         self.odds = odds
         self.espn = espn
         self.store = store
@@ -823,6 +836,18 @@ class SlateBuilder:
         self.player_board = player_board
         self.players_every = max(1.0, float(players_every))
         self._players_next = 0.0
+        # The raw capture (capture/worker.py's Capturer, or anything with schedule_from_slate; dashboard/__main__.py sets
+        # it): each round's ESPN games are handed to it on a thread of its own (_schedule_capture)
+        self.capturer = capturer
+        self._capture_lock = threading.Lock()
+        self._capture_thread: Optional[threading.Thread] = None
+        self._capture_busy = False
+        self._capture_pending: Optional[Tuple[List[Dict[str, Any]], str]] = None  # (rows, signature) to hand over next
+        self._capture_running: Optional[str] = None  # the signature being handed over
+        self._capture_sig: Optional[str] = None  # the last hand-off that worked, and when
+        self._capture_at = -math.inf
+        self._capture_failed = -math.inf  # when the last hand-off failed
+        self._capture_logged = -math.inf  # when a failure was last logged in full (at most hourly)
 
     # --- serving -----------------------------------------------------------------------------------
 
@@ -1002,6 +1027,7 @@ class SlateBuilder:
             self._prewarm_players(games, now)
             self._recheck_quota()
             self._publish(leagues, games, as_of, now, self._quota())
+            self._schedule_capture(games, now)
             if self.preload:
                 try:
                     self._preload(games, now)
@@ -1890,6 +1916,99 @@ class SlateBuilder:
             prewarm(rows)
         except Exception:
             log.exception("Slate: the player boards' prewarm failed")
+
+    # --- the raw capture's hook (capture/worker.py) -------------------------------------------------
+
+    @staticmethod
+    def _capture_input(game: Mapping[str, Any]) -> Dict[str, Any]:
+        """What Capturer.schedule_from_slate gets of one ESPN game: its CAPTURE_KEYS (copies), plus ``espn_league``,
+        the league key whose ESPN scoreboard lists it (for an odds feed tennis tournament, its tour: tennis_atp or
+        tennis_wta). For tennis and MMA, ``espn_id`` is the match's or the bout's competition id, not the event's."""
+        row = {key: (dict(game[key]) if isinstance(game[key], dict) else game[key]) for key in CAPTURE_KEYS
+               if key in game}
+        league = str(game.get("league") or "")
+        row["espn_league"] = league if espn_path(league) else _tour(league)
+        return row
+
+    def _schedule_capture(self, games: Sequence[Mapping[str, Any]], now: float) -> None:
+        """Hand the round's ESPN games to the raw capture (see the module's docstring). The hand-off itself runs on
+        its own thread; nothing here waits for it, and whatever goes wrong costs the slate nothing."""
+        capturer = self.capturer
+        if capturer is None:
+            return
+        try:
+            rows = [self._capture_input(game) for game in games if game.get("espn_id")]
+            marks = sorted("|".join(str(row.get(key)) for key in ("league", "espn_id", "status", "start", "_time_ok"))
+                           for row in rows)
+            sig = hashlib.sha256("\n".join(marks).encode("utf-8", "replace")).hexdigest()
+            with self._capture_lock:
+                if now - self._capture_failed < CAPTURE_RETRY:
+                    return
+                if sig == self._capture_sig and now - self._capture_at < CAPTURE_EVERY:
+                    return  # handed over already, and nothing changed
+                if sig == self._capture_running or (self._capture_pending is not None
+                                                    and self._capture_pending[1] == sig):
+                    return  # on its way
+                self._capture_pending = (rows, sig)
+                if self._capture_busy:
+                    return  # the hand-off running now takes these next
+                self._capture_busy = True
+            thread = threading.Thread(target=self._hand_capture, args=(capturer,), name="slate-capture", daemon=True)
+            self._capture_thread = thread
+            try:
+                thread.start()
+            except RuntimeError:  # shutting down
+                with self._capture_lock:
+                    self._capture_busy = False
+                    self._capture_pending = None
+        except Exception:  # the raw capture must never cost the slate
+            log.exception("Slate: handing the games to the raw capture failed this round")
+
+    def _hand_capture(self, capturer: Any) -> None:
+        """The hand-off thread: Capturer.schedule_from_slate with the newest rows, until none are waiting. A failure
+        is logged (in full at most hourly) and the next hand-off waits CAPTURE_RETRY seconds."""
+        finished = False
+        try:
+            while True:
+                with self._capture_lock:
+                    item, self._capture_pending = self._capture_pending, None
+                    if item is None:
+                        self._capture_busy = False
+                        self._capture_running = None
+                        finished = True
+                        return
+                    rows, sig = item
+                    self._capture_running = sig
+                try:
+                    capturer.schedule_from_slate(rows)
+                except Exception as exc:
+                    now = self._now()
+                    with self._capture_lock:
+                        self._capture_failed = now
+                        self._capture_pending = None  # the round after the pause hands over its own games
+                        loud = now - self._capture_logged >= 3600
+                        if loud:
+                            self._capture_logged = now
+                    if loud:
+                        log.exception("Slate: the raw capture couldn't take the slate's games; trying again in %d s",
+                                      int(CAPTURE_RETRY))
+                    else:
+                        log.warning("Slate: the raw capture couldn't take the slate's games (%s)", type(exc).__name__)
+                else:
+                    done_at = self._now()
+                    with self._capture_lock:
+                        self._capture_sig, self._capture_at = sig, done_at
+        finally:
+            if not finished:  # an unexpected end: the next round may start another hand-off
+                with self._capture_lock:
+                    self._capture_busy = False
+                    self._capture_running = None
+
+    def wait_capture(self, timeout: float = 30.0) -> None:
+        """Wait for the raw capture's hand-off in progress, if any (for tests and tools)."""
+        thread = self._capture_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout)
 
     def request_context(self) -> None:
         """A reader asked for a game whose context block isn't built yet (ContextService.for_game queued it): run the

@@ -5,12 +5,15 @@
 ("hist_file", "hist_list", "hist_game"), so a value already fetched (by this process or the other one) costs no
 request. Before each request ``allow()`` (the Backfill's budget and time-window check) may refuse it with
 ``Refused``; after it ``on_request(url)`` counts it. ``transport(url, params, timeout) -> (status, body bytes)``
-is the actual GET (requests by default); tests hand in one that serves fixtures.
+is the actual GET (requests by default); tests hand in one that serves fixtures. Just before each real request the
+URL's host token is taken from the process's capture door, when the capture lends one (see _shared_token).
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 import threading
 import time
 from typing import Any, Callable, Hashable, Mapping, Optional, Tuple
@@ -37,6 +40,19 @@ class HttpError(RuntimeError):
         super().__init__(f"HTTP {status} for {url}")
         self.status = status
         self.url = url
+
+
+# The dashboard's capture lends its PoliteHttp's per-host buckets to the rest of the process while it captures
+# (capture.http.set_shared): each request here then waits for its host's token there too, so forward capture and this
+# backfill together keep to each host's rate. A process that never loaded the capture can't have that door, and nothing
+# is imported for it: the backfill's requests are exactly as they were.
+_CAPTURE_HTTP = importlib.util.resolve_name("...capture.http", __package__)
+
+
+def _shared_token(url: str) -> None:
+    acquire = getattr(sys.modules.get(_CAPTURE_HTTP), "shared_acquire", None)  # None: not loaded (or still loading)
+    if acquire is not None:
+        acquire(url)  # a no-op without a door; never raises
 
 
 def requests_transport(url: str, params: Mapping[str, Any], timeout: float) -> Tuple[int, bytes]:
@@ -72,6 +88,7 @@ class HistHttp:
                 wait = self.pace - (self.clock() - self._last)
                 if wait > 0:
                     self.sleep(wait)
+            _shared_token(url)
             try:
                 status, body = self.transport(url, dict(params or {}), self.timeout)
             finally:

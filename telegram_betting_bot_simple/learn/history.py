@@ -12,7 +12,9 @@ and the grader's live capture, all into the ``hist_*`` tables (learn/history_sto
       only (no box scores: StatsAPI's terms are "non-bulk").
     Resumable: each unit's cursor is saved after every step (``hist_progress``) and the night's request count in
     ``hist_budget``, so a restart carries on where it stopped and never spends a night's budget twice. Every fetch
-    goes through the shared TTLCache. Returns a report dict (see ``run_night``).
+    goes through the shared TTLCache. Returns a report dict (see ``run_night``). With ``raw`` (v4 P1's raw.db, wired
+    by learn/loop.py while capture is on) a game's summary is raw-first: read from raw.db when its final summary is
+    there (no request), else fetched once with EspnClient.summary_raw and kept in raw.db too (``Backfill.summary``).
 
 ``HistoryReader(store).games(league, since=None, until=None)``
     Yields point-in-time records, oldest first: the game, its lines dated before the start only (``as_of < start``,
@@ -27,9 +29,11 @@ and the grader's live capture, all into the ``hist_*`` tables (learn/history_sto
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
@@ -58,6 +62,13 @@ LIVE_MARKET_KINDS = ("sharp", "us_books", "prediction_market")
 # Soccer leagues played within one calendar year (their season is the year); the rest start in July/August
 CALENDAR_SOCCER = ("soccer_usa_mls", "soccer_brazil", "soccer_argentina", "soccer_japan", "soccer_sweden",
                    "soccer_norway", "soccer_finland", "soccer_league_of_ireland", "soccer_chile", "soccer_conmebol")
+# The learn backfill and the capture's older-games backfill (capture/backfill.py RawBackfill) never run at the same
+# time (v4 P1 review M2): both read ESPN's site.api.espn.com at night, each through a pacer of its own (HistHttp's 2 s,
+# PoliteHttp's buckets), and together they could pass 1 request a second. This is set for the whole of
+# Backfill.run_night; RawBackfill makes no request while it is set. Both run in the dashboard process (its "learner"
+# and "capture" threads), so a process-wide Event is enough; in separate processes they would need a lease in
+# betting.db instead.
+LEARN_BACKFILL_RUNNING = threading.Event()
 # HistoryReader.sharp_line: the first book with a full set of prices wins (Pinnacle is never stored after its
 # 2025-07-23 cut-off, so Betfair Exchange's close takes over there)
 SHARP_ORDER = ("pinnacle", "betfair_ex", "median", "nflverse", "avg", "draftkings", "espn_bet", "bet365", "sharp",
@@ -352,7 +363,7 @@ class _EspnUnit(_Unit):
               stage: str) -> Tuple[int, Optional[str]]:
         key = f"espn:{event_id}"
         if stage == "summary":
-            parsed = bf.espn.summary(self.league, event_id)
+            parsed = bf.summary(self.league, event_id)
             if parsed.get("state") not in ("final", "void") or not parsed.get("home") or not parsed.get("away"):
                 return 0, None  # not over (a suspended game): the live grader or a later night takes it
             record = _summary_record(self.league, self.season, event_id, parsed, espn_hist.SOURCE)
@@ -437,17 +448,71 @@ def _mlb_record(league: str, season: int, event: Mapping[str, Any], mlb: Optiona
     return {"game": game, "lines": [], "stats": stats, "weather": weather}
 
 
+class _HistDoor:
+    """PoliteHttp's ``get`` for EspnClient.summary_raw, over the learn backfill's HistHttp: its own budget and window
+    check (Refused), pace and count, and its HttpError on an answer that isn't 2xx, as without raw.db. The body comes
+    back as bytes (summary_raw takes a door that raises on HTTP errors itself)."""
+
+    def __init__(self, http: HistHttp) -> None:
+        self.http = http
+
+    def get(self, url: str, params: Optional[Mapping[str, Any]] = None, *,
+            headers: Optional[Mapping[str, str]] = None) -> bytes:
+        return self.http._get(url, params)  # HistHttp's one GET: allow(), pace, transport, on_request()
+
+
+class _RawFirst:
+    """EspnHistory's door for one game's summary while raw.db is attached (Backfill.summary): the final summary in
+    raw.db when it is there (no request), else one fetch with EspnClient.summary_raw through _HistDoor, whose raw body
+    is kept in raw.db too. While raw.db's disk is short of room (RawStore.room) nothing is written: the fetch takes
+    the usual path. raw.db failing to read or write never changes what the backfill gets."""
+
+    def __init__(self, backfill: "Backfill", league: str, event_id: str) -> None:
+        self.backfill = backfill
+        self.league = league
+        self.event_id = event_id
+
+    def json(self, url: str, params: Optional[Mapping[str, Any]] = None) -> Any:
+        from ..capture.backfill import keep_summary, stored_summary
+        from ..data.espn_client import EspnClient
+        bf = self.backfill
+        try:
+            found = stored_summary(bf.raw, self.event_id)
+        except Exception:  # noqa: BLE001 - an unreadable raw.db: fetched as without it
+            log.exception("history backfill: couldn't read %s's summary from raw.db", self.event_id)
+            found = None
+        if found is not None:
+            return found
+        try:
+            room = bool(bf.raw.room())
+        except Exception:  # noqa: BLE001 - unknown: nothing more is written
+            room = False
+        if not room:
+            return bf.http.json(url, params)  # the usual fetch, as without raw.db
+        # seed=False: an old game's lean copy would only fill the grader's cache (v4 P1 review M1)
+        body = EspnClient(bf.cache, bf.clock).summary_raw(self.league, self.event_id, http=_HistDoor(bf.http),
+                                                          seed=False)
+        try:
+            keep_summary(bf.raw, self.league, self.event_id, body, fetched_at=bf.clock())
+        except Exception:  # noqa: BLE001 - the history is written all the same
+            log.exception("history backfill: couldn't keep %s's summary in raw.db", self.event_id)
+        return json.loads(body.decode("utf-8-sig"))
+
+
 class Backfill:
     """The nightly backfill (see the module's docstring). ``store`` is a data.store.Store (or a path, or an open
     connection), ``cache`` the shared TTLCache, ``now`` a clock (a function giving epoch seconds or a datetime) or a
     fixed time. ``http`` replaces the HTTP door (tests hand in a HistHttp over fixtures), ``sleep`` the 2-second
     wait, ``tz`` the server's time zone (default: its local time), ``per_night`` LEARN_BACKFILL_PER_NIGHT,
-    ``sources``/``leagues`` limit the work."""
+    ``sources``/``leagues`` limit the work. ``raw`` (v4 P1: capture/raw_store.RawStore, raw.db) turns on the
+    raw-first summaries (``summary``); None, the default, leaves everything as it was."""
 
     def __init__(self, store: Any, cache: Any, now: Any = None, *, http: Optional[HistHttp] = None,
                  sleep: Optional[Callable[[float], None]] = None, tz: Optional[datetime.tzinfo] = None,
                  per_night: Optional[int] = None, sources: Optional[Sequence[str]] = None,
-                 leagues: Optional[Sequence[str]] = None, seasons: int = SEASONS, chunk: int = CHUNK) -> None:
+                 leagues: Optional[Sequence[str]] = None, seasons: int = SEASONS, chunk: int = CHUNK,
+                 raw: Any = None) -> None:
+        self.raw = raw
         self.store = store
         self.cache = cache
         self.clock = _clock(now)
@@ -511,6 +576,18 @@ class Backfill:
         if self._errors_in_row >= STOP_AFTER_ERRORS:
             raise Refused("errors")
 
+    # -- summaries --
+
+    def summary(self, league: str, event_id: str) -> Dict[str, Any]:
+        """A game's parsed summary (EspnHistory.summary, through the shared cache). With ``raw`` (v4 P1) it is
+        raw-first: a final summary already in raw.db is read from there, with no request; one that is fetched is
+        fetched once with EspnClient.summary_raw through this backfill's own HistHttp (the same request, budget,
+        pace and errors as without raw.db) and its raw body is kept in raw.db as well, so one fetch serves both
+        stores for old games too."""
+        if self.raw is None:
+            return self.espn.summary(league, event_id)
+        return espn_hist.EspnHistory(_RawFirst(self, league, str(event_id)), self.cache).summary(league, event_id)
+
     # -- writing --
 
     def complete(self, db: sqlite3.Connection, league: str, game_key: str) -> bool:
@@ -572,7 +649,15 @@ class Backfill:
         """Spend up to ``budget`` requests tonight (default LEARN_BACKFILL_PER_NIGHT, counted across runs of the
         same night). Returns {"ran", "night", "budget", "used" (tonight, all runs), "requests" (this run), "games"
         (new games written), "stopped" ("done", "budget", "window", "errors" or why it didn't run),
-        "sources": {source: requests this run}, "progress": progress()}."""
+        "sources": {source: requests this run}, "progress": progress()}. LEARN_BACKFILL_RUNNING is set meanwhile:
+        the capture's backfill waits."""
+        LEARN_BACKFILL_RUNNING.set()
+        try:
+            return self._run_night(budget)
+        finally:
+            LEARN_BACKFILL_RUNNING.clear()
+
+    def _run_night(self, budget: Optional[int]) -> Dict[str, Any]:
         now = self.clock()
         total = self.per_night if budget is None else max(0, int(budget))
         report: Dict[str, Any] = {"ran": False, "night": self.night(now), "budget": total, "used": 0,
@@ -937,4 +1022,4 @@ def capture_final(store: Any, league: str, row: Mapping[str, Any], final: Mappin
 
 
 __all__ = ["Backfill", "HistoryReader", "capture_final", "progress", "per_night_budget", "season_for",
-           "PER_NIGHT_DEFAULT", "WINDOW_HOURS", "SHARP_ORDER"]
+           "PER_NIGHT_DEFAULT", "WINDOW_HOURS", "SHARP_ORDER", "LEARN_BACKFILL_RUNNING"]

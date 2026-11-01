@@ -26,7 +26,16 @@
 //         rejected_texts, pending, memo: {text, ideas, source, model, at, month} | null},
 //    health: {graded: {sport: n}, voided: {sport: {n, reasons}}, backlog, backfill: {source: {units, done, current,
 //             active, todo, games, requests, errors, updated_at}}, history: {league: {games, final, void, with_close,
-//             with_stats}}, runs: {night|week|month: {last, period, current}}, trials: {month, promoted, rolled_back}}}
+//             with_stats}}, runs: {night|week|month: {last, period, current}}, trials: {month, promoted, rolled_back}},
+//    capture: {enabled, stored, unreadable, as_of, last_stored, coverage: {days, within_hours, target, sports: [{sport,
+//              label, finals, covered, missed, pending, share, unread}], total, unread: [{league, day, tries, final}]},
+//              size: {raw_bytes, disk_total, disk_free, disk_full, floor_bytes, paused} | null, requests: {day, capture,
+//              prices, per_day, backfill, backfill_night, per_night, night, night_open},
+//              http: {since, requests, errors, share, counted, days} | null (forward capture),
+//              backfill_http: {since, requests, errors, share} | null (the older-games backfill), backfill: [{league,
+//              seasons: [{season, done, games_seen, games_stored}], done, begun, planned, games_seen, games_stored,
+//              updated_at}], errors: [{at, league, game_key, what, error}],
+//              alarms: [{kind: http|backfill|boards|shape|disk, text}]} (v4 P1: the raw capture's health, from raw.db)}
 //
 //   normalizeProgress(raw) -> the checked payload (never throws)
 //   ll(v) "+0.0004" · range(lo, hi) "−0.0011 to +0.0019" · moveText(old, new, unit) "0.20 → 0.22" ·
@@ -264,6 +273,67 @@ function health(raw) {
   };
 }
 
+// The raw capture's health (v4 P1, learn/progress.py capture_health): shares are 0-1 and sizes are bytes. The server
+// words the alarms; their kind only sets the order (disk, then shape, then HTTP), and all show as warnings
+const CAPTURE_ALARMS = ["disk", "shape", "boards", "http", "backfill"];
+const share01 = (v) => (num(v) === null || v < 0 || v > 1 ? null : v);
+
+function captureCounts(raw) {
+  const o = obj(raw);
+  return { finals: int(o.finals) ?? 0, covered: int(o.covered) ?? 0, missed: int(o.missed) ?? 0, pending: int(o.pending) ?? 0,
+    share: share01(o.share) };
+}
+
+/** A "YYYY-MM-DD" day as sent (a sweep's ESPN day, a backfill night); "" for anything else. */
+const isoDay = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : "");
+
+function capture(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const cov = obj(raw.coverage);
+  const size = raw.size && typeof raw.size === "object" ? obj(raw.size) : null;
+  const r = obj(raw.requests);
+  const h = raw.http && typeof raw.http === "object" ? obj(raw.http) : null;
+  const b = raw.backfill_http && typeof raw.backfill_http === "object" ? obj(raw.backfill_http) : null;
+  return {
+    enabled: raw.enabled !== false, stored: raw.stored === true, unreadable: text(raw.unreadable, 40),
+    lastStored: when(raw.last_stored),
+    coverage: {
+      days: int(cov.days) ?? 7, hours: int(cov.within_hours) ?? 36, target: share01(cov.target),
+      sports: list(cov.sports).map((s) => ({ sport: text(obj(s).sport, 20), label: text(obj(s).label, 40) || text(obj(s).sport, 20), ...captureCounts(s),
+        unread: int(obj(s).unread) ?? 0 }))
+        .filter((s) => s.label && (s.finals || s.unread)),
+      total: captureCounts(cov.total),
+      // Boards the nightly sweep couldn't read: their games are left out unseen, so coverage is unknown
+      unread: list(cov.unread).map((u) => ({ league: text(obj(u).league, 64), day: isoDay(obj(u).day), tries: int(obj(u).tries) ?? 0,
+        final: obj(u).final === true })).filter((u) => u.league).slice(0, 60),
+    },
+    size: size ? { raw: int(size.raw_bytes), total: int(size.disk_total), free: int(size.disk_free), full: share01(size.disk_full),
+      floor: int(size.floor_bytes), paused: size.paused === true } : null,
+    requests: { day: text(r.day, 10), capture: int(r.capture) ?? 0, prices: int(r.prices) ?? 0, perDay: int(r.per_day),
+      backfill: int(r.backfill) ?? 0, backfillNight: isoDay(r.backfill_night), perNight: int(r.per_night), night: isoDay(r.night),
+      nightOpen: r.night_open === true },
+    // Forward capture's requests (the backfill's own are backfillHttp)
+    http: h ? { since: when(h.since), requests: int(h.requests) ?? 0, errors: int(h.errors) ?? 0, share: share01(h.share),
+      counted: h.counted === "requests" ? "requests" : "stored" } : null,
+    backfillHttp: b ? { since: when(b.since), requests: int(b.requests) ?? 0, errors: int(b.errors) ?? 0, share: share01(b.share) } : null,
+    backfill: list(raw.backfill).map((b) => {
+      const o = obj(b);
+      return {
+        league: text(o.league, 64), done: int(o.done) ?? 0, begun: int(o.begun) ?? 0, planned: int(o.planned), stored: int(o.games_stored) ?? 0,
+        seen: int(o.games_seen) ?? 0, updated: when(o.updated_at),
+        seasons: list(o.seasons).map((s) => ({ season: int(obj(s).season), done: obj(s).done === true, stored: int(obj(s).games_stored) ?? 0 }))
+          .filter((s) => s.season !== null).slice(0, 12),
+      };
+    }).filter((b) => b.league).slice(0, 60),
+    errors: list(raw.errors).map((e) => {
+      const o = obj(e);
+      return { at: when(o.at), league: text(o.league, 64), key: text(o.game_key, 80), what: text(o.what, 80), error: text(o.error, 240) };
+    }).filter((e) => e.what || e.error).slice(0, 5),
+    alarms: list(raw.alarms).map((a) => ({ kind: text(obj(a).kind, 20), text: text(obj(a).text, 300) })).filter((a) => a.text)
+      .sort((a, b) => (CAPTURE_ALARMS.indexOf(a.kind) + 1 || 9) - (CAPTURE_ALARMS.indexOf(b.kind) + 1 || 9)).slice(0, 8),
+  };
+}
+
 /** The payload checked; never throws (a malformed part is left out or shown as "–"). */
 export function normalizeProgress(raw) {
   const o = obj(raw);
@@ -282,6 +352,7 @@ export function normalizeProgress(raw) {
     experiments: list(o.experiments).map(experiment).filter((e) => e.label),
     ai: ai(o.ai),
     health: health(o.health),
+    capture: capture(o.capture),
   };
 }
 

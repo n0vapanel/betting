@@ -9,6 +9,7 @@ are cached to keep the request rate low.
 from __future__ import annotations
 
 import datetime
+import json
 import re
 import threading
 import time
@@ -218,6 +219,17 @@ def competition_state(competition: Any) -> Optional[Tuple[str, Optional[int], Op
             start)
 
 
+class EspnHttpError(RuntimeError):
+    """ESPN answered a raw fetch (summary_raw, scoreboard_raw) with an HTTP error: ``status``, ``url`` and the
+    answer's ``body``; the message is _get's."""
+
+    def __init__(self, status: int, url: str, body: bytes = b"") -> None:
+        super().__init__(f"ESPN returned HTTP {status} for {url}")
+        self.status = int(status)
+        self.url = url
+        self.body = body
+
+
 class EspnClient:
     """ESPN's public endpoints, every request through the shared TTLCache (data/cache.py) with a kind and the
     policy table's time to live (data/utils.py's policy). Game summaries are state-aware: a live game's for
@@ -421,6 +433,79 @@ class EspnClient:
         competitions = (data.get("header") or {}).get("competitions") if isinstance(data, dict) else None
         if competitions:
             self._remember(league, event_id, competitions[0], at)
+
+    # --- raw copies for the capture store (v4 P1): one fetch serves both stores ---
+
+    def _get_raw(self, url: str, params: Dict[str, Any], http: Any = None) -> bytes:
+        """One GET's body as ESPN sent it: through ``http`` when given (``http.get(url, params)``, e.g.
+        capture.http.PoliteHttp: an answer with ``status`` and ``body``, or the body's bytes from a door that raises
+        on HTTP errors itself), else with requests as _get. Whatever ``http.get`` raises comes out unchanged (the
+        capture's Unreachable, Backoff and Refused, the learn backfill's Refused and HttpError); an answer that isn't
+        2xx raises EspnHttpError."""
+        if http is None:
+            response = requests.get(url, params=params, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+            if not response.ok:
+                raise EspnHttpError(response.status_code, url, response.content or b"")
+            return response.content or b""
+        answer = http.get(url, params)
+        if isinstance(answer, (bytes, bytearray)):
+            return bytes(answer)
+        status, body = int(getattr(answer, "status", 0) or 0), getattr(answer, "body", b"") or b""
+        if not 200 <= status < 300:
+            raise EspnHttpError(status, url, bytes(body))
+        return bytes(body)
+
+    def _seed(self, key: Tuple[Any, ...], kind: str, value: Any, rule: Any) -> float:
+        """Keep ``value`` as the copy of ``key`` fetched now, with the life ``rule`` (ttl, stale) a load of it would
+        get, here and in the shared table (TTLCache.put: the entry and row a loader's value gets); returns its fetch
+        time on the cache's clock."""
+        return float(self.cache.put(key, value, rule[0], rule[1], kind=kind))
+
+    def summary_raw(self, league: str, event_id: Any, *, http: Any = None, seed: bool = True) -> bytes:
+        """The game's whole summary as ESPN sent it, for the raw capture store: one GET of
+        ``{SITE}/{sport}/{path}/summary`` with ``{"event": id}`` and nothing else, through ``http`` when given. The
+        same answer seeds the lean cache: its lean_summary goes under summary()'s key, with the life summary() gives
+        such a copy, and the game's state is noted, so the grader's next summary() is a hit holding exactly what it
+        would have loaded. A failure seeds nothing: whatever ``http.get`` raises comes out unchanged, an HTTP error
+        is EspnHttpError, and a 2xx answer that isn't a summary (not JSON) comes back as it is, seeding nothing (the
+        raw store keeps it; the grader's own load meets it as before). ``seed=False`` fetches the same way and gives
+        back the same bytes but writes nothing to the lean cache (in memory or in the shared table) and notes no
+        state: the learn backfill's old games, which the grader never reads."""
+        sport, path = LEAGUES[league]
+        body = self._get_raw(f"{SITE}/{sport}/{path}/summary", {"event": str(event_id)}, http)
+        if not seed:
+            return body
+        try:
+            data = lean_summary(json.loads(body))
+        except (ValueError, TypeError, AttributeError):
+            return body
+        at = self._seed(("espn", "summary", league, str(event_id)), "summary", data,
+                        ttl_for("summary", self._copy_state(data) or "pre"))
+        self._remember_summary(league, event_id, data, at)
+        return body
+
+    def scoreboard_raw(self, league: str, day: datetime.date, *, http: Any = None, seed: bool = True) -> bytes:
+        """The league's scoreboard for ``day`` (a US Eastern date) as ESPN sent it (every key: MMA's bout details,
+        tennis notes), for the raw capture store: one GET with the lean client's own query (``dates``, ``limit``, the
+        league's SCOREBOARD_PARAMS), through ``http`` when given. The same answer seeds the lean cache: its
+        lean_events go under scoreboard()'s key with the life the board's own state gives it (as a load), and the
+        games' states are noted. Failures and ``seed=False`` as summary_raw's."""
+        target = espn_path(league)
+        if target is None:
+            raise KeyError(league)
+        sport, path = target
+        params = {"dates": day.strftime("%Y%m%d"), "limit": SCOREBOARD_LIMIT, **SCOREBOARD_PARAMS.get(league, {})}
+        body = self._get_raw(f"{SITE}/{sport}/{path}/scoreboard", params, http)
+        if not seed:
+            return body
+        try:
+            events = lean_events(json.loads(body).get("events", []))
+        except (ValueError, TypeError, AttributeError):
+            return body  # not a board (not JSON): as summary_raw's
+        at = self._seed(self._scoreboard_key(league, day), "scoreboard", events,
+                        ttl_for("scoreboard", self.board_state(day, events)))
+        self._remember_events(league, events, at)
+        return body
 
     def standings(self, league: str, season: Optional[int] = None) -> Dict[str, Dict[str, float]]:
         """Per-team wins, losses and average points for/against, keyed by ESPN team id, with the team's home record

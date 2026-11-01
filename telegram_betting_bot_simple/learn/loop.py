@@ -661,7 +661,16 @@ class Learner:
             report = dict(self._backfill(now) or {})
         else:
             from .history import Backfill
-            report = Backfill(self.store, self.cache, self.clock, tz=self.tz, per_night=self.per_night).run_night()
+            options: Dict[str, Any] = {}
+            if getattr(self.config, "capture_enabled", None) is True:
+                # v4 P1: the raw-first summaries (learn/history.Backfill.summary) read and keep raw.db
+                try:
+                    from ..capture.raw_store import RawStore, resolve_raw_db_path
+                    options["raw"] = RawStore(resolve_raw_db_path(self.config, self.store))
+                except Exception:  # noqa: BLE001 - without raw.db the backfill runs as it always has
+                    log.exception("The history backfill couldn't open raw.db; it runs without it")
+            report = Backfill(self.store, self.cache, self.clock, tz=self.tz, per_night=self.per_night,
+                              **options).run_night()
         return {k: report.get(k) for k in ("ran", "stopped", "used", "requests", "games", "budget")}
 
     def _night_scores(self, now: float, key: str) -> Dict[str, Any]:
