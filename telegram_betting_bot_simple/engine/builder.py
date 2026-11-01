@@ -107,7 +107,8 @@ can't meet exactly, it returns the closest tickets it can make, each saying how 
   ``options`` and, in ``stats["relaxation"]``, every step taken (Best balance's search too, objective
   "closest"). ``best_effort`` False (strict) runs exactly as before closest effort existed.
 
-``top_picks`` ranks single legs by the brain's chance (the likeliest winners, one a game).
+``top_picks`` ranks single legs by the brain's chance (the likeliest winners, one a game); ``game_picks`` takes one
+game's pick for each of its markets (the game page and the bot's game card), with the same price safety.
 
 This module imports engine.bets and engine.tickets inside functions only, so engine/bets.py and
 engine/target.py may import it at module level.
@@ -3118,6 +3119,108 @@ def top_picks(candidates: Iterable[Candidate], n: int = 10, markets: Iterable[st
                       "game": cand.game, "start": cand.start, "chance": round(cand.chance, 4),
                       "chance_source": cand.chance_source, "price": str(price), "book": book, "edge": round(edge, 4),
                       "why": cand.why[:3], **_why_units(cand)})
+    return picks
+
+
+# --- one game's picks (the game page, the Mini App and the bot's game card) -----------------------------------
+
+# A pick whose chance is at least this far above the books' margin-free chance gets the game page's neutral "Brain
+# higher than market" chip (a game pick is never called an edge or value)
+BRAIN_HIGHER = 0.03
+MAIN_LINE_MARKETS: Tuple[str, ...] = ("spreads", "totals")
+
+
+def _line_of(cand: Candidate) -> Optional[float]:
+    """The line a spreads or totals leg is on, as the board names it: the total, or the home side's point (the away
+    side's is its negative); None for a leg without one."""
+    if cand.point is None:
+        return None
+    return -cand.point if cand.market == "spreads" and cand.side == "away" else cand.point
+
+
+def _main_lines(cands: Sequence[Candidate]) -> Dict[str, float]:
+    """Each spreads and totals market's main line among one game's legs: the line the most books quote (either side;
+    ``prices`` and the leg's own book), as summarize_markets' consensus line is the point most books offer, so the
+    game's other views show it; on a tie the one priced nearest even money, then the lower line."""
+    books: Dict[Tuple[str, float], Set[str]] = {}
+    even: Dict[Tuple[str, float], float] = {}
+    for cand in cands:
+        line = _line_of(cand) if cand.market in MAIN_LINE_MARKETS else None
+        if line is None:
+            continue
+        key = (cand.market, line)
+        books.setdefault(key, set()).update(set(cand.prices or {}) | {cand.book})
+        chance = cand.fair if cand.fair is not None else cand.chance
+        even[key] = min(even.get(key, 1.0), abs(chance - 0.5))
+    main: Dict[str, float] = {}
+    for market, line in sorted(books, key=lambda key: (-len(books[key]), even[key], abs(key[1]), key[1], key[0])):
+        main.setdefault(market, line)
+    return main
+
+
+def game_picks(candidates: Iterable[Candidate], league: str, event_id: Any, *, now: Optional[datetime.datetime] = None,
+               max_price_age_s: Optional[int] = None) -> List[Dict[str, Any]]:
+    """The brain's pick for each of one game's markets: only this game's legs (``league``, and ``ref["id"]`` equal to
+    ``event_id``), with top_picks' price safety: never a game under way (flagged ``live``, or its start passed or
+    unreadable at ``now``, the clock by default), never a leg the goals model prices at fair odds (``model_price``),
+    a chance of 0.1% or less, or a stale price (flagged ``stale_price``, or older than ``max_price_age_s``, by default
+    the Builder's own limit Controls.max_price_age_s); each priced at its best price book (never a SHARP_BOOKS book or
+    an exchange).
+
+    One pick a market, in MARKETS order (h2h, spreads and totals first, then the soccer markets a book prices): the
+    highest chance wins, ties broken by the edge at that price. Spreads and totals count only their main line
+    (_main_lines, found among all the game's legs, so a main line left out by the rules never lets an alternate line
+    in): never an alternate line.
+
+    Each pick is {ref, key, market, market_title, label, chance, market_chance, price, book, edge, brain_higher,
+    chance_source, why, adjusted?, why_units?}: ``market_chance`` the books' margin-free chance (Candidate.fair), None
+    without one; ``brain_higher`` whether the chance is at least 3 points above it (BRAIN_HIGHER; False without one);
+    ``chance_source`` the leg's ("blend", "books", "adjusted", ...); ``adjusted`` a totals leg's note when a forecast
+    or roof change moved its chance (only then: the slip keeps it); ``why`` at most 3 lines."""
+    when = _now(now)
+    limit = Controls().max_price_age_s if max_price_age_s is None else max_price_age_s
+    game = str(event_id)
+    mine = [cand for cand in candidates if cand.league == league and str(cand.ref["id"]) == game]
+    main = _main_lines(mine)
+    books: Dict[str, bool] = {}
+    best: Dict[str, Tuple[Tuple[float, float, str], Candidate, Decimal, str, float]] = {}
+    for cand in mine:
+        if cand.market not in MARKETS or {"live", "model_price", "stale_price"} & cand.flags or cand.chance <= 0.001:
+            continue
+        if cand.price_age_s > limit:
+            continue
+        start = _parse_time(cand.start)
+        if start is None or start <= when:
+            continue
+        if cand.market in MAIN_LINE_MARKETS and _line_of(cand) != main.get(cand.market):
+            continue
+        offers = dict(cand.prices or {})
+        offers.setdefault(cand.book, cand.price)
+        usable = []
+        for book, price in offers.items():
+            if book not in books:
+                books[book] = _price_book(book)
+            if books[book]:
+                usable.append((price, book))
+        if not usable:
+            continue
+        price, book = max(usable, key=lambda pair: (pair[0], pair[1] == cand.book, pair[1]))
+        edge = edge_of(cand.chance, cand.push, price)
+        rank = (-cand.chance, -edge, cand.key)
+        if cand.market not in best or rank < best[cand.market][0]:
+            best[cand.market] = (rank, cand, price, book, edge)
+    picks: List[Dict[str, Any]] = []
+    for market in MARKETS:
+        if market not in best:
+            continue
+        _, cand, price, book, edge = best[market]
+        chance, market_chance = round(cand.chance, 4), _round(cand.fair)
+        picks.append({"ref": dict(cand.ref), "key": cand.key, "market": market, "market_title": MARKET_TITLES[market],
+                      "label": cand.label, "chance": chance, "market_chance": market_chance, "price": str(price),
+                      "book": book, "edge": round(edge, 4),
+                      "brain_higher": market_chance is not None and chance - market_chance >= BRAIN_HIGHER - _EPS,
+                      "chance_source": cand.chance_source, "why": cand.why[:3],
+                      **({"adjusted": dict(cand.adjusted)} if cand.adjusted else {}), **_why_units(cand)})
     return picks
 
 

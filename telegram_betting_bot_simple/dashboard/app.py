@@ -914,6 +914,18 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
     ) -> Dict[str, Any]:
         return gated(lab, uid, lambda: svc.game(league, id))
 
+    @app.get("/api/game/picks")
+    def game_picks(
+        league: str = Query(pattern=LEAGUE_KEY),
+        id: str = Query(max_length=64),
+        uid: str = Depends(person),
+        lab: Lab = Depends(get_lab),
+    ) -> Dict[str, Any]:
+        """Suggested picks for one game (Lab.game_picks): the brain's pick for each market and the game's best player
+        props, from what is in hand (no Odds API request; a game without prices asks the slate's throttled loader).
+        Picks: a break or the pause after a warning sign is the 400 every pick route gives; 404 for an unknown game."""
+        return lab_call(lambda: lab.game_picks(uid, league, id))
+
     @app.post("/api/slip")
     def slip(body: SlipRequest, uid: str = Depends(person), svc: DashboardService = Depends(get_service),
              lab: Lab = Depends(get_lab)) -> Dict[str, Any]:

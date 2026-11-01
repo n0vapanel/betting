@@ -60,13 +60,18 @@ class Config(BaseSettings):
     # Below this many Odds API requests left this month, serve saved odds instead of fetching
     odds_reserve: int = Field(50, validation_alias="ODDS_RESERVE")
     # Today's all-sports slate (data/slate.py): seconds between ESPN scoreboard checks for a league with a game
-    # live, with games still to play today, with none today, and for the days ahead; and how many odds
-    # boards a day the app may load when someone opens a league whose odds are over 2 hours old (3 credits each)
+    # live, with games still to play today, with none today, and for the days ahead. Odds boards (3 credits each)
+    # load within a daily budget: the month's credits above ODDS_RESERVE spread over the days left in the month, every
+    # board counted whichever page or process loads it; SLATE_ODDS_PER_DAY is the day's boards while the month's count
+    # isn't known yet (a new install).
+    # SLATE_PRELOAD loads the boards of leagues with a game in the next 18 hours before anyone asks (70% of the
+    # day's boards at most; 0 turns it off)
     slate_live_seconds: float = Field(20, ge=5, validation_alias="SLATE_LIVE_SECONDS")
     slate_today_seconds: float = Field(60, ge=10, validation_alias="SLATE_TODAY_SECONDS")
     slate_idle_seconds: float = Field(600, ge=60, validation_alias="SLATE_IDLE_SECONDS")
     slate_future_seconds: float = Field(3600, ge=60, validation_alias="SLATE_FUTURE_SECONDS")
     slate_odds_per_day: int = Field(12, ge=0, validation_alias="SLATE_ODDS_PER_DAY")
+    slate_preload: bool = Field(True, validation_alias="SLATE_PRELOAD")
     # AI analysts: each one is switched on by its API key. Their forecasts are graded, and only move the
     # AI's own chances once their record earns it
     anthropic_api_key: Optional[str] = Field(None, validation_alias="ANTHROPIC_API_KEY")

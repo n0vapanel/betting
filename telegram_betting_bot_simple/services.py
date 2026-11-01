@@ -26,7 +26,7 @@ from .dashboard.service import AI_LEAGUES, DashboardService
 from .data.cache import TTLCache, forbid_secrets
 from .data.espn_client import EspnClient
 from .data.espn_players import PlayerData
-from .data.odds_service import OddsService, configure_books
+from .data.odds_service import ODDS_PER_DAY, OddsService, configure_books
 from .data.slate import SlateBuilder
 from .data.store import Store
 from .data.utils import use_cache
@@ -75,9 +75,12 @@ def build_service(config: Config) -> Optional[DashboardService]:
     # process follows these (data/odds_service.py's BookRoles)
     configure_books(bookmakers or None, getattr(config, "sharp_book_keys", None) or None,
                     getattr(config, "price_book_keys", None) or None)
+    # Every board it fetches is counted against the day's odds budget in the shared store, the slate's rule, so the bot
+    # and the dashboard agree (SLATE_ODDS_PER_DAY: a day's boards while the month's count is unknown)
     odds = OddsService(
         config.odds_api_key, cache, config.odds_cache_minutes, config.odds_regions,
         store=store, reserve=config.odds_reserve, bookmakers=bookmakers,
+        odds_per_day=getattr(config, "slate_odds_per_day", ODDS_PER_DAY),
     )
     espn = EspnClient(cache)
     service = DashboardService(odds, espn, ZoneInfo(config.timezone), store=store,
@@ -110,7 +113,8 @@ def build_context(config: Any, store: Store, cache: TTLCache, espn: EspnClient) 
 
 def build_slate(config: Config, service: DashboardService) -> SlateBuilder:
     """Today's all-sports slate over the service's odds, ESPN and store (the dashboard starts its thread), with
-    the markets brain's free outside sources unless MARKETS_ENABLED is off, all on the service's shared cache. The
+    the markets brain's free outside sources unless MARKETS_ENABLED is off, all on the service's shared cache, and
+    the odds boards of leagues with a game soon preloaded within the day's budget unless SLATE_PRELOAD is off. The
     service's game route reads the slate's "Markets say" (``service.slate``), and a game whose status or score the
     slate sees change has its computed entries dropped (``service.invalidate_game``), to be rebuilt once."""
     polymarket = kalshi = ratings = None
@@ -129,7 +133,7 @@ def build_slate(config: Config, service: DashboardService) -> SlateBuilder:
         idle_seconds=config.slate_idle_seconds, future_seconds=config.slate_future_seconds,
         odds_per_day=config.slate_odds_per_day, ai_leagues=AI_LEAGUES,
         polymarket=polymarket, kalshi=kalshi, ratings=ratings, on_change=service.invalidate_game,
-        context=getattr(service, "context", None),
+        context=getattr(service, "context", None), preload=getattr(config, "slate_preload", True),
     )
     service.slate = slate
     if getattr(service, "context", None) is not None:

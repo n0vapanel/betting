@@ -809,6 +809,22 @@ def asks_about_risk(asked: str) -> bool:
     return bool(_ASKS_RISK.search(text)) or any(pattern.search(text) for _, pattern in LECTURES)
 
 
+# "Ask again in a few minutes" and its paraphrases ("try again in a minute", "check back shortly", "give it a few
+# minutes"): never the answer when a build or the top picks miss prices, since the Builder has already waited for the
+# boards on their way (the tools' ``prices`` line says why they're missing; ai/assistant.py's guard holds a reply to it)
+ASK_AGAIN = re.compile(
+    r"\b(?:ask|try|check|come|circle)\s+(?:me\s+|it\s+)?(?:again|back)\b[^.!?\n]{0,40}?"
+    r"(?:\bin\s+(?:a\s+)?(?:few|couple(?:\s+of)?|\d+)\s+(?:more\s+)?min(?:ute)?s?\b|\bin\s+a\s+(?:minute|moment|bit|sec)\b"
+    r"|\bshortly\b|\bin\s+a\s+little\s+while\b)"
+    r"|\bgive\s+it\s+(?:a\s+)?(?:few|couple(?:\s+of)?|\d+)\s+min(?:ute)?s?\b", re.IGNORECASE)
+ASK_AGAIN_PROBLEM = "banned wording (\"ask again in a few minutes\": the prices line says why they're missing)"
+
+
+def asks_again(text: str) -> bool:
+    """Whether a reply tells the person to ask again in a few minutes (ASK_AGAIN)."""
+    return bool(ASK_AGAIN.search(text or ""))
+
+
 def refusal_problems(text: str, route: Any, tools_available: Any, asked: str = "", allowed: str = "") -> List[str]:
     """Why a reply refuses or lectures when the tools could answer (empty when it doesn't), on a look-up, build or
     analyse ``route`` (the assistant's Route, a mapping or an intent; anything else, a support reply included, is
@@ -1205,8 +1221,10 @@ def builder_template(cards: Sequence[Dict[str, Any]], most: int = 3) -> str:
     the checks: one line per ticket that leads with its option label ("Likeliest at your odds") or title, its picks,
     its odds and its chance (the ticket's ``fit`` when closest effort gave one, else its own numbers), and the rules
     the Builder relaxed for that ticket, quoted on its own line (each option loosens its own way). It never refuses:
-    the tickets are what code built."""
-    lines = []
+    the tickets are what code built. A league asked about that still had no prices once the Builder waited for it is
+    said first, in the Lab's one line (a card's ``prices_note``: "NBA prices are still on their way; here's the best I
+    can do with NHL and NFL games now.")."""
+    lines = [note for note in (card.get("prices_note") for card in cards) if note][:1]
     shown = list(cards)[:most]
     for card in shown:
         ticket = card.get("ticket") or {}
@@ -1234,11 +1252,13 @@ def builder_template(cards: Sequence[Dict[str, Any]], most: int = 3) -> str:
 
 def picks_template(card: Dict[str, Any], most: int = 5) -> str:
     """The chat's answer in code's own words for the likeliest winners (brain_top_picks' card), strongest first:
-    each pick's chance, price and book and why, in a few words (first_reason: not the chance again)."""
+    each pick's chance, price and book and why, in a few words (first_reason: not the chance again), after the Lab's
+    one line on a league asked about that still has no prices (``prices_note``), when there is one."""
     picks = [pick for pick in card.get("picks") or [] if isinstance(pick, dict)]
+    note = card.get("prices_note")
     if not picks:
-        return "No game in scope has prices loaded right now: try another sport."
-    lines = ["The most likely winners, strongest first:"]
+        return note or "No game in scope has prices loaded right now: try another sport."
+    lines = ([note] if note else []) + ["The most likely winners, strongest first:"]
     for i, pick in enumerate(picks[:most], 1):
         line = f"{pick.get('rank') or i}. {pick.get('label') or 'A pick'}"
         if isinstance(pick.get("chance"), (int, float)):

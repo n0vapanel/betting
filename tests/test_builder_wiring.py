@@ -192,8 +192,10 @@ def make_world(tmp_path) -> World:
     service.slate = slate
     lab = Lab(service, store, now=lambda: NOW)
     w = World(store, slate, service, lab, odds)
-    # The slate's background loader runs boards on its own thread: here it is only recorded
+    # The slate's background loader runs boards on its own thread: here it is only recorded, so a board asked for
+    # never arrives, and a run naming a league without prices waits this long for it (not the full PRICE_WAIT)
     slate._odds_pool.submit = lambda fn, league: w.queued.append(league)  # type: ignore[method-assign]
+    lab.price_wait = 0.3
     return w
 
 
@@ -420,10 +422,12 @@ def test_a_league_without_prices_is_a_near_miss_and_asks_once_for_odds(world) ->
     assert data["tickets"] == []
     [entry] = data["unpriced"]
     assert entry["league"] == NHL and entry["games"] == 2 and entry["request"]["code"] == "queued"
-    assert "no prices loaded (2 games)" in entry["reason"] and "loading in the background" in entry["reason"]
+    # The run waited for the board (the fixture's never comes), so the reason says so: tonight's games, still on
+    # their way, never "ask again" (it said "(2 games)", "loading in the background" before the wait)
+    assert "no prices loaded (tonight's 2 games)" in entry["reason"] and "still on their way" in entry["reason"]
     miss = next(m for m in data["near_misses"] if m["rule"] == "no_prices")
     assert miss["league"] == NHL and miss["reason"] == entry["reason"]
-    assert data["blocked"]["message"].startswith("No prices are loaded")
+    assert data["blocked"]["message"] == "No prices are loaded for tonight's 2 NHL games: they haven't arrived yet."
     assert world.queued == [NHL]
     # The slate's throttle: asking again (another result) queues nothing more
     again = run(client, {"preset": "crazy", "leagues": [NHL]})
@@ -431,7 +435,9 @@ def test_a_league_without_prices_is_a_near_miss_and_asks_once_for_odds(world) ->
 
 
 def test_background_odds_requests_respect_the_daily_cap(world) -> None:
-    world.slate.odds_per_day = 0
+    # 10 credits above the reserve over the month's 6 days left: no board today (the daily budget replaced
+    # SLATE_ODDS_PER_DAY's fixed 12, which this test set to 0)
+    world.odds.quota = {"remaining": 60, "used": 440}
     data = run(world.client(), {"preset": "risky", "leagues": [NHL]})
     assert data["unpriced"][0]["request"]["code"] == "daily_cap" and world.queued == []
 

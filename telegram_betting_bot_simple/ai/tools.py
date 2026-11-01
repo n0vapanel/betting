@@ -66,7 +66,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from ..dashboard.lab import MAX_TOP_PICKS, OPTION_LABELS, TOP_PICKS
+from ..dashboard.lab import MAX_TOP_PICKS, OPTION_LABELS, PRICE_BUDGET, PRICE_WAIT, TOP_PICKS
 from ..dashboard.service import CallRejected, NotFound
 from ..data.leagues import POPULAR_LEAGUES
 from ..engine import consensus
@@ -1221,6 +1221,8 @@ class Toolbox:
         self.extra_leagues = extra_leagues
         self.extra: Set[str] = set()  # leagues loaded this turn beyond self.leagues
         self.pasted: Dict[int, Optional[Mapping[str, Any]]] = dict(pasted or {})
+        # The turn's one wait for odds boards on their way, shared by all its tool calls (dashboard/lab.py's PRICE_BUDGET)
+        self.price_budget: Dict[str, float] = {"left": PRICE_WAIT}
         self.runners: Dict[str, Callable[[Any], Tuple[Dict[str, Any], str, List[Dict[str, Any]]]]] = {
             "sports_find_events": self._events, "odds_get_prices": self._odds, "markets_consensus": self._markets,
             "game_context": self._game_context, "player_get_profile": self._profile,
@@ -1244,7 +1246,11 @@ class Toolbox:
                                                 "for 24 hours after a warning sign",
                                 "Don't suggest bets; offer help, the budget and break settings, or how odds work")
             data = INPUTS[name].model_validate(args)
-            content, summary, cards = self.runners[name](data)
+            budget = PRICE_BUDGET.set(self.price_budget)  # this turn's tool calls wait PRICE_WAIT at most, together
+            try:
+                content, summary, cards = self.runners[name](data)
+            finally:
+                PRICE_BUDGET.reset(budget)
             content.setdefault("as_of", self._as_of())
             return ToolRun(name, args, True, content, summary, cards)
         except ValidationError as exc:
@@ -1690,9 +1696,13 @@ class Toolbox:
             body["stake"] = stake
         built = self.lab.builder_run(self.uid, body) or {}
         tickets = [t for t in built.get("tickets") or [] if isinstance(t, dict)]
+        # The Lab's one line on prices: a league asked about still has none after the run waited for its board (or none
+        # in scope has any: then it is also ``blocked``)
+        note = built.get("prices_note")
         content = trim({"label": built.get("label"), "stake": built.get("stake"),
                         "stake_given": built.get("stake_given"), "target": built.get("target"),
-                        "notes": built.get("notes"), "blocked": (built.get("blocked") or {}).get("message"),
+                        "notes": built.get("notes"), "prices": note,
+                        "blocked": (built.get("blocked") or {}).get("message"),
                         "relax": (built.get("blocked") or {}).get("relax"),
                         "near_misses": [m.get("text") or m.get("reason") for m in built.get("near_misses") or []],
                         "unpriced": [u.get("reason") for u in built.get("unpriced") or []]}, items=12)
@@ -1712,8 +1722,9 @@ class Toolbox:
         content["source"] = BUILDER_SOURCE
         hints = []
         if not tickets:
-            hints.append("Nothing could be built: say in one sentence what blocked it (blocked, relax, unpriced) and "
-                         "offer what would work, such as another sport; don't invent a ticket")
+            hints.append(f"Nothing could be built: say in one sentence what blocked it ({'prices, ' if note else ''}"
+                         "blocked, relax, unpriced) and offer what would work, such as another sport; don't invent a "
+                         "ticket" + ("; never tell them to ask again in a few minutes" if note else ""))
         elif options:
             hints.append("No single ticket meets every target, so code built the closest options: lead with them, one "
                          "sentence each with its option label and its odds and chance from fit (closest to your "
@@ -1725,6 +1736,9 @@ class Toolbox:
                          "with them and quote each ticket's own relaxed with that ticket only")
         if tickets and not built.get("stake_given"):
             hints.append("No stake given: the money figures are per $10 staked; say so if you quote money")
+        if tickets and note:
+            hints.insert(0, "Open with prices in one line (a league asked about has none yet, so these tickets come "
+                            "from the others); never tell them to ask again in a few minutes")
         if hints:
             content["hint"] = ". ".join(hints)
         where = ", ".join(controls.get("leagues") or []) or "all sports"
@@ -1739,6 +1753,8 @@ class Toolbox:
         # The ticket's own notes (fair odds, a long shot, disagreement) travel in ticket["notes"]: a card's "notes" are
         # per-leg notes ({index, notes}) to the app
         cards = [builder_card(ticket) for ticket in tickets]
+        if cards and note:
+            cards[0]["prices_note"] = note  # code's own answer leads with it (ai/explain.py's builder_template)
         return content, summary, cards
 
     def _top_picks(self, data: TopPicksInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
@@ -1760,15 +1776,27 @@ class Toolbox:
                     if isinstance(entry, Mapping)]
         if unpriced:
             content["unpriced"] = unpriced
+        # The Lab's one line on prices: a league asked about still has none after it waited for the boards on their way
+        note = found.get("prices_note")
+        if note:
+            content["prices"] = note
         if picks:
             content["hint"] = ("Lead with the picks, strongest first: each one's chance and odds in a few words and "
                                "why. The card lets the user add any of them to the slip")
+            if note:
+                content["hint"] = ("Open with prices in one line (a league asked about has none yet, so the picks come "
+                                   "from the others); never tell them to ask again in a few minutes. " + content["hint"])
+        elif note:
+            content["hint"] = ("Nothing could be picked: say why in one line (prices) and offer another sport; never "
+                               "tell them to ask again in a few minutes")
         else:
             content["hint"] = ("No game in scope has prices loaded now: say so in one sentence (unpriced says when "
                                "odds are on their way) and offer another sport")
         summary = f"brain_top_picks({', '.join(leagues)}): " + ("; ".join(
             f"{pick.get('label')} [{_ref_text(pick.get('ref') or {})}]" for pick in picks) or "no picks")
         cards = [picks_card(found, leagues)] if picks else []
+        if cards and note:
+            cards[0]["prices_note"] = note  # code's own answer leads with it (ai/explain.py's picks_template)
         return content, summary, cards
 
     def _players_scan(self, data: ScanInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:

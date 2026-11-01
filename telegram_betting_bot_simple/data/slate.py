@@ -26,8 +26,25 @@ document that the API serves as it is (GET /api/slate, with an ETag, so an uncha
 - A league whose odds are older than the odds service's 2 hours can ask for a new board (request_odds,
   POST /api/slate/odds): in the background, at most once per league per 2 hours (a lease in the shared
   store keeps that across restarts), never below the odds service's reserve (counting the boards already on
-  their way), at most ODDS_PER_DAY boards a day, and never for a league ESPN shows no games for. Each board
-  costs 3 of the month's credits per odds region.
+  their way), within the day's budget, and never for a league ESPN shows no games for. Each board costs 3 of
+  the month's credits per odds region.
+- With ``preload`` (services.build_slate: SLATE_PRELOAD, on by default) each round then preloads boards through
+  the same loader, so the prices are there before anyone asks: for leagues in season at The Odds API with a game
+  ESPN shows starting within PRELOAD_HOURS and saved odds older than the 2 hours (or none), the soonest first game
+  first (a tie: the league with more games in that window first), at most PRELOAD_BACKLOG queued or loading at once
+  (each round tops them up). The loader takes one board at a time, a person's request before any preload still
+  queued.
+- The day's budget (a UTC day) is the month's credits above the reserve spread over the days left in the month,
+  in whole boards: (remaining - reserve) / days_left / a board's cost, ``remaining`` as the day began (the count
+  now plus what today's loaded boards cost, so the allowance doesn't shrink as it is spent): the odds service's
+  day_boards, one rule for every loader. The day's first claim fixes its limit in the shared store (again only if
+  the count rises: the month's reset, a new key), so boards on their way can't make the day look bigger, and no board
+  is claimed that would take the count, less the boards on their way (both processes'), under the reserve (Store.
+  claim_odds_board). Preloads may use PRELOAD_SHARE of the day's boards, requests all of them;
+  the boards are counted in the shared store, so both processes and restarts agree, and the odds service counts any
+  other board it fetches (a game page's, a league list's, the bot's) against the same day, while a board queued here
+  is counted once (OddsService.budgeted). While the count is unknown (a new install) the day has ``odds_per_day``
+  boards.
 
 The slate also carries the month's Odds API quota as last reported ({"remaining", "used"}, read from the
 shared store, never fetched), for the header's "N odds left".
@@ -85,9 +102,11 @@ the first round 12 to 24 hours before it, whether or not anything changed), so t
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import gzip
 import hashlib
+import heapq
 import json
 import logging
 import math
@@ -105,7 +124,7 @@ from ..engine import consensus
 from ..learn import registry
 from .espn_client import ESPN_DAY_TZ, LEAGUES as ESPN_LEAGUES, SCOREBOARD_ONLY, espn_path, team_match_score
 from .leagues import POPULAR_LEAGUES, SPORTS
-from .odds_service import MARKETS, book_roles, moneylines, summarize_markets
+from .odds_service import MARKETS, ODDS_PER_DAY, book_roles, budget_day, day_boards, moneylines, summarize_markets
 from .store import T24_WINDOW
 
 log = logging.getLogger(__name__)
@@ -120,7 +139,10 @@ LIVE_SOON = 10 * 60  # a game starting this soon refreshes at the live pace
 STUCK = 6 * 3600  # ... but not a "scheduled" game this long past its start (ESPN never updated it)
 FETCH_COST = len(MARKETS)  # Odds API credits one league's board costs per region (moneyline, spreads, totals)
 ODDS_TTL = 2 * 3600  # odds older than this are stale (the odds service's own odds_ttl when it has one)
-ODDS_PER_DAY = 12  # boards request_odds may load in 24 hours, all leagues together
+PRELOAD_HOURS = 18  # a league with a game starting this soon has its stale board preloaded ...
+PRELOAD_SHARE = 0.7  # ... within this share of the day's boards (requests may use them all) ...
+PRELOAD_BACKLOG = 2  # ... at most this many queued or loading at once (topped up next round): a person's ask never
+# waits behind a long line of them (and it goes before any still queued)
 BACKOFF_CAP = 30 * 60  # a failing board is retried at most this far apart (or at its own pace, if slower) ...
 LIVE_BACKOFF_CAP = 5 * 60  # ... and one with a game on, this far
 BREAKER_MIN = 8  # when at least this many boards of a round fail, and more than half of them, ...
@@ -717,7 +739,7 @@ class SlateBuilder:
                  ratings: Any = None, markets_every: float = MARKETS_EVERY, log_consensus: bool = True,
                  on_change: Optional[Callable[..., Any]] = None, context: Any = None,
                  context_every: float = CONTEXT_EVERY, player_board: Any = None,
-                 players_every: float = PLAYERS_EVERY) -> None:
+                 players_every: float = PLAYERS_EVERY, preload: bool = False) -> None:
         self.odds = odds
         self.espn = espn
         self.store = store
@@ -752,8 +774,15 @@ class SlateBuilder:
         self._refreshing = threading.Lock()
         self._lock = threading.Lock()  # request_odds' bookkeeping
         self._requested: Dict[str, float] = {}
-        self._loads: List[float] = []
         self._loading: Set[str] = set()
+        # Odds boards preloaded each round (see the module docstring); the day's boards counted here only when the
+        # store can't count them (a test's fake)
+        self.preload = bool(preload)
+        self._day_boards: Dict[Tuple[str, str], int] = {}
+        self._paid: Dict[str, Tuple[str, str, Any]] = {}  # league -> (day, kind, claim) of its queued load's board
+        self._kinds: Dict[str, str] = {}  # league -> request or preload, while its board is queued or loading
+        self._queue: List[Tuple[int, int, str]] = []  # (requests first, order asked, league): _load_odds' next
+        self._queue_seq = 0
         self._logged: Dict[str, float] = {}
         self._thread: Optional[threading.Thread] = None
         # The markets brain: the free outside sources (data/markets; None when MARKETS_ENABLED is off), fetched only
@@ -973,6 +1002,11 @@ class SlateBuilder:
             self._prewarm_players(games, now)
             self._recheck_quota()
             self._publish(leagues, games, as_of, now, self._quota())
+            if self.preload:
+                try:
+                    self._preload(games, now)
+                except Exception:  # the preloader must never cost the scores
+                    log.exception("Slate: preloading odds failed this round")
             return self._next_delay(season, today, self._now())
 
     def _note_changes(self, games: Sequence[Mapping[str, Any]]) -> None:
@@ -1915,7 +1949,7 @@ class SlateBuilder:
                         self._past.popitem(last=False)
         return out
 
-    # --- fresh odds on request ------------------------------------------------------------------------
+    # --- fresh odds on request, and preloaded ----------------------------------------------------------
 
     def request_odds(self, league: str) -> Dict[str, Any]:
         """Ask for a fresh odds board for one league, loaded in the background: {"queued", "reason", "code"}
@@ -1925,9 +1959,15 @@ class SlateBuilder:
         Runs only when the league is in season at The Odds API, its saved odds are older than the odds
         service's 2 hours (or missing), it hasn't been asked for in that time (by anyone, across restarts),
         ESPN doesn't show it without games, the quota stays at or above the odds service's reserve after this
-        board and every board already on its way, and fewer than ``odds_per_day`` boards were loaded this way
-        in the last 24 hours. The slate updates when it arrives.
+        board and every board already on its way, and the day's budget has a board left (a request may use all
+        of the day's boards; see the module docstring). The slate updates when it arrives.
         """
+        return self._queue_odds(league, "request")
+
+    def _queue_odds(self, league: str, kind: str) -> Dict[str, Any]:
+        """request_odds for a request or a preload (``kind``): one loader for both (its pool, leases and the boards
+        on their way), so no board is loaded twice, by either process or within the 2 hours; a preload may use only
+        PRELOAD_SHARE of the day's boards."""
         now = self._now()
         ttl = self._odds_ttl()
         active = self._active(self._season)
@@ -1950,21 +1990,205 @@ class SlateBuilder:
             # Boards already queued haven't been paid for yet: count them too (the app asks for several at once)
             if not self._affordable(boards=len(self._loading) + 1):
                 return _answer(False, "reserve", "The month's odds allowance is down to its reserve.")
-            self._loads = [t for t in self._loads if now - t < 24 * 3600]
-            if len(self._loads) >= self.odds_per_day:
+            budget = self._budget(now)
+            try:
+                claim, why = self._claim_board(budget, kind)
+            except Exception:
+                log.exception("Couldn't count the odds board for %s", league)
+                return _answer(False, "error", "Couldn't ask for odds right now.")
+            if claim is None:
+                if why == "reserve":  # with the boards on their way, both processes' (the store's claims)
+                    return _answer(False, "reserve", "The month's odds allowance is down to its reserve.")
                 return _answer(False, "daily_cap", "Today's odds loads are used up; saved odds stay on show.")
             if self.store is not None and hasattr(self.store, "try_lease"):
                 try:
-                    if not self.store.try_lease(f"slate-odds:{league}", ttl):
-                        return _answer(False, "throttled", "Asked for less than 2 hours ago.")
+                    leased: Optional[bool] = bool(self.store.try_lease(f"slate-odds:{league}", ttl))
                 except Exception:
                     log.exception("Couldn't take the odds lease for %s", league)
-                    return _answer(False, "error", "Couldn't ask for odds right now.")
+                    leased = None
+                if not leased:
+                    self._give_back(budget["day"], kind, claim)  # nothing is loaded: the board isn't spent
+                    if leased is None:
+                        return _answer(False, "error", "Couldn't ask for odds right now.")
+                    return _answer(False, "throttled", "Asked for less than 2 hours ago.")
             self._requested[league] = now
-            self._loads.append(now)
             self._loading.add(league)
-        self._odds_pool.submit(self._load_odds, league)
+            self._kinds[league] = kind
+            # The odds service counts no other board for this load (budgeted); the claim ends when it has loaded
+            self._paid[league] = (budget["day"], kind, claim)
+            # A person's request goes before any preload still queued (each kind in the order asked): _load_odds
+            self._queue_seq += 1
+            heapq.heappush(self._queue, (0 if kind == "request" else 1, self._queue_seq, league))
+        if kind == "preload":
+            # Never the key: the league, the cost and the count as last reported
+            log.info("Slate: preloading %s odds (%d credits; %s left this month; board %d of today's %d)", league,
+                     self._fetch_cost(), "?" if budget["remaining"] is None else budget["remaining"],
+                     budget["spent"] + 1, budget["boards"])
+        try:
+            self._odds_pool.submit(self._load_odds, league)
+        except RuntimeError:  # shutting down: nothing will load it, so nothing is spent
+            with self._lock:
+                self._loading.discard(league)
+                self._kinds.pop(league, None)
+                self._queue = [entry for entry in self._queue if entry[2] != league]
+                heapq.heapify(self._queue)
+                paid = self._paid.pop(league, None)
+            if paid:
+                self._give_back(*paid)
+            return _answer(False, "error", "Couldn't ask for odds right now.")
         return _answer(True, "queued", "Loading the latest odds.")
+
+    def _preload(self, games: Sequence[Mapping[str, Any]], now: float) -> List[str]:
+        """The round's preloads (see the module docstring), queued through request_odds' loader with the preloads'
+        share of the day's budget: leagues in season at The Odds API with a game ESPN shows (it has an ESPN id) still
+        to start within PRELOAD_HOURS, whose saved odds are older than the odds TTL or missing, the soonest first
+        game first (a tie: more games in the window first). It stops at the reserve or the day's preload share, and
+        keeps at most PRELOAD_BACKLOG preloads queued or loading (the next round tops it up). Returns the leagues
+        queued."""
+        active = self._active(self._season)
+        if not active:
+            return []
+        with self._lock:
+            room = PRELOAD_BACKLOG - sum(1 for league in self._loading if self._kinds.get(league) == "preload")
+        if room <= 0:
+            return []
+        horizon = now + PRELOAD_HOURS * 3600
+        window: Dict[str, List[float]] = {}
+        for game in games:
+            ts = game.get("_ts")
+            if game.get("status") != "pre" or not game.get("espn_id") or game.get("league") not in active \
+                    or not isinstance(ts, (int, float)) or not now < ts <= horizon:
+                continue
+            window.setdefault(game["league"], []).append(float(ts))
+        if not window:
+            return []
+        ttl = self._odds_ttl()
+        times = self._odds_times()
+        due = sorted((league for league in window if times.get(league) is None or now - times[league] >= ttl),
+                     key=lambda league: (min(window[league]), -len(window[league]), league))
+        queued: List[str] = []
+        for league in due:
+            if len(queued) >= room:
+                break  # the backlog is full: the next round tops it up
+            code = self._queue_odds(league, "preload")["code"]
+            if code == "queued":
+                queued.append(league)
+            elif code in ("reserve", "daily_cap", "error"):
+                break  # the month's reserve, today's preload share or the store: no more this round
+        return queued
+
+    def odds_status(self, leagues: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+        """What a reader waiting for prices polls (dashboard/lab.py's _ensure_prices), for each league: {"loading": its
+        board is on its way, "saved": when its saved board was fetched, "shown": when the board the published slate
+        shows was fetched} (epoch seconds, to the second; None without one). Never fetches."""
+        wanted = list(dict.fromkeys(leagues))
+        with self._lock:
+            loading = set(self._loading)
+        times = self._odds_times()
+        current = self._current
+        shown: Dict[str, Optional[float]] = {}
+        for entry in (current.data.get("leagues") if current is not None else None) or []:
+            if isinstance(entry, Mapping) and entry.get("key") in wanted:
+                shown[entry["key"]] = _parse_time(entry.get("odds_as_of"))
+        return {league: {"loading": league in loading,
+                         "saved": float(math.floor(times[league])) if times.get(league) is not None else None,
+                         "shown": shown.get(league)} for league in wanted}
+
+    def _budget(self, now: float) -> Dict[str, Any]:
+        """The day's odds budget (see the module docstring): {"day": the UTC date, "boards": the day's boards (a
+        request may use them all: the limit the day's first claim fixed in the store, else what the odds service's rule
+        gives now), "preloads": the share preloads may use, "spent": the boards counted today by both processes,
+        "remaining": the month's credits as last reported (None: unknown), "proposed": the rule's boards now (what a
+        first claim fixes), "reserve", "cost"}."""
+        day = budget_day(now)
+        spent = self._spent(day)
+        remaining = self._remaining()
+        reserve, cost = getattr(self.odds, "reserve", 0) or 0, self._fetch_cost()
+        # The odds service's one rule for every loader (data/odds_service.py's day_boards), boards on their way not yet
+        # paid for
+        proposed = day_boards(remaining, reserve, cost, spent, now, in_flight=len(self._loading),
+                              unknown=self.odds_per_day)
+        frozen = self._odds_day(day)
+        fixed = frozen is not None and not (remaining is not None and (frozen["start_remaining"] is None
+                                                                       or remaining > frozen["start_remaining"]))
+        boards = int(frozen["limit"]) if fixed else proposed
+        return {"day": day, "boards": boards, "preloads": math.floor(boards * PRELOAD_SHARE + 1e-9), "spent": spent,
+                "remaining": remaining, "proposed": proposed, "reserve": reserve, "cost": cost}
+
+    def _odds_day(self, day: str) -> Optional[Dict[str, Any]]:
+        """The day's limit as its first claim fixed it in the store (Store.odds_day), None before that or without one."""
+        reader = getattr(self.store, "odds_day", None) if self._counts_in_store() else None
+        if not callable(reader):
+            return None
+        try:
+            return reader(day)
+        except Exception as exc:
+            self._log_failure("odds budget", exc)
+            return None
+
+    def _remaining(self) -> Optional[int]:
+        """The month's Odds API credits left, as last reported (no request is made); None when unknown."""
+        try:
+            quota = getattr(self.odds, "quota", None) or {}
+        except Exception as exc:
+            self._log_failure("odds quota", exc)
+            return None
+        remaining = quota.get("remaining") if isinstance(quota, Mapping) else None
+        return remaining if isinstance(remaining, int) and not isinstance(remaining, bool) else None
+
+    def _counts_in_store(self) -> bool:
+        return self.store is not None and callable(getattr(self.store, "take_odds_board", None))
+
+    def _spent(self, day: str) -> int:
+        """The boards counted against ``day``'s budget (both processes, from the shared store)."""
+        if not self._counts_in_store():
+            return sum(n for (counted, _), n in self._day_boards.items() if counted == day)
+        try:
+            return sum(self.store.odds_boards(day).values())
+        except Exception as exc:
+            self._log_failure("odds budget", exc)
+            return 0
+
+    def _claim_board(self, budget: Mapping[str, Any], kind: str) -> Tuple[Any, str]:
+        """Count one ``kind`` board against the day's budget: (its claim, "ok"), or (None, "daily_cap" or "reserve").
+        In the shared store (Store.claim_odds_board) the day's limit is fixed by its first claim and the reserve holds
+        with every board on its way, both processes' together; a preload may use PRELOAD_SHARE of the day."""
+        day = budget["day"]
+        share = PRELOAD_SHARE if kind == "preload" else 1.0
+        if self._counts_in_store():
+            claim = getattr(self.store, "claim_odds_board", None)
+            if callable(claim):
+                return claim(day, kind, remaining=budget["remaining"], limit=budget["proposed"], share=share,
+                             reserve=budget["reserve"], cost=budget["cost"])
+            taken = self.store.take_odds_board(day, kind, budget["preloads" if kind == "preload" else "boards"])
+            return (True, "ok") if taken else (None, "daily_cap")
+        self._day_boards = {key: n for key, n in self._day_boards.items() if key[0] == day}
+        if sum(self._day_boards.values()) >= budget["preloads" if kind == "preload" else "boards"]:
+            return None, "daily_cap"
+        self._day_boards[(day, kind)] = self._day_boards.get((day, kind), 0) + 1
+        return True, "ok"
+
+    def _give_back(self, day: str, kind: str, claim: Any = None) -> None:
+        """Uncount a board that loaded nothing, and end its claim."""
+        try:
+            if self._counts_in_store():
+                if isinstance(claim, str):
+                    self.store.give_back_odds_board(day, kind, claim)
+                else:
+                    self.store.give_back_odds_board(day, kind)
+            elif self._day_boards.get((day, kind)):
+                self._day_boards[(day, kind)] -= 1
+        except Exception:
+            log.exception("Couldn't uncount an odds board")
+
+    def _finish(self, claim: Any) -> None:
+        """A claimed board's load has ended: it is no longer on its way (Store.finish_odds_board)."""
+        finish = getattr(self.store, "finish_odds_board", None) if self._counts_in_store() else None
+        if isinstance(claim, str) and callable(finish):
+            try:
+                finish(claim)
+            except Exception:
+                log.exception("Couldn't end an odds board's claim")
 
     def _fetch_cost(self) -> int:
         """Credits one league's board costs: a credit per market per region (ten listed bookmakers count as one
@@ -1988,18 +2212,38 @@ class SlateBuilder:
         return not isinstance(remaining, int) or remaining - self._fetch_cost() * boards >= reserve
 
     def _load_odds(self, league: str) -> None:
+        """One queued board, on the odds pool's one worker: the queue's next (a person's request before any preload,
+        each kind in the order asked), whichever league this task was queued with."""
+        with self._lock:
+            if self._queue:
+                league = heapq.heappop(self._queue)[2]
+            paid = self._paid.pop(league, None)  # (day, kind, claim): the board _queue_odds counted for this load
+        # The odds service counts every board it fetches (OddsService.budgeted): this one is counted already
+        budgeted = getattr(self.odds, "budgeted", None)
+        scope = budgeted(paid[0], paid[1]) if paid and callable(budgeted) else contextlib.nullcontext()
+        token: Any = None
+        before = self._odds_times().get(league) if paid else None
         try:
-            # Loads run one at a time, so the quota read here already counts every board loaded before this one
-            if not self._affordable():
-                log.info("Slate: not loading %s odds: the month's allowance is down to its reserve", league)
-            elif self.service is not None and league in self.ai_leagues:
-                self.service.games(league, refresh=True)  # the model's chances are logged with the board
-            else:
-                self.odds.league_games(league, refresh=True)
+            with scope as token:
+                # Loads run one at a time, so the quota read here already counts every board loaded before this one
+                if not self._affordable():
+                    log.info("Slate: not loading %s odds: the month's allowance is down to its reserve", league)
+                elif self.service is not None and league in self.ai_leagues:
+                    self.service.games(league, refresh=True)  # the model's chances are logged with the board
+                else:
+                    self.odds.league_games(league, refresh=True)
         except Exception as exc:
             # Only the type: a connection error's message can quote the request URL, which holds the API key
             log.warning("Slate: loading %s odds failed (%s)", league, type(exc).__name__)
         finally:
+            if paid:
+                day, kind, claim = paid
+                if isinstance(token, dict) and not token.get("used") and self._odds_times().get(league) == before:
+                    # Nothing was loaded (the reserve held, another process had just loaded it, the request failed)
+                    self._give_back(day, kind, claim)
+                else:
+                    self._finish(claim)
             with self._lock:
                 self._loading.discard(league)
+                self._kinds.pop(league, None)
             self.wake()

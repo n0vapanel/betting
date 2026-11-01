@@ -76,6 +76,7 @@ Money is Decimal in whole cents, rounded once; chances are floats.
 
 from __future__ import annotations
 
+import contextvars
 import datetime
 import difflib
 import functools
@@ -178,6 +179,19 @@ REQUEST_WORDS = {  # the slate's answer to a request for odds, as a league witho
     "throttled": "odds were asked for less than 2 hours ago",
     "not_in_season": "no odds market for this league right now",
 }
+PRICE_WAIT = 8.0  # seconds a run waits for the odds boards it needs that are on their way (Lab._ensure_prices) ...
+PRICE_POLL = 0.25  # ... looking again this often
+# A chat turn's price wait (ai/tools.py's Toolbox sets it around each tool call): {"left": seconds}, what the turn's runs
+# may still wait for boards on their way, every tool call of the turn together. Outside a chat turn (the Builder, the
+# game page) it is unset and each run waits up to its own PRICE_WAIT
+PRICE_BUDGET: "contextvars.ContextVar[Optional[Dict[str, float]]]" = contextvars.ContextVar("price_budget",
+                                                                                          default=None)
+# Why a league asked about still has no prices once a run has waited for it, as one of four reasons (Lab._unpriced's
+# ``why``: on_way and arriving are both "the prices haven't arrived"). Never "ask again": the run already waited
+PRICE_REASONS = {"on_way": "they're still on their way", "arriving": "they haven't arrived yet",
+                 "reserve": "the month's odds allowance is at its reserve",
+                 "daily_cap": "today's odds allowance is used up",
+                 "no_games": "the bookmakers don't list these games right now"}
 MAX_WINDOW_DAYS = 8  # the slate holds today and the next six days
 WINDOW_STEP = 300  # window edges are widened to 5 minutes, so people asking in the same few minutes share a result
 # The player scan (Lab.player_scan): today's or tomorrow's players ranked for a stat and a number
@@ -195,6 +209,7 @@ MAX_SCAN_THRESHOLD = 999  # engine/scan.py's threshold_for takes numbers under 1
 # games that day first (Lab._stat_less_leagues), with no cap
 MAX_SCAN_CHECKS = 3  # leagues a scan with a stat and no league looks at for games before it says none has any
 YES_STATS = ("anytime_td", "anytime_goal", "dd", "td")  # asks that are a yes or no ("anytime TD", "double-double")
+GAME_PROPS = 3  # a game's suggested picks (Lab.game_picks): the rows in each player-prop list (likeliest, best edges)
 SCAN_TITLES = {"basketball_nba": "NBA", "basketball_wnba": "WNBA", "americanfootball_nfl": "NFL", "icehockey_nhl": "NHL",
                "baseball_mlb": "MLB", "soccer_epl": "EPL", "soccer_spain_la_liga": "La Liga",
                "soccer_italy_serie_a": "Serie A", "soccer_germany_bundesliga": "Bundesliga",
@@ -297,6 +312,87 @@ def best_effort_view(result: Dict[str, Any]) -> Dict[str, Any]:
             tickets_[index]["option"] = {"key": key, "label": label}
     result["options"] = options
     return result
+
+
+# --- leagues asked about without prices, in the ask's own words (Lab._unpriced) ----------------------------------
+
+def _price_why(code: Optional[str], outcome: Optional[str] = None) -> str:
+    """PRICE_REASONS' key for a league without prices: from the slate loader's answer ``code`` and, when the run
+    waited for its board (Lab._ensure_prices), how that ended ("loading": still on its way when the wait ran out)."""
+    if outcome == "loading" or (outcome is None and code in ("queued", "loading")):
+        return "on_way"
+    if code in ("reserve", "daily_cap"):
+        return str(code)
+    if code in ("no_games", "not_in_season"):
+        return "no_games"
+    return "arriving"
+
+
+def _day_words(day: datetime.date, first: datetime.datetime, today: datetime.date) -> str:
+    """A local day of games as the ask reads it: "tonight's", "today's", "tomorrow's" or "Sunday's"."""
+    if day == today:
+        return "tonight's" if first.hour >= 17 else "today's"
+    if day == today + datetime.timedelta(days=1):
+        return "tomorrow's"
+    return f"{day:%A}'s"
+
+
+def _ask_games(starts: Sequence[datetime.datetime], windowed: bool, now: datetime.datetime,
+               zone: Any) -> Tuple[int, str]:
+    """(how many, when) of a league's games without prices that an ask is about: with a time window, the games in it
+    (named by their day when they fall on one, else "in your window"); without one, the games on the soonest day of
+    play ("tonight's", "tomorrow's", "Sunday's"), never every game to come."""
+    local = sorted(start.astimezone(zone) for start in starts)
+    days = sorted({start.date() for start in local})
+    if windowed and len(days) > 1:
+        return len(local), "in your window"
+    on_day = [start for start in local if start.date() == days[0]]
+    return len(on_day), _day_words(days[0], on_day[0], now.astimezone(zone).date())
+
+
+def _games_words(entry: Mapping[str, Any], title: bool = False) -> str:
+    """An unpriced entry's games: "tonight's 7 games", with ``title`` "tonight's 7 NBA games", "12 games in your
+    window"."""
+    count = int(entry.get("games") or 0)
+    noun = (f"{entry.get('title')} game" if title else "game") + ("" if count == 1 else "s")
+    when = str(entry.get("when") or "")
+    if not when or when == "in your window":
+        return f"{count} {noun}" + (f" {when}" if when else "")
+    return f"{when} {count} {noun}"
+
+
+def _and(items: Sequence[str]) -> str:
+    """"NHL", "NHL and NFL", "NHL, NFL and EPL"."""
+    items = [str(item) for item in items if item]
+    return ", ".join(items[:-1]) + " and " + items[-1] if len(items) > 1 else "".join(items)
+
+
+def no_prices_line(entries: Sequence[Mapping[str, Any]], titles: Sequence[str] = (), windowed: bool = False) -> str:
+    """Why nothing at all could be built or picked, in one line: the leagues asked about have no prices (_unpriced's
+    entries, the most games first) and why (the prices haven't arrived, the month's reserve, today's allowance), or
+    there are no games in scope (``titles``: the leagues asked about; none: every league). Never "ask again"."""
+    if not entries:
+        leagues = f"{_and(list(titles))} " if titles else ""
+        return f"There are no {leagues}games {'in your window' if windowed else 'coming up this week'}."
+    why = entries[0].get("why") or "arriving"
+    same = [entry for entry in entries if (entry.get("why") or "arriving") == why][:3]
+    reason = PRICE_REASONS["arriving" if why == "on_way" else why]
+    return f"No prices are loaded for {_and([_games_words(entry, title=True) for entry in same])}: {reason}."
+
+
+def prices_note(entries: Sequence[Mapping[str, Any]], built: Sequence[str] = ()) -> str:
+    """One line for a run that still went ahead while leagues asked about have no prices (_unpriced's entries):
+    "NBA prices are still on their way; here's the best I can do with NHL and NFL games now." (``built``: the titles of
+    the leagues the tickets or picks come from; none: only the first half)."""
+    why = entries[0].get("why") or "arriving"
+    leagues = _and([str(entry.get("title")) for entry in entries if (entry.get("why") or "arriving") == why][:3])
+    if why == "on_way":
+        head = f"{leagues} prices are still on their way"
+    elif why == "arriving":
+        head = f"{leagues} prices haven't arrived yet"
+    else:
+        head = f"No {leagues} prices ({PRICE_REASONS[why]})"
+    return f"{head}; here's the best I can do with {_and(list(built))} games now." if built else f"{head}."
 
 
 # --- small helpers --------------------------------------------------------------------------------
@@ -1647,11 +1743,15 @@ class Lab(Gates):
                          "saved": saved if isinstance(saved, dict) else None},
         }
 
+    price_wait = PRICE_WAIT  # what builder_run and builder_top_picks give boards on their way (_ensure_prices)
+
     def builder_run(self, uid: str, body: Mapping[str, Any]) -> Dict[str, Any]:
         """POST /api/builder/run {controls, stake?}: the engine's Result as JSON (Decimals as strings), its tickets
         priced at the person's stake (else $10), plus ``unpriced`` (leagues in scope with games but no prices, each
         a near miss; the slate's throttled background loader is asked for their odds) and ``as_of``. Picks only: the
-        gates and the pause.
+        gates and the pause. The boards the run needs that are on their way get a few seconds first
+        (_ensure_prices); a league still without prices then keeps its reason, the run goes ahead with the leagues
+        that have them, and ``prices_note`` says so in one line (with nothing built, ``blocked`` says why).
 
         Closest effort (controls ``best_effort``, on unless the person picked strict): a request no ticket meets
         exactly gets the closest tickets the engine can make, each with ``fit`` ({odds, chance, target_odds,
@@ -1670,16 +1770,122 @@ class Lab(Gates):
         now = datetime.datetime.fromtimestamp(self._now(), datetime.timezone.utc)
         out = engine.restake(shared["result"], stake if stake is not None else BUILDER_STAKE, now)
         out.update(unpriced=shared["unpriced"], as_of=shared["as_of"], stake_given=stake is not None)
+        if shared.get("prices_note"):
+            out["prices_note"] = shared["prices_note"]
         return best_effort_view(out)
 
     def _builder_shared(self, controls: Any) -> Dict[str, Any]:
         """The result before the stake: shared by everyone for BUILDER_TTL seconds (see the section comment)."""
         import hashlib
         assembled = self.service.builder_candidates(now=self._now())
+        assembled = self._ensure_prices(assembled, controls.leagues, wait=self.price_wait)
         key = ("builder", hashlib.sha1(controls.cache_key().encode()).hexdigest()[:24], assembled["etag"],
                assembled.get("consensus_as_of"), self.service.odds_mark(), assembled.get("context_mark") or "")
+        waited = assembled.get("price_wait")
+        if waited:  # how the wait ended words the leagues still without prices
+            key += (tuple(sorted(waited["outcome"].items())),)
         return self.service.cache.get(key, BUILDER_TTL, lambda: self._builder_build(controls, assembled),
                                       kind="builder", error_ttl=5)
+
+    def _ensure_prices(self, assembled: Mapping[str, Any], leagues: Optional[Iterable[str]], *,
+                       wait: float = PRICE_WAIT) -> Mapping[str, Any]:
+        """The Builder's candidates once the odds boards an ask needs have had up to ``wait`` seconds to arrive.
+
+        The ask needs each league it names (``leagues``) that has games to come and no prices, or only stale ones;
+        naming none (every league), it needs the leagues without prices only when no league has any. Each is asked
+        for through the slate's loader (its throttle, the reserve and the day's budget decide; at most
+        ODDS_REQUESTS_PER_RUN boards put on their way, the most games first, none after the reserve or the day's
+        budget says no), and the boards it answers are queued or loading are waited for, looked at every PRICE_POLL
+        seconds, until each has loaded and shows on the slate or has ended without a new board. Then the candidates
+        are assembled again and come back with ``price_wait``: {"waited": seconds, "answers": {league: the loader's
+        answer}, "outcome": {league: "arrived" | "loading" (still on its way when the wait ran out) | "none" (ended
+        without a new board)}}, which _unpriced words. With nothing to wait for (or no slate: the bot's process)
+        ``assembled`` itself comes back, at no cost in time. In a chat turn every tool call shares one PRICE_WAIT
+        (PRICE_BUDGET): once the turn has waited that long, later calls don't wait."""
+        slate = getattr(self.service, "slate", None)
+        status = getattr(slate, "odds_status", None)
+        shared = PRICE_BUDGET.get()  # a chat turn's one wait for all its tool calls (PRICE_BUDGET)
+        if shared is not None:
+            wait = min(wait, max(0.0, float(shared.get("left", 0.0))))
+        if slate is None or not callable(status) or wait <= 0:
+            return assembled
+        needed = self._price_needs(assembled, leagues)
+        if not needed:
+            return assembled
+        try:
+            before = status(needed)
+        except Exception:
+            log.exception("Couldn't read the slate's odds boards")
+            return assembled
+        answers: Dict[str, Dict[str, Any]] = {}
+        for league in needed:
+            try:
+                answer = dict(slate.request_odds(league) or {})
+            except Exception:
+                log.exception("Couldn't ask for %s odds", league)
+                answer = {"queued": False, "code": "error", "reason": "Couldn't ask for odds right now."}
+            answers[league] = answer
+            if answer.get("code") in ("reserve", "daily_cap") or \
+                    sum(a.get("code") == "queued" for a in answers.values()) >= ODDS_REQUESTS_PER_RUN:
+                break
+        pending = [league for league, answer in answers.items() if answer.get("code") in ("queued", "loading")]
+        if not pending:
+            return assembled
+        started = time.monotonic()
+        deadline = started + max(0.0, float(wait))
+        outcome: Dict[str, str] = {}
+        while pending:
+            try:
+                seen = status(pending)
+            except Exception:
+                log.exception("Couldn't read the slate's odds boards")
+                break
+            for league in list(pending):
+                now_ = seen.get(league) or {}
+                if now_.get("loading"):
+                    continue
+                saved, shown = now_.get("saved"), now_.get("shown")
+                if saved is None or saved == (before.get(league) or {}).get("saved"):
+                    outcome[league] = "none"  # the load ended without a new board (it failed, or the reserve held)
+                    pending.remove(league)
+                elif shown is not None and shown >= saved:
+                    outcome[league] = "arrived"  # loaded, and the slate's games carry it
+                    pending.remove(league)
+            left = deadline - time.monotonic()
+            if not pending or left <= 0:
+                break
+            time.sleep(min(PRICE_POLL, left))
+        outcome.update((league, "loading") for league in pending)
+        if shared is not None:
+            shared["left"] = max(0.0, float(shared.get("left", 0.0)) - (time.monotonic() - started))
+        fresh = self.service.builder_candidates(now=self._now())
+        return {**fresh, "price_wait": {"waited": round(time.monotonic() - started, 2), "answers": answers,
+                                        "outcome": outcome}}
+
+    def _price_needs(self, assembled: Mapping[str, Any], leagues: Optional[Iterable[str]]) -> List[str]:
+        """The leagues _ensure_prices asks for: those the ask names with games to come and no prices, then those with
+        only stale prices (older than the odds' 2 hours), the most games first; with no league named, the leagues
+        without prices only when no league has any."""
+        scope = set(leagues or ())
+        candidates = list(assembled.get("candidates") or [])
+        if not scope and candidates:
+            return []  # every league, and some have prices: the run goes ahead with those
+        now = datetime.datetime.fromtimestamp(self._now(), datetime.timezone.utc)
+        coming: Dict[str, set] = {}
+        for candidate in candidates:
+            start = _parse_time(candidate.start)
+            if start is not None and start > now:
+                coming.setdefault(candidate.league, set()).add(str(candidate.ref.get("id")))
+        unpriced, stale = [], []
+        for league, info in (assembled.get("leagues") or {}).items():
+            if scope and league not in scope:
+                continue
+            to_come = sum(1 for start in info.get("games") or [] if (_parse_time(start) or now) > now)
+            if not info.get("priced") and to_come:
+                unpriced.append((-to_come, league))
+            elif scope and info.get("priced") and info.get("odds") == "stale" and coming.get(league):
+                stale.append((-len(coming[league]), league))
+        return [league for _, league in sorted(unpriced) + sorted(stale)]
 
     def _builder_build(self, controls: Any, assembled: Mapping[str, Any]) -> Dict[str, Any]:
         engine = _engine_builder()
@@ -1689,9 +1895,33 @@ class Lab(Gates):
         now = datetime.datetime.fromtimestamp(self._now(), datetime.timezone.utc)
         result = engine.build(candidates, controls, now,
                               unpriced={entry["league"]: entry["reason"] for entry in unpriced})
-        return {"result": result.to_dict(), "unpriced": unpriced,
-                "as_of": {"slate": assembled["etag"], "consensus": assembled.get("consensus_as_of"),
-                          "built": _iso_z(self._now())}}
+        out: Dict[str, Any] = {"result": result.to_dict(), "unpriced": unpriced,
+                               "as_of": {"slate": assembled["etag"], "consensus": assembled.get("consensus_as_of"),
+                                         "built": _iso_z(self._now())}}
+        built = [leg["ref"].get("league") for ticket in out["result"].get("tickets") or []
+                 for leg in ticket.get("legs") or [] if isinstance(leg.get("ref"), Mapping)]
+        note = self._prices_words(assembled, controls, scope, unpriced, built, bool(candidates))
+        if note:
+            out["prices_note"] = note
+            if not candidates and out["result"].get("blocked"):
+                out["result"]["blocked"]["message"] = note  # why nothing in scope has prices, in one line
+        return out
+
+    def _prices_words(self, assembled: Mapping[str, Any], controls: Any, scope: Optional[set],
+                      unpriced: Sequence[Mapping[str, Any]], built: Sequence[str], priced: bool) -> Optional[str]:
+        """A run's one line on prices: with no prices at all in scope (``priced`` False), why (no_prices_line); with
+        leagues asked about still without prices, that the run went ahead with the others (prices_note, ``built``:
+        the leagues the tickets or picks come from); else None."""
+        infos = assembled.get("leagues") or {}
+
+        def title(league: str) -> str:
+            return str((infos.get(league) or {}).get("title") or SCAN_TITLES.get(league) or league)
+        if not priced:
+            asked = [title(league) for league in sorted(scope or ())]
+            return no_prices_line(unpriced, asked, windowed=bool(controls.window))
+        if scope and unpriced:
+            return prices_note(unpriced, [title(league) for league in dict.fromkeys(built) if league])
+        return None
 
     def _unpriced(self, assembled: Mapping[str, Any], controls: Any, scope: Optional[set]) -> List[Dict[str, Any]]:
         """Leagues in scope with games in the window and no prices at all (no game of theirs on a saved odds board):
@@ -1700,44 +1930,70 @@ class Lab(Gates):
         ODDS_REQUESTS_PER_RUN boards on their way ("queued"); an answer that loads nothing (no market there, asked
         lately, already loading, a fresh board without these games) costs nothing and doesn't count, so a league
         asked for earlier never keeps the others waiting. Once the reserve or the daily cap is reached, no more are
-        asked this run."""
+        asked this run.
+
+        A league _ensure_prices asked for this run (``price_wait``) keeps that answer, and counts against the run's
+        share, unless its board came (or the load ended) meanwhile: then it is asked again. Each entry's ``games``
+        counts only the games the ask is about (those in its window; without one, those on the soonest day of play,
+        read in the ask's time zone), ``when`` names them ("tonight's", "tomorrow's", "Sunday's", "in your window"),
+        ``why`` is PRICE_REASONS' key and ``waited`` whether the run waited for its board; after a wait the reason
+        says the prices are still on their way or haven't arrived, never to ask again."""
         window = controls.window or {}
         low, high = _parse_time(window.get("from")), _parse_time(window.get("to"))
         now = datetime.datetime.fromtimestamp(self._now(), datetime.timezone.utc)
+        zone = self._ask_zone(controls)
+        waited = assembled.get("price_wait") or {}
+        outcome = waited.get("outcome") or {}
+        answers = waited.get("answers") or {}
         out = []
         for league, info in (assembled.get("leagues") or {}).items():
             if (scope is not None and league not in scope) or info.get("priced"):
                 continue  # a league with a board: its other games just aren't priced yet
-            starts = [_parse_time(start) for start in info.get("games") or []]
-            count = sum(1 for start in starts if start is not None and (low is None or start >= low)
-                        and (high is None or start <= high) and (not controls.exclude_started or start > now))
-            if count:
-                out.append({"league": league, "title": info.get("title") or league, "games": count,
+            starts = [start for start in (_parse_time(start) for start in info.get("games") or [])
+                      if start is not None and (low is None or start >= low) and (high is None or start <= high)
+                      and (not controls.exclude_started or start > now)]
+            if starts:
+                count, when = _ask_games(starts, bool(window), now, zone)
+                out.append({"league": league, "title": info.get("title") or league, "games": count, "when": when,
                             "priced_games": info.get("priced") or 0, "odds": info.get("odds")})
         out.sort(key=lambda entry: (-entry["games"], entry["title"]))
         slate = getattr(self.service, "slate", None)
-        asked = 0
-        stop = False
+        asked = sum((answer or {}).get("code") == "queued" for answer in answers.values())
+        stop = any((answer or {}).get("code") in ("reserve", "daily_cap") for answer in answers.values())
         for entry in out:
-            answer = None
-            if slate is not None and not stop and asked < ODDS_REQUESTS_PER_RUN:
+            league = entry["league"]
+            answer = answers.get(league) if outcome.get(league) in (None, "loading") else None
+            if answer is None and slate is not None and not stop and asked < ODDS_REQUESTS_PER_RUN:
                 try:
-                    answer = slate.request_odds(entry["league"])
+                    answer = slate.request_odds(league)
                 except Exception:
-                    log.exception("Couldn't ask for %s odds", entry["league"])
+                    log.exception("Couldn't ask for %s odds", league)
                     answer = {"queued": False, "code": "error", "reason": "Couldn't ask for odds right now."}
                 asked += answer.get("code") == "queued"
                 stop = answer.get("code") in ("reserve", "daily_cap")
             entry["request"] = answer
-            games = f"{entry['games']} game{'s' if entry['games'] != 1 else ''}"
-            text = f"{entry['title']}: no prices loaded ({games})"
             code = (answer or {}).get("code")
-            if code in REQUEST_WORDS:
+            entry["why"] = _price_why(code, outcome.get(league))
+            entry["waited"] = league in outcome
+            text = f"{entry['title']}: no prices loaded ({_games_words(entry)})"
+            if entry["waited"] and entry["why"] in ("on_way", "arriving"):
+                text += f"; {PRICE_REASONS[entry['why']]}"  # the run waited for them: no "ask again"
+            elif code in REQUEST_WORDS:
                 text += f"; {REQUEST_WORDS[code]}"
             elif answer and answer.get("reason"):
                 text += f"; {answer['reason'][0].lower()}{answer['reason'][1:].rstrip('.')}"
             entry["reason"] = text
         return out
+
+    def _ask_zone(self, controls: Any) -> Any:
+        """The time zone an ask's days are read in: its own (the controls' tz: the person's), else the app's."""
+        name = getattr(controls, "tz", None)
+        if name:
+            try:
+                return ZoneInfo(str(name))
+            except Exception:
+                log.warning("Unknown time zone %r; reading the ask's days in the app's", name)
+        return getattr(self.service, "tz", None) or datetime.timezone.utc
 
     def builder_top_picks(self, uid: str, leagues: Optional[Sequence[str]] = None, n: int = TOP_PICKS,
                           markets: Optional[Sequence[str]] = None) -> Dict[str, Any]:
@@ -1747,18 +2003,22 @@ class Lab(Gates):
         person can bet at (never a price at the goals model's fair odds), never a game under way or a price older
         than the Builder's stale limit (Controls.max_price_age_s); with ``leagues`` only those, and a league among
         them with games but no prices loaded is named in ``unpriced`` and asked for in the background (the slate's
-        throttled loader, as a run asks). Picks only: the gates and the pause.
+        throttled loader, as a run asks). Picks only: the gates and the pause. As a run does, the boards needed that
+        are on their way get a few seconds first (_ensure_prices), and ``prices_note`` says in one line why a league
+        asked about has no picks (or, with none at all, why nothing could be picked).
 
         Returns {picks: [{rank, ref, league, label, game, start, chance, chance_source, price, book, edge, why,
-        why_units?}], leagues, markets, unpriced: [{league, title, games, reason}], as_of: {slate, consensus}}."""
-        self.ready(uid, picks=True)
+        why_units?}], leagues, markets, unpriced: [{league, title, games, reason}], as_of: {slate, consensus},
+        prices_note?}."""
+        user = self.ready(uid, picks=True)
         engine = _engine_builder()
         markets = [m for m in dict.fromkeys(markets or TOP_PICK_MARKETS) if m in engine.MARKETS] or \
             list(TOP_PICK_MARKETS)
         n = max(1, min(int(n or TOP_PICKS), MAX_TOP_PICKS))
         scope = set(leagues) if leagues else None
+        assembled = self.service.builder_candidates(now=self._now())
+        assembled = self._ensure_prices(assembled, sorted(scope) if scope else None, wait=self.price_wait)
         now = self._now()
-        assembled = self.service.builder_candidates(now=now)
         usable = [candidate for candidate in assembled["candidates"] if (scope is None or candidate.league in scope)
                   and "stale_price" not in candidate.flags]
         # The engine prices each pick at its best price book and leaves out a game under way, a price older than the
@@ -1777,14 +2037,26 @@ class Lab(Gates):
             if pick.get("why_units"):
                 view["why_units"] = pick["why_units"]
             picks.append(view)
-        unpriced = []
+        entries: List[Dict[str, Any]] = []
+        controls = engine.Controls()
         if scope is not None:
             # Leagues asked about with games and no prices loaded: named, and their boards asked for in the background
-            controls = engine.Controls(leagues=sorted(scope))
-            unpriced = [{key: entry.get(key) for key in ("league", "title", "games", "reason")}
-                        for entry in self._unpriced(assembled, controls, scope)]
-        return {"picks": picks, "leagues": sorted(scope) if scope else None, "markets": markets, "unpriced": unpriced,
-                "as_of": {"slate": assembled.get("etag"), "consensus": assembled.get("consensus_as_of")}}
+            # (their games read in the person's time zone: "tonight's 7 games")
+            try:
+                controls = engine.Controls(leagues=sorted(scope),
+                                           tz=(user.get("settings") or {}).get(TIMEZONE_SETTING) or None)
+            except ValueError:
+                controls = engine.Controls(leagues=sorted(scope))
+            entries = self._unpriced(assembled, controls, scope)
+        unpriced = [{key: entry.get(key) for key in ("league", "title", "games", "reason")} for entry in entries]
+        out = {"picks": picks, "leagues": sorted(scope) if scope else None, "markets": markets, "unpriced": unpriced,
+               "as_of": {"slate": assembled.get("etag"), "consensus": assembled.get("consensus_as_of")}}
+        priced = any(scope is None or candidate.league in scope for candidate in assembled["candidates"])
+        note = self._prices_words(assembled, controls, scope, entries, [pick.get("league") for pick in picks],
+                                  priced or bool(picks)) if scope is not None else None
+        if note:
+            out["prices_note"] = note
+        return out
 
     def builder_price(self, uid: str, body: Mapping[str, Any]) -> Dict[str, Any]:
         """POST /api/builder/price {legs: [ref], stake?, books?, target_odds?, target_chance?, tolerance_pct?}: a
@@ -2740,6 +3012,273 @@ class Lab(Gates):
         view.setdefault("league", league)
         view["addable"] = False  # the slip takes game picks; a player prop is shown with its price only
         return view
+
+    # --- a game's suggested picks (GET /api/game/picks: the game page and the Mini App; the bot's game card) -------
+
+    def game_picks(self, uid: str, league: str, event_id: str) -> Dict[str, Any]:
+        """Suggested picks for one game: the brain's pick for each of its markets (engine/builder.py's game_picks over
+        the Builder's own legs, assembled from what is in hand, never fetched, with top_picks' price safety: a book a
+        person can bet at, never a price at the goals model's fair odds, a stale price or a game under way) and the
+        game's best player props from the player board (ESPN only, as P0 made it). No Odds API request is made here.
+        Picks only: the gates and the pause come first.
+
+        Returns {picks, props: {likeliest, edges, day}, game: {label, start, started}, unpriced?: {reason, code},
+        loading?: {games_ready, games_total, failed?}, as_of}:
+
+        - ``picks``: the engine's, one a market (h2h, spreads and totals at the main line, then soccer markets a book
+          prices); [] once the game has started (``game.started``).
+        - ``unpriced``: the game has no prices loaded, or only old ones (every leg stale or past the Builder's limit,
+          so no pick), even after the few seconds _ensure_prices gives a board on its way (``price_wait``, as the
+          Builder's runs wait; a game under way never waits); the slate's throttled background loader was asked for
+          the league's board (_game_unpriced: its throttle, the reserve and the daily budget decide, as the Builder's
+          _unpriced asks); ``code`` is the Builder's ``why`` for it (_price_why).
+          A game the game route finds that the Builder has no legs for is unpriced, never a 404.
+        - ``props``: _game_props' rows, from the board of ``day`` ("today" or "tomorrow": the Player finder's day;
+          None for a game on another day or in a league the scan doesn't cover).
+        - ``loading``: while the player board is still building, as player_scan says it.
+        - ``as_of``: when the game's prices were fetched, else when this was answered.
+
+        Raises CallRejected for the gates (age, a break, the pause) and NotFound for a game nothing in hand knows."""
+        self.ready(uid, picks=True)
+        league, event_id = str(league or ""), str(event_id or "")
+        if not LEAGUE_KEY.fullmatch(league):
+            raise CallRejected("League keys look like basketball_nba")
+        if not EVENT_ID.fullmatch(event_id):
+            raise NotFound(f"No game {event_id} in {league}")
+        engine = _engine_builder()
+        now = self._now()
+        assembled = self.service.builder_candidates(now=now)
+        legs = [leg for leg in assembled["candidates"] if leg.league == league and str(leg.ref["id"]) == event_id]
+        game = self._picks_game(league, event_id, legs)
+        if game is None:
+            raise NotFound(f"No game {event_id} in {league}")
+        out: Dict[str, Any] = {
+            "picks": [], "props": {"likeliest": [], "edges": [], "day": self._props_day(league, game["start"])},
+            "game": {"label": game["label"], "start": game["start"], "started": game["started"]},
+            "as_of": _iso_z(now)}
+        if game["started"]:
+            return out  # picks are for games still to come (and the player board leaves a game under way out)
+        # A board on its way for the league gets a few seconds first, as the Builder's runs give it (_ensure_prices:
+        # it asks the slate's loader for a league with no prices or only stale ones; no slate, no wait)
+        assembled = self._ensure_prices(assembled, [league], wait=self.price_wait)
+        now = self._now()
+        legs = [leg for leg in assembled["candidates"] if leg.league == league and str(leg.ref["id"]) == event_id]
+        limit = engine.Controls().max_price_age_s
+        if legs:
+            out["picks"] = engine.game_picks(legs, league, event_id,
+                                             now=datetime.datetime.fromtimestamp(now, datetime.timezone.utc),
+                                             max_price_age_s=limit)
+            out["as_of"] = _iso_z(now - min(leg.price_age_s for leg in legs))
+        # No prices loaded, or only old ones (every leg stale or past the Builder's limit, so none can be suggested):
+        # unpriced, with the loader's answer, so the app says why and looks again while a board is on its way
+        stale = bool(legs) and not out["picks"] and all("stale_price" in leg.flags or leg.price_age_s > limit
+                                                        for leg in legs)
+        if not legs or stale:
+            out["unpriced"] = self._game_unpriced(league, assembled, stale=stale)
+        props, loading = self._game_props(league, game, out["props"]["day"])
+        out["props"].update(props)
+        if loading is not None:
+            out["loading"] = loading
+        return out
+
+    def _picks_game(self, league: str, event_id: str, legs: Sequence[Any]) -> Optional[Dict[str, Any]]:
+        """The game as game_picks reads it, from what is in hand (never fetched): {label, start, started, home, away,
+        espn_id} from its legs, the slate's row (the dashboard's: its ESPN id and status) and else the league's odds
+        board as the game route finds games on it (_odds_board). None when none of them knows it: the game route's
+        404 too."""
+        from ..data.slate import ids_of
+        row: Mapping[str, Any] = {}
+        slate = getattr(self.service, "slate", None)
+        if slate is not None:
+            try:
+                current = slate.current()
+            except Exception:
+                log.exception("Couldn't read the slate")
+                current = None
+            for found in (getattr(current, "data", None) or {}).get("games") or []:
+                if isinstance(found, Mapping) and found.get("league") == league and ids_of(found)[0] == event_id:
+                    row = found
+                    break
+        away, home, start = (*legs[0].teams, legs[0].start) if legs else (None, None, None)
+        if row:
+            away = away or (row.get("away") or {}).get("name")
+            home = home or (row.get("home") or {}).get("name")
+            start = start or row.get("start")
+        if not (home and away and start):
+            event = next((g for g in self._odds_board(league) if isinstance(g, Mapping)
+                          and str(g.get("id")) == event_id), None)
+            if event is None:
+                return None
+            home, away, start = event.get("home"), event.get("away"), event.get("commence_time")
+        moment = _parse_time(start)
+        started = (any("live" in leg.flags for leg in legs) or row.get("status") in ("live", "final")
+                   or (moment is not None and moment.timestamp() <= self._now()))
+        return {"label": f"{away} @ {home}", "start": start, "started": bool(started), "home": home, "away": away,
+                "espn_id": ids_of(row)[1] if row else None}
+
+    def _game_unpriced(self, league: str, assembled: Mapping[str, Any], stale: bool = False) -> Dict[str, str]:
+        """game_picks' ``unpriced`` for a game with no prices loaded: {reason, code}, once the slate's throttled
+        background loader has been asked for the league's board (its throttle, the reserve and the day's budget decide;
+        nothing is fetched here). The answer _ensure_prices got for the league is kept while its board may still come
+        (``price_wait``, as _unpriced keeps it), else the loader is asked here; a process without the slate (the bot's)
+        asks nothing. ``code`` is _price_why's PRICE_REASONS key, the ``why`` the Builder's _unpriced entries carry:
+        "on_way" (the board is queued or loading, or a wait ended with it still loading), "reserve", "daily_cap",
+        "no_games" (no market for the league, or no games listed), else "arriving". ``reason`` says it in words, never
+        to ask again or come back later: "No prices are loaded for this game: ...", or with ``stale`` (its prices are
+        all past their time) "This game's prices are out of date: ..."."""
+        slate = getattr(self.service, "slate", None)
+        waited = assembled.get("price_wait") or {}
+        outcome = (waited.get("outcome") or {}).get(league)
+        answer: Optional[Mapping[str, Any]] = None
+        if outcome in (None, "loading"):
+            answer = (waited.get("answers") or {}).get(league)
+        if answer is None and slate is not None:
+            try:
+                answer = slate.request_odds(league)
+            except Exception:
+                log.exception("Couldn't ask for %s odds", league)
+                answer = {"queued": False, "code": "error", "reason": "Couldn't ask for odds right now."}
+        why = _price_why((answer or {}).get("code"), outcome)
+        what = "This game's prices are out of date" if stale else "No prices are loaded for this game"
+        return {"reason": f"{what}: {PRICE_REASONS[why]}", "code": why}
+
+    def _odds_board(self, league: str) -> List[Any]:
+        """The league's odds board as the game route finds games on it (odds.league_games), read only when that can't
+        fetch, as the player board reads it (data/player_board.py's _odds_games): the saved board (the store's, else
+        the feed's last in memory), else the feed's own copy while it is within its time to live less the board's
+        ODDS_MARGIN. [] when neither can be read for free."""
+        odds = self.service.odds
+        try:
+            saved = odds.saved_games(league) if callable(getattr(odds, "saved_games", None)) else None
+        except Exception:
+            saved = None
+        if saved:
+            return list(saved[1] or [])
+        loaded = getattr(odds, "odds_loaded_at", None)
+        try:
+            at = loaded(league) if callable(loaded) else None
+        except Exception:
+            at = None
+        ttl = float(getattr(odds, "odds_ttl", 7200) or 7200) - _player_board_module().ODDS_MARGIN
+        if at is None or time.time() - at >= ttl:  # the odds service's own clock, as the player board reads it
+            return []
+        try:
+            return list(odds.league_games(league) or [])  # within its time to live: its copy, no fetch
+        except Exception:
+            return []
+
+    def _props_day(self, league: str, start: Any) -> Optional[str]:
+        """The player board's day a game's props come from: "today" or "tomorrow" (ESPN's day, US Eastern: the Player
+        finder's days), None for a game on another day or in a league the player scan doesn't cover."""
+        try:
+            covered = league in _engine_scan().STATS
+        except ImportError:  # a server running without the scan's engine
+            return None
+        moment = _parse_time(start)
+        if not covered or moment is None:
+            return None
+        today = datetime.datetime.fromtimestamp(self._now(), ESPN_DAY_TZ).date()
+        offset = (moment.astimezone(ESPN_DAY_TZ).date() - today).days
+        return SCAN_DAYS[offset] if 0 <= offset < len(SCAN_DAYS) else None
+
+    def _espn_event(self, league: str, game: Mapping[str, Any]) -> Optional[str]:
+        """A game's ESPN event id (the player board's key for it): the slate's row has it, else ESPN's scoreboard is
+        matched on both teams and the date (espn_client.find_game, through the shared cache: never the odds feed)."""
+        if game.get("espn_id"):
+            return str(game["espn_id"])
+        find = getattr(getattr(self.service, "espn", None), "find_game", None)
+        if not callable(find) or not (game.get("home") and game.get("away") and game.get("start")):
+            return None
+        try:
+            match = find(league, str(game["home"]), str(game["away"]), str(game["start"]))
+        except Exception:
+            return None
+        return str(match["event_id"]) if isinstance(match, Mapping) and match.get("event_id") else None
+
+    def _game_props(self, league: str, game: Mapping[str, Any], day: Optional[str]
+                    ) -> Tuple[Dict[str, List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
+        """game_picks' player props ({likeliest, edges}) and ``loading``: the player board's snapshot for the league and
+        the game's ``day`` (never the odds feed), only this game's players, through the engine's own scan functions so
+        each row has the P0 scan's shape (_scan_row's, with ``stat``, ``stat_label`` and ``side``): ``likeliest`` the
+        posted-line scan of every stat and side, the rows whose line isn't stale and has a price on the side suggested
+        (_side_priced: a line nobody can bet is never a suggestion), by chance (one a player and stat);
+        ``edges`` scan_edges' rows with a positive edge that isn't suspect, by edge; GAME_PROPS of each, ranked.
+        ``loading`` is player_scan's while the board builds. Nothing (and no board read) for a game on another day, a
+        league whose stats have no posted lines here (soccer), or a game ESPN's scoreboard can't be matched to."""
+        none: Dict[str, List[Dict[str, Any]]] = {"likeliest": [], "edges": []}
+        if day is None:
+            return none, None
+        engine = _engine_scan()
+        table = engine.STATS[league]
+        if not any(spec["markets"] for spec in table.values()):
+            return none, None
+        espn_id = self._espn_event(league, game)
+        if espn_id is None:
+            return none, None
+        try:
+            snapshot = self.player_board.snapshot(league, day, props=True)
+        except Exception as exc:
+            log.warning("Couldn't read the %s player board (%s)", league, type(exc).__name__)
+            return none, None
+        snapshot = dict(snapshot) if isinstance(snapshot, Mapping) else {}
+        games = snapshot.get("games") or {}
+        view = {**snapshot, "games": {espn_id: games[espn_id]} if espn_id in games else {}, "started_players": [],
+                "players": [player for player in snapshot.get("players") or [] if isinstance(player, Mapping)
+                            and str(player.get("event_id")) == espn_id]}
+        try:
+            props, loading = self._ranked_props(engine, view, league, day)
+        except Exception:  # the props never hold the game's picks back
+            log.exception("Couldn't rank the player props of %s game %s", league, espn_id)
+            return none, None
+        if not snapshot.get("loaded"):
+            loading = {"games_ready": 0, "games_total": 0}  # the day's games are still being read
+        if not isinstance(loading, Mapping):
+            return props, None
+        view_loading = {"games_ready": loading.get("games_ready"), "games_total": loading.get("games_total")}
+        if loading.get("failed"):
+            view_loading["failed"] = int(loading["failed"])
+        return props, view_loading
+
+    def _ranked_props(self, engine: Any, view: Mapping[str, Any], league: str, day: str
+                      ) -> Tuple[Dict[str, List[Dict[str, Any]]], Any]:
+        """(_game_props' {likeliest, edges} from one game's board view, the engine's own ``loading`` for the board)."""
+        edged = engine.scan_edges(view, league, GAME_PROPS)
+        edges = [row for row in edged.get("players") or [] if isinstance(row, Mapping) and not row.get("edge_suspect")
+                 and isinstance(row.get("edge"), (int, float)) and row["edge"] > 0]
+        found: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for key, spec in engine.STATS[league].items():
+            if not spec["markets"]:
+                continue
+            for side in ("over",) if spec["yes"] else ("over", "under"):
+                ask = engine.make_ask(league, key, None, side, day)
+                result = engine.scan(view, ask, engine.MAX_ROWS)
+                for row in list(result.get("players") or []) + list(result.get("close") or []):
+                    line = row.get("line")
+                    if not isinstance(line, Mapping) or line.get("stale") or not self._side_priced(line, ask["side"]):
+                        continue  # a suggestion is a bet a person can place: a line priced on the side suggested
+                    seen = (str(row.get("athlete_id")), key)
+                    if seen not in found or row["chance"] > found[seen]["chance"]:
+                        found[seen] = {**row, "stat": key, "stat_label": spec["label"], "side": ask["side"]}
+        likeliest = sorted(found.values(), key=lambda row: (-row["chance"], -(row.get("edge") or 0.0),
+                                                             str(row.get("name") or ""), row["stat"], row["side"]))
+        props: Dict[str, List[Dict[str, Any]]] = {}
+        for name, rows in (("likeliest", likeliest), ("edges", edges)):
+            props[name] = [self._scan_row(row, league) for row in rows[:GAME_PROPS]]
+            for rank, row in enumerate(props[name], 1):
+                row["rank"] = rank
+        return props, edged.get("loading")
+
+    @staticmethod
+    def _side_priced(line: Mapping[str, Any], side: str) -> bool:
+        """Whether a scan row's posted line (engine/scan.py's line_view) has a price on ``side``, read as the app's
+        lineParts reads it: a yes bet's price (over only), a milestone's over (it has no under), else the over/under
+        line's price on that side."""
+        yes_only = line.get("kind") == "yes" or (line.get("yes") and not line.get("over") and not line.get("under"))
+        if side == "under" and (yes_only or line.get("kind") == "milestone"):
+            return False
+        if yes_only:
+            return bool(line.get("yes"))
+        return bool(line.get("under") if side == "under" else line.get("over"))
 
     # --- the AI chat (ai/assistant.py does the work) ----------------------------------------------
 

@@ -121,7 +121,8 @@ def test_a_run_carries_every_field_the_app_reads(world) -> None:
                 assert SWAP_KEYS <= set(swap), SWAP_KEYS - set(swap)
     # NHL has ESPN games and no saved board: a league without prices, named (the app lists result.unpriced)
     nhl = next(entry for entry in result["unpriced"] if entry["league"] == NHL)
-    assert nhl["title"] and nhl["reason"].startswith(f"{nhl['title']}: no prices loaded (2 games)")
+    # Tonight's games only (it read "(2 games)": every game to come)
+    assert nhl["title"] and nhl["reason"].startswith(f"{nhl['title']}: no prices loaded (tonight's 2 games)")
     assert result["near_misses"][0]["rule"] == "no_prices"
     misses = [miss for miss in result["near_misses"] if miss["rule"] != "no_prices"]
     assert misses and all(MISS_KEYS <= set(miss) for miss in misses)

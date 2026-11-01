@@ -97,11 +97,13 @@ from ..data.espn_client import ESPN_DAY_TZ
 from ..data.store import BUDGET_RAISE_DELAY, REALITY_CHECK_MINUTES
 from ..engine.pasted import MAX_PASTE_CHARS, NO_LEG_ODDS, basic_parse, looks_like_slip
 from .explain import (
+    ASK_AGAIN_PROBLEM,
     MIN_OUTPUT_TOKENS,
     AIError,
     ClaudeCaller,
     Explanation,
     answering_tools,
+    asks_again,
     builder_template,
     explain_ticket,
     honest_cant,
@@ -2110,6 +2112,10 @@ class Assistant:
         answering = answering_tools(route, said)
         tools = {name for name in answering if Assistant._can_answer(name, runs)}
         found = refusal_problems(text, route, tools, asked=said, allowed=allowed)
+        # A build or the top picks without prices say why in their ``prices`` line (the Builder gives the boards on
+        # their way a few seconds first): never "ask again in a few minutes"
+        if asks_again(text) and any(run.ok and (run.content or {}).get("prices") for run in runs):
+            found.append(ASK_AGAIN_PROBLEM)
         if retry and found and all(problem.startswith("a refusal") for problem in found) and honest_cant(text) \
                 and not any(Assistant._answered(name, run) for name in answering for run in runs):
             return []
@@ -2345,6 +2351,10 @@ class Assistant:
                     return f"{summary} The card below compares the strategies side by side."
             if card["type"] == "player":
                 return f"Here is {card.get('title')}'s card."
+        # Nothing built or picked for want of prices: the Lab's one line on why (never "ask again")
+        note = next((run.content["prices"] for run in runs if run.ok and (run.content or {}).get("prices")), None)
+        if note:
+            return str(note)
         if any(run.ok for run in runs):
             return "I couldn't put that into words reliably, so I've left it out. Try asking in a different way."
         return "I couldn't answer that reliably just now. Try asking in a different way."

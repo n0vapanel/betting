@@ -12,6 +12,10 @@
 // say"; a light placeholder while the block is on its way, checked again once after 20 s. The context parts are
 // drawn into their own slots (data-cx="top" | "line" | "why"), so that check and a phone/desk switch redraw only
 // them.
+//
+// Suggested picks (views/game/picks.js), right after the action bar: the brain's pick for each of the game's markets
+// and the game's best player props (GET /api/game/picks), asked once the page has drawn (the page never waits for it:
+// a skeleton holds its place), each pick with "Add to slip". Its slot (data-gp) is redrawn on its own.
 
 import { api, request, isQuiet, qs } from "../api.js";
 import { setTitle, refreshMainButton, leagueTitle, sportEmoji, layout, onLayoutChange } from "../app.js";
@@ -27,6 +31,7 @@ import { goalsSection } from "./markets/goals.js";
 import { ensureMarketStyles } from "./markets/styles.js";
 import { gameContext, bindContext, adjustedNote, RECHECK_MS } from "./context/conditions.js";
 import { scanLeague } from "./players/scan.js";
+import { gamePicks } from "./game/picks.js";
 
 let current = null; // {game, params} for the Telegram main button
 
@@ -209,12 +214,15 @@ export async function render(root, params) {
   const state = { game, params, redraw: null, cleanup: null };
   current = state;
   const context = () => gameContext(game, { phone: layout.mode === "phone", pick: wfKey });
+  // Suggested picks: drawn as they stand on every redraw, asked for once the page is on screen (picks.start below)
+  const picks = gamePicks(game, { signal: params.signal });
 
   if (game.soccer) ensureMarketStyles(); // the Goals model's table styles (markets/styles.js)
   const draw = () => {
     const cx = context();
     root.innerHTML = `<div class="cx-wrap"><div class="cx-top${cx.top ? " has-panel" : ""}">${hero(game)}<div class="cx-slot" data-cx="top">${cx.top}</div></div></div>
       ${actions(game, myCall)}
+      <div data-gp>${picks.html()}</div>
       <div data-cx="line">${cx.line}</div>
       ${marketsSection(game, { short })}
       <div data-cx="why">${cx.why}</div>
@@ -237,6 +245,7 @@ export async function render(root, params) {
     if (root.isConnected) draw();
   };
   draw();
+  picks.start(root); // in the background: the page doesn't wait for it
   refreshMainButton();
   if (game.prediction) state.redraw();
 
@@ -289,6 +298,7 @@ export async function render(root, params) {
     clearTimeout(recheck);
     stopLayout();
     unbindContext();
+    picks.stop();
   };
   params.signal?.addEventListener?.("abort", () => state.cleanup?.(), { once: true });
 

@@ -158,6 +158,24 @@ CREATE TABLE IF NOT EXISTS consensus_log (
 );
 CREATE INDEX IF NOT EXISTS consensus_log_by_status ON consensus_log (status, start);
 CREATE INDEX IF NOT EXISTS consensus_log_by_event ON consensus_log (league, event_id);
+CREATE TABLE IF NOT EXISTS odds_boards (
+    day TEXT NOT NULL,             -- the UTC date (YYYY-MM-DD) the slate's odds boards are counted against
+    kind TEXT NOT NULL,            -- preload or request (data/slate.py's daily budget counts them together)
+    boards INTEGER NOT NULL,
+    PRIMARY KEY (day, kind)
+);
+CREATE TABLE IF NOT EXISTS odds_days (
+    day TEXT PRIMARY KEY,          -- the UTC date: its odds boards' limit, fixed at the day's first claim
+    start_remaining INTEGER,       -- the month's count it was worked out from (NULL: unknown then)
+    day_limit INTEGER NOT NULL,
+    frozen_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS odds_claims (
+    id TEXT PRIMARY KEY,           -- one board counted and on its way, until it has loaded or was given back
+    day TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    taken REAL NOT NULL
+);
 """
 
 CONSENSUS_FIELDS = ("league", "game_key", "event_id", "espn_id", "swapped", "home", "away", "start", "logged_at",
@@ -707,6 +725,7 @@ MIGRATIONS: Tuple[Tuple[str, str, str], ...] = (
 )
 SNAPSHOT_SUFFIX = "#t24"  # a t24 row's game_key: the game's own key plus this
 T24_WINDOW = (12 * 3600.0, 24 * 3600.0)  # the snapshot is taken on the first log this long before the start
+CLAIM_SECONDS = 120.0  # an odds board claimed this long ago and not ended no longer counts as on its way
 
 
 def migrate(db: sqlite3.Connection) -> List[str]:
@@ -827,6 +846,12 @@ class Store:
             ).fetchone()
         return {"remaining": row[0], "used": row[1]} if row else {"remaining": None, "used": None}
 
+    def quota_reported_at(self) -> Optional[float]:
+        """When the most recent count (latest_quota) was reported (epoch seconds), or None."""
+        with closing(self._connect()) as db:
+            row = db.execute("SELECT ts FROM api_usage WHERE remaining IS NOT NULL ORDER BY ts DESC LIMIT 1").fetchone()
+        return float(row[0]) if row else None
+
     def try_lease(self, key: str, seconds: float) -> bool:
         """Claim ``key`` for ``seconds`` unless another process holds an unexpired claim."""
         now = time.time()
@@ -843,6 +868,108 @@ class Store:
             )
             db.execute("COMMIT")
             return True
+
+    # --- the slate's daily odds budget (data/slate.py): boards counted per UTC day, both processes together -------
+
+    def odds_boards(self, day: str) -> Dict[str, int]:
+        """{kind: boards} counted against ``day``'s odds budget (a UTC date, YYYY-MM-DD)."""
+        with closing(self._connect()) as db:
+            return {kind: int(boards) for kind, boards in
+                    db.execute("SELECT kind, boards FROM odds_boards WHERE day = ? AND boards > 0", (day,))}
+
+    def take_odds_board(self, day: str, kind: str, limit: int) -> bool:
+        """Count one more ``kind`` board against ``day``'s budget unless ``limit`` boards (every kind together) are
+        counted already. One transaction, so two processes asking at once never both take the last board. Days
+        over 40 days old are dropped."""
+        with closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                (total,) = db.execute("SELECT COALESCE(SUM(boards), 0) FROM odds_boards WHERE day = ?",
+                                      (day,)).fetchone()
+                if int(total) >= limit:
+                    db.execute("ROLLBACK")
+                    return False
+                db.execute("INSERT INTO odds_boards (day, kind, boards) VALUES (?, ?, 1) "
+                           "ON CONFLICT(day, kind) DO UPDATE SET boards = boards + 1", (day, kind))
+                old = (datetime.date.fromisoformat(day) - datetime.timedelta(days=40)).isoformat()
+                db.execute("DELETE FROM odds_boards WHERE day < ?", (old,))
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+            db.execute("COMMIT")
+            return True
+
+    def give_back_odds_board(self, day: str, kind: str, claim: Optional[str] = None) -> None:
+        """Uncount a board that wasn't loaded after all (its lease was taken elsewhere, nothing came), and end its claim."""
+        with closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("UPDATE odds_boards SET boards = MAX(boards - 1, 0) WHERE day = ? AND kind = ?", (day, kind))
+            if claim:
+                db.execute("DELETE FROM odds_claims WHERE id = ?", (claim,))
+            db.execute("COMMIT")
+
+    def claim_odds_board(self, day: str, kind: str, *, remaining: Optional[int], limit: int, share: float = 1.0,
+                         reserve: int = 0, cost: int = 0, now: Optional[float] = None) -> Tuple[Optional[str], str]:
+        """Count one ``kind`` board against ``day``'s budget and hold it as on its way until finish_odds_board (or
+        give_back_odds_board) ends its claim: (the claim's id, "ok"), or (None, why: "daily_cap" or "reserve"). One
+        transaction, so neither the day nor the reserve can be passed by loads that overlap, in one process or two.
+
+        The day's limit is fixed by its first claim (``limit``, which the caller worked out from ``remaining``, the
+        count then) and fixed again only by a higher count (the month's reset, a new key): a board taken but not yet
+        loaded can't make the day look bigger. ``share`` of it may be counted (a preload's part). And the count (the
+        lower of ``remaining`` and the latest one reported) less the boards on their way and this one, at ``cost``
+        each, never goes under ``reserve``. A claim not ended within CLAIM_SECONDS no longer counts as on its way (its
+        process died)."""
+        now = time.time() if now is None else now
+        with closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                row = db.execute("SELECT start_remaining, day_limit FROM odds_days WHERE day = ?", (day,)).fetchone()
+                if row is None or (remaining is not None and (row[0] is None or remaining > row[0])):
+                    db.execute("INSERT OR REPLACE INTO odds_days (day, start_remaining, day_limit, frozen_at) "
+                               "VALUES (?, ?, ?, ?)", (day, remaining, int(limit), now))
+                    day_limit = int(limit)
+                else:
+                    day_limit = int(row[1])
+                (total,) = db.execute("SELECT COALESCE(SUM(boards), 0) FROM odds_boards WHERE day = ?",
+                                      (day,)).fetchone()
+                if int(total) >= math.floor(day_limit * share + 1e-9):
+                    db.execute("COMMIT")  # keeps the day's limit, counts nothing
+                    return None, "daily_cap"
+                latest = db.execute("SELECT remaining FROM api_usage WHERE remaining IS NOT NULL "
+                                    "ORDER BY ts DESC LIMIT 1").fetchone()
+                counts = [value for value in (remaining, latest[0] if latest else None) if value is not None]
+                (on_way,) = db.execute("SELECT COUNT(*) FROM odds_claims WHERE taken > ?",
+                                       (now - CLAIM_SECONDS,)).fetchone()
+                if counts and min(counts) - int(cost) * (int(on_way) + 1) < reserve:
+                    db.execute("COMMIT")
+                    return None, "reserve"
+                claim = secrets.token_hex(8)
+                db.execute("INSERT INTO odds_boards (day, kind, boards) VALUES (?, ?, 1) "
+                           "ON CONFLICT(day, kind) DO UPDATE SET boards = boards + 1", (day, kind))
+                db.execute("INSERT INTO odds_claims (id, day, kind, taken) VALUES (?, ?, ?, ?)", (claim, day, kind, now))
+                old = (datetime.date.fromisoformat(day) - datetime.timedelta(days=40)).isoformat()
+                db.execute("DELETE FROM odds_boards WHERE day < ?", (old,))
+                db.execute("DELETE FROM odds_days WHERE day < ?", (old,))
+                db.execute("DELETE FROM odds_claims WHERE taken < ?", (now - 86400,))
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+            db.execute("COMMIT")
+            return claim, "ok"
+
+    def finish_odds_board(self, claim: Optional[str]) -> None:
+        """A claimed board has loaded (or its load ended): no longer on its way."""
+        if claim:
+            with closing(self._connect()) as db:
+                db.execute("DELETE FROM odds_claims WHERE id = ?", (claim,))
+
+    def odds_day(self, day: str) -> Optional[Dict[str, Any]]:
+        """The day's fixed odds board limit ({"start_remaining", "limit"}: claim_odds_board), or None before its first
+        claim."""
+        with closing(self._connect()) as db:
+            row = db.execute("SELECT start_remaining, day_limit FROM odds_days WHERE day = ?", (day,)).fetchone()
+        return {"start_remaining": row[0], "limit": int(row[1])} if row else None
 
     # --- the shared cache (data/cache.py): values as gzip JSON, keyed by key_text --------------------------
 

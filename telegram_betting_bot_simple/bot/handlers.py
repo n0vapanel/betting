@@ -2,7 +2,10 @@
 
 Flow: /start → Single or Multi → sport → league → games → a game's card
 (the model's predicted score, win/cover/over chances, best odds,
-injuries and projected top players) with one button per pick. In Single
+injuries and projected top players, and "Suggested picks": the brain's
+pick for each market and the game's best player props, Lab.game_picks,
+for a person the gates and the picks pause let through) with one button
+per pick. In Single
 mode a pick shows that bet's payout; in Multi mode picks go on a slip
 (marked ✓) whose combined odds come from the best single bookmaker.
 On NBA games 🔮 lets anyone make a call (winner and how sure they are),
@@ -51,15 +54,22 @@ from telegram.ext import (
 )
 
 from ..ai.assistant import HELPLINE
+from ..ai.explain import edge_text, scan_edge_label
 from ..config import Config
 from ..dashboard.lab import paused_until
+from ..dashboard.service import CallRejected, NotFound
 from ..data.leagues import SPORTS, pick_leagues
 from ..engine import calls
 from ..services import build_service
-from .chat import AGE_BUTTON, setup_chat
+from .chat import AGE_BUTTON, MAX_TEXT, setup_chat
 
 MAX_GAMES = 10
 STAKES = (5, 10, 25, 50)
+# The game card's "Suggested picks" block (Lab.game_picks): the brain's game picks, then the game's player props
+SUGGESTED_PICKS = 3
+SUGGESTED_PROPS = 2
+SUGGESTED_HEAD = "💡 <b>Suggested picks</b>"
+SUGGESTED_NOTE = "No pick is certain. Only you add bets to your slip."
 # Pick buttons encode market and side in one letter each to stay under Telegram's 64-byte limit
 MARKET_CODES = {"h": "h2h", "s": "spreads", "t": "totals"}
 SIDE_CODES = {"h": "home", "a": "away", "d": "draw", "o": "over", "u": "under"}
@@ -182,8 +192,10 @@ def context_line(card: Dict[str, Any]) -> Optional[str]:
     return line
 
 
-def game_card_text(card: Dict[str, Any], odds_as_of: Optional[str]) -> str:
-    """A game's prediction, odds context, injuries and projected leaders (HTML)."""
+def game_card_text(card: Dict[str, Any], odds_as_of: Optional[str], picks: Optional[Dict[str, Any]] = None) -> str:
+    """A game's prediction, odds context, injuries and projected leaders (HTML). ``picks`` (Lab.game_picks' answer for
+    the person) adds the "Suggested picks" block after the markets' lines, as much of it as fits Telegram's limit
+    (_fit_suggestions: the card's own content always comes first); without it the card is as it always was."""
     league = card.get("league", "")
     home, away = card["home"], card["away"]
     esc = html.escape
@@ -228,6 +240,7 @@ def game_card_text(card: Dict[str, Any], odds_as_of: Optional[str]) -> str:
     where = context_line(card)
     if where:
         lines.append(where)
+    suggested_at = len(lines)
 
     analysts = [a for a in (card.get("analysts") or {}).get("analysts", []) if a.get("forecast")]
     if analysts:
@@ -261,7 +274,77 @@ def game_card_text(card: Dict[str, Any], odds_as_of: Optional[str]) -> str:
                           for pl in top]
     lines += ["", f"Odds{f' as of {esc(odds_as_of)}' if odds_as_of else ''}: best price across bookmakers. "
                   "Button % = AI chance of winning."]
+    return _fit_suggestions(lines, suggested_at, suggested_entries(card, picks))
+
+
+def _fit_suggestions(lines: List[str], at: int, entries: List[str]) -> str:
+    """The card's lines with the "Suggested picks" block at ``at``: its heading, as many of ``entries`` as keep the
+    message within Telegram's limit (picks before props, so props give way first) and the note. The block gives way to
+    the card's own content: with no room for even one entry, the card alone."""
+    for count in range(len(entries), 0, -1):
+        block = ["", SUGGESTED_HEAD] + entries[:count] + [f"<i>{html.escape(SUGGESTED_NOTE)}</i>"]
+        text = "\n".join(lines[:at] + block + lines[at:])
+        if len(text) <= MAX_TEXT:
+            return text
     return "\n".join(lines)
+
+
+def _pick_name(card: Dict[str, Any], pick: Dict[str, Any]) -> str:
+    """A game pick the way the card names teams: "Celtics to win", "Celtics -6.5", "Over 221.5"; else its label."""
+    league = card.get("league", "")
+    ref = pick.get("ref") if isinstance(pick.get("ref"), dict) else {}
+    market, side, point = ref.get("market"), str(ref.get("side") or ""), ref.get("point")
+    team = {"home": card.get("home"), "away": card.get("away")}.get(side)
+    number = isinstance(point, (int, float)) and not isinstance(point, bool)
+    if market == "h2h":
+        return f"{short_name(team, league)} to win" if team else "Draw"
+    if market == "spreads" and team and number:
+        return f"{short_name(team, league)} {point:+g}"
+    if market == "totals" and number:
+        return f"{side.title()} {point:g}"
+    return str(pick.get("label") or "")
+
+
+def suggested_entries(card: Dict[str, Any], picks: Optional[Dict[str, Any]]) -> List[str]:
+    """The "Suggested picks" block's lines (HTML, escaped): up to SUGGESTED_PICKS of the brain's game picks, "Celtics to
+    win: 64% (market 58%), 1.72 at FanDuel", then up to SUGGESTED_PROPS player props, the likeliest and the best edges
+    in turn ("Jayson Tatum points over 26.5: 61% (edge +4.2%)"). [] without picks (paused, refused) or for a game under
+    way."""
+    if not isinstance(picks, dict) or (picks.get("game") or {}).get("started"):
+        return []
+    esc = html.escape
+    entries = []
+    for pick in [p for p in picks.get("picks") or [] if isinstance(p, dict)][:SUGGESTED_PICKS]:
+        chance, market = pick.get("chance"), pick.get("market_chance")
+        if not isinstance(chance, (int, float)):
+            continue
+        text = f"{esc(_pick_name(card, pick))}: {pct(chance)}"
+        if isinstance(market, (int, float)):
+            text += f" (market {pct(market)})"
+        try:
+            price = float(pick.get("price"))
+        except (TypeError, ValueError):
+            price = 0.0
+        if price > 1:
+            text += f", {price:.2f}" + (f" at {esc(str(pick['book']))}" if pick.get("book") else "")
+        entries.append(text)
+    props = picks.get("props") if isinstance(picks.get("props"), dict) else {}
+    lists = [[row for row in props.get(name) or [] if isinstance(row, dict)] for name in ("likeliest", "edges")]
+    shown: List[Dict[str, Any]] = []
+    for index in range(max(len(rows) for rows in lists)):
+        for rows in lists:
+            row = rows[index] if index < len(rows) else None
+            same = row is not None and any((row.get("athlete_id"), row.get("stat"), row.get("side")) ==
+                                           (other.get("athlete_id"), other.get("stat"), other.get("side"))
+                                           for other in shown)
+            if row is not None and not same and isinstance(row.get("chance"), (int, float)) \
+                    and len(shown) < SUGGESTED_PROPS:
+                shown.append(row)
+    for row in shown:
+        text = f"{esc(str(row.get('name') or 'A player'))} {esc(scan_edge_label(row))}: {pct(row['chance'])}"
+        edge = None if (row.get("line") or {}).get("stale") else edge_text(row.get("edge"))
+        entries.append(text + (f" ({esc(edge)})" if edge else ""))
+    return entries
 
 
 def slip_text(slip: Dict[str, Any], picks: List[Dict[str, Any]]) -> str:
@@ -571,7 +654,29 @@ async def show_game(update: Update, context: ContextTypes.DEFAULT_TYPE, league: 
     if card.get("prediction") and not card["live"]:
         rows.append([InlineKeyboardButton("🔮 Make your call", callback_data=f"call:{league}:{card['id'][:GAME_ID_CHARS]}")])
     rows.append(back)
-    await _show(update, game_card_text(card, board.get("odds_as_of")), rows)
+    suggested = await _suggested(update, context, league, card)
+    await _show(update, game_card_text(card, board.get("odds_as_of"), suggested), rows)
+
+
+async def _suggested(update: Update, context: ContextTypes.DEFAULT_TYPE, league: str,
+                     card: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The game card's suggested picks for this person (Lab.game_picks, in a worker thread), or None: no Lab or no
+    account kept (none is made here, so nobody who hasn't confirmed their age sees picks), a game under way, the gates
+    or the pause after a warning sign refusing (Lab.ready), or anything failing (the card shows without them)."""
+    lab = getattr(context.application.bot_data.get("service"), "lab", None)
+    user = getattr(update, "effective_user", None)
+    if lab is None or user is None or card.get("live"):
+        return None
+    account, kept = await _account(update, context)
+    if not kept or not account:
+        return None
+    try:
+        return await asyncio.to_thread(lab.game_picks, f"tg:{user.id}", league, str(card["id"]))
+    except (CallRejected, NotFound):
+        return None  # a break, the pause or the age check (no picks block), or a game the Builder doesn't have
+    except Exception:
+        logging.exception("Couldn't suggest picks for %s", card.get("id"))
+        return None
 
 
 async def pick_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

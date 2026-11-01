@@ -759,8 +759,10 @@ def test_fresh_odds_respect_the_reserve_the_season_the_games_and_a_daily_cap(sto
     builder.refresh()
     assert builder.request_odds(NBA)["reason"].startswith("The month's odds allowance is down to its reserve")
     assert low.fetches == []
-    odds = FakeOdds(store, now=lambda: clock["now"])
-    builder = builder_for(store, espn, odds, now=lambda: clock["now"], odds_per_day=1)
+    # 70 credits left on 26 October: the 20 above the reserve over the month's 6 days left are one board a day (the
+    # daily budget replaced SLATE_ODDS_PER_DAY, which now holds only while the count is unknown)
+    odds = FakeOdds(store, remaining=70, now=lambda: clock["now"])
+    builder = builder_for(store, espn, odds, now=lambda: clock["now"])
     builder.refresh()
     assert builder.request_odds("basketball_euroleague")["queued"] is False  # not in season at The Odds API
     assert builder.request_odds("tennis_atp")["queued"] is False  # ESPN's tour: no odds market of its own
@@ -769,7 +771,7 @@ def test_fresh_odds_respect_the_reserve_the_season_the_games_and_a_daily_cap(sto
     assert builder.request_odds(EPL)["queued"] is False
     assert builder.request_odds(NBA)["queued"]
     wait_for(builder)
-    # One board a day (SLATE_ODDS_PER_DAY), all leagues together; a day later there's room again
+    # One board a day, all leagues together; a day later there's room again
     assert builder.request_odds(ODI)["reason"].startswith("Today's odds loads are used up")
     clock["now"] += 24 * 3600 + 1
     builder.refresh()
@@ -797,9 +799,11 @@ def hold_the_odds_pool(builder: SlateBuilder) -> threading.Event:
     return gate
 
 
-def test_boards_already_queued_count_against_the_reserve(store) -> None:
+def test_boards_already_queued_count_against_the_reserve(store, monkeypatch) -> None:
     # The app asks for up to four leagues at once, and several people may be on Today: each answer must count
-    # the boards already on their way, or they all pass the check and the reserve is spent
+    # the boards already on their way, or they all pass the check and the reserve is spent. On the month's last
+    # day the daily budget is every credit above the reserve, so the reserve is what holds here
+    monkeypatch.setattr(odds_service, "days_left", lambda now: 1)
     leagues = [EPL, ODI, "soccer_spain_la_liga", "soccer_italy_serie_a"]
     listing = [{"key": key, "group": "Soccer", "title": key, "active": True, "has_outrights": False} for key in leagues]
     odds = PayingOdds(store, listing=listing, remaining=56)  # room for two boards above the reserve of 50
@@ -815,7 +819,8 @@ def test_boards_already_queued_count_against_the_reserve(store) -> None:
     assert odds.fetches == [EPL, ODI] and odds.quota["remaining"] == 50  # never below the reserve
 
 
-def test_a_queued_board_is_skipped_if_the_quota_fell_meanwhile_and_regions_cost_more(store) -> None:
+def test_a_queued_board_is_skipped_if_the_quota_fell_meanwhile_and_regions_cost_more(store, monkeypatch) -> None:
+    monkeypatch.setattr(odds_service, "days_left", lambda now: 1)  # the month's last day: the reserve holds, not the day
     listing = [{"key": key, "group": "Soccer", "title": key, "active": True, "has_outrights": False} for key in (EPL, ODI)]
     espn = FakeEspn({(EPL, TODAY): [espn_game("e1", "Arsenal", "Chelsea", at(30), sport="soccer")]})
     odds = PayingOdds(store, listing=listing, remaining=60)
