@@ -43,7 +43,7 @@ const CSS = `
 .view-bets .mb-mark { display: inline-flex; align-items: center; gap: 3px; font-weight: 650; font-size: 12.5px; white-space: nowrap; flex: none; }
 .view-bets .mb-mark.good { color: var(--accent); }
 .view-bets .mb-mark.bad { color: var(--danger); }
-.view-bets .mb-mark.warn { color: var(--warn); }
+.view-bets .mb-mark.warn { color: var(--warn-ink); }
 .view-bets .mb-mark.muted { color: var(--text-2); }
 .view-bets .mb-nums, .mb-sheet .mb-nums { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
 .view-bets .mb-nums > div, .mb-sheet .mb-nums > div { background: var(--card-2); border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; min-width: 0; }
@@ -69,7 +69,7 @@ const CSS = `
 .view-bets .mb-day.won { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
 .view-bets .mb-day.lost { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 45%, transparent); color: var(--danger); }
 .view-bets .mb-day.void, .view-bets .mb-day.partial { background: var(--card-3); color: var(--text-2); }
-.view-bets .mb-day.live { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 45%, transparent); color: var(--warn); }
+.view-bets .mb-day.live { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 45%, transparent); color: var(--warn-ink); }
 .view-bets .mb-day.next { border: 2px dashed var(--info); color: var(--info); background: var(--info-soft); }
 .view-bets .mb-day.skip { opacity: 0.45; }
 .view-bets .mb-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }

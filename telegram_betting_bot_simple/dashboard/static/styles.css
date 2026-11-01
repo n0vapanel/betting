@@ -219,7 +219,7 @@ code { font-size: 0.9em; background: var(--card-2); border-radius: 4px; padding:
 .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .good { color: var(--accent); }
 .bad { color: var(--danger); }
-.warn { color: var(--warn); }
+.warn { color: var(--warn-ink); } /* text: --warn itself is for icons, borders and fills (under 4.5:1 as text in light themes) */
 .info { color: var(--info); }
 .eyebrow { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); margin-bottom: 4px; }
 .text-link { display: inline-flex; align-items: center; gap: 2px; min-height: var(--tap); font-weight: 600; color: var(--info); }
@@ -265,7 +265,7 @@ code { font-size: 0.9em; background: var(--card-2); border-radius: 4px; padding:
   position: relative;
 }
 .pill::after { content: ""; position: absolute; inset: -6px -2px; }
-.pill.low { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.pill.low { color: var(--warn-ink); border-color: var(--warn); background: var(--warn-soft); }
 .avatar {
   flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
   background: var(--card-3); color: var(--text); font-weight: 700; position: relative; margin-right: -4px;
@@ -329,7 +329,7 @@ html.tg .slipbar-inner, :root[data-theme="light"] .slipbar-inner { background: v
 .slip-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
 .slip-text b, .slip-text span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .slip-text span { color: var(--text-2); font-size: 13px; }
-.slip-text .warn { color: var(--warn); display: flex; align-items: center; gap: 4px; }
+.slip-text .warn { color: var(--warn-ink); display: flex; align-items: center; gap: 4px; }
 .slip-open > .icon { color: var(--text-2); margin-right: 2px; }
 .slip-analyse { flex: none; }
 /* Inside Telegram, while its main button is the slip's "Analyse" (app.js refreshMainButton), this one steps aside */
@@ -518,7 +518,7 @@ select.input { appearance: auto; }
 .o-price { font-size: 15.5px; font-weight: 750; line-height: 1.2; white-space: nowrap; }
 .o-chance { font-size: 11px; color: var(--text-2); line-height: 1.1; white-space: nowrap; }
 .o-mark { margin-left: 3px; color: var(--accent); font-weight: 800; }
-.o-mark.warn { color: var(--warn); }
+.o-mark.warn { color: var(--warn-ink); }
 .o-check { position: absolute; top: 3px; right: 3px; width: 16px; height: 16px; border-radius: 50%; display: none; place-items: center; background: var(--accent-ink); color: var(--accent); }
 .odds.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .odds.on .o-point, .odds.on .o-chance, .odds.on .o-mark { color: var(--accent-ink); opacity: 0.85; }
