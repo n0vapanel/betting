@@ -16,6 +16,8 @@
 //
 //   renderBrain(box, {signal, query}) -> draws into ``box``; query: sport=<key> picks the sport first
 //   captureHtml(normalized) -> the raw capture card's HTML ("" when the payload has no capture block)
+//   everyGameHtml(normalized) -> the every-game card (v4 P3-lite): per sport the live record, the 14-day back-test and
+//   the priced picks apart (learning records, never picks)
 // Every figure is the server's; status words come from its fields (model.js); text goes in through esc().
 
 import { api, isQuiet } from "../../api.js";
@@ -311,6 +313,34 @@ function healthHtml(d) {
       h.backlog !== null ? ["Games waiting over 2 days for a grade", String(h.backlog)] : null])}`);
 }
 
+// --- 11 · every game (v4 P3-lite) -------------------------------------------------------------------------------------
+
+const EVERY_GAME_LINES = [["live", "Every game, live"], ["retro", "Every game, last 14 days (back-tested)"], ["priced", "Priced picks"]];
+
+/** One line of the every-game card: games predicted, graded and pending, the hit rate, and Brier score against the line's. */
+function everyGameLine(label, b) {
+  if (!b.predicted) return "";
+  const pct = (v) => (v === null ? "–" : `${Math.round(v * 100)}%`);
+  const brier = b.marketN && b.marketBrainBrier !== null && b.marketBrier !== null
+    ? `Brier ${fixed(b.marketBrainBrier, 3)} vs the line's ${fixed(b.marketBrier, 3)} (${games(b.marketN)})`
+    : b.brainBrier !== null ? `Brier ${fixed(b.brainBrier, 3)}` : "";
+  return `<li><span>${esc(label)}</span><b>${esc([`${b.predicted.toLocaleString()} predicted`, `${b.graded.toLocaleString()} graded`,
+    `${b.pending.toLocaleString()} pending`, b.scored ? `hit rate ${pct(b.hitRate)}` : "", brier].filter(Boolean).join(" · "))}</b></li>`;
+}
+
+/** The every-game card: per sport the live record, the 14-day back-test and the priced picks, apart. Learning records, not picks. */
+export function everyGameHtml(d) {
+  const e = d.everyGame;
+  if (!e) return "";
+  const intro = `<p class="hint" style="margin-top:0">${esc(e.note || "Learning records, not picks: every game the brain predicts, scored after the final.")}</p>`;
+  if (!e.sports.length) {
+    const why = e.unreadable ? "The record couldn't be read just now." : "No game predicted yet: each game is logged an hour before its start.";
+    return section("Every game", `${intro}<p class="bp-empty">${esc(why)}</p>`, { id: "bp-every-game" });
+  }
+  const body = e.sports.map((s) => `<h3 class="bp-sub">${esc(s.label)}</h3><ul class="bp-kv">${EVERY_GAME_LINES.map(([name, label]) => everyGameLine(label, s[name])).join("")}</ul>`).join("");
+  return section("Every game", `${intro}${body}`, { id: "bp-every-game" });
+}
+
 // --- 10 · raw capture (v4 P1) -----------------------------------------------------------------------------------------
 
 /** "4.2 GB" from bytes, as df -h and the server's alarms count them (1024-based); "–" when unknown. */
@@ -506,7 +536,7 @@ export async function renderBrain(box, { signal, query = new URLSearchParams() }
   };
 
   const draw = () => {
-    box.innerHTML = `<div class="bp">${introHtml(data)}${headlinesHtml(data, selected)}${sportSection()}${changesHtml(data)}${heldHtml(data)}${experimentsHtml(data)}${aiHtml(data)}${healthHtml(data)}${captureHtml(data)}</div>`;
+    box.innerHTML = `<div class="bp">${introHtml(data)}${headlinesHtml(data, selected)}${sportSection()}${changesHtml(data)}${heldHtml(data)}${experimentsHtml(data)}${aiHtml(data)}${healthHtml(data)}${everyGameHtml(data)}${captureHtml(data)}</div>`;
     drawCharts();
   };
 

@@ -64,6 +64,7 @@ from ..services import build_service
 from .chat import AGE_BUTTON, MAX_TEXT, setup_chat
 
 MAX_GAMES = 10
+TELEGRAM_LIMIT = 4096  # characters in one Telegram message
 STAKES = (5, 10, 25, 50)
 # The game card's "Suggested picks" block (Lab.game_picks): the brain's game picks, then the game's player props
 SUGGESTED_PICKS = 3
@@ -1046,9 +1047,13 @@ def brain_text(service: Any) -> str:
         return "The brain's learning record isn't available here."
     from ..learn.progress import brain_lines
     lines = brain_lines(store)
-    return ("🧠 How the brain is doing\n\n" + "\n\n".join(lines) + "\n\nIt leans mostly on the market, which is very "
-            "hard to beat: improving means better-calibrated chances and log loss moving toward the sharp market's. "
-            "Most weeks nothing changes. The Brain progress page has the details.")
+    tail = ("\n\nIt leans mostly on the market, which is very hard to beat: improving means better-calibrated chances "
+            "and log loss moving toward the sharp market's. Most weeks nothing changes. The Brain progress page has the "
+            "details.")
+    head = "🧠 How the brain is doing\n\n"
+    while lines and len(head + "\n\n".join(lines) + tail) > TELEGRAM_LIMIT:
+        lines = lines[:-1]  # Telegram's limit: the record's lines (last) go first
+    return head + "\n\n".join(lines) + tail
 
 
 async def brain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -6,7 +6,7 @@ and the grader's live capture, all into the ``hist_*`` tables (learn/history_sto
     between 01:00 and 06:00 server time, newest seasons first:
     - football-data.co.uk: E0, E1, SP1, I1, D1, F1 from 2019/20 and MLS from the USA file (one request a file);
     - nflverse: games.csv (one request covers 2019 on);
-    - ESPN: the NBA, NHL, college football and basketball and MLB, the last 3 seasons. Event ids by 7-day windows,
+    - ESPN: the NBA, NHL, college football and basketball, MLB, the NFL and the WNBA, the last 3 seasons. Event ids by 7-day windows,
       then per game the summary (result, box stats) and the core odds (open and close). MLB uses one StatsAPI
       schedule request per season (results, innings, weather), ESPN's scoreboard per date for the ids, and ESPN odds
       only (no box scores: StatsAPI's terms are "non-bulk").
@@ -116,10 +116,10 @@ def season_for(league: str, start: Any) -> Optional[int]:
     if ts is None:
         return None
     day = datetime.datetime.fromtimestamp(ts, EASTERN).date()
+    if league == "americanfootball_nfl":  # before ESPN's windows: an August preseason game is that year's season
+        return day.year if day.month >= 3 else day.year - 1
     if league in espn_hist.LEAGUES:
         return espn_hist.current_season(league, day)
-    if league == "americanfootball_nfl":
-        return day.year if day.month >= 3 else day.year - 1
     if league.startswith("soccer_") and not league.startswith(CALENDAR_SOCCER):
         return day.year if day.month >= 7 else day.year - 1
     return day.year

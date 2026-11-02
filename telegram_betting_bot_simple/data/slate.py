@@ -102,6 +102,13 @@ Nothing it does or raises reaches the slate. The same games are handed over agai
 seconds, a change in any game's status or start at the next round, and after a failed hand-off the next waits
 CAPTURE_RETRY seconds. Without a capturer nothing here changes.
 
+The brain's every-game record (v4 P3-lite, learn/every_game.py): after the markets brain, each round logs the brain's view
+of every team-league game starting within the hour into ai_predictions (``_log_brain``; updated until the start, then
+frozen), from the round's own inputs: the odds board's book sources, else ESPN's own line from the boards and summaries
+already fetched (EspnClient.event_line, the lean cache, raw.db), else the ratings. It fetches nothing, and its rows (a
+payload with a ``source``) are never read back as the NBA model's chance (``_ai_chances``). ``every_game=False`` turns
+it off.
+
 The learning loop (v3, learn/): every blend is made with the live parameter version of its sport
 (learn/registry.py ``current``; version 0, today's constants, until a change passes the gate), and the logged row
 keeps that ``params_version``. Each game also gets one snapshot row a day before its start (kind "t24", logged on
@@ -208,6 +215,7 @@ PLAYERS_EVERY = 5 * 60.0  # the player boards' game-day prewarm (data/player_boa
 PAST_KEPT = 600  # past scoreboards (league, day) the context worker keeps: they don't change
 CAPTURE_EVERY = 10 * 60.0  # the raw capture's hook: unchanged games are handed over again at most this often ...
 CAPTURE_RETRY = 60.0  # ... and after a failed hand-off, the next waits this long
+BRAIN_RAW_RECHECK = 600.0  # the every-game record reads a game's pre-start summary in raw.db at most this often
 # What the raw capture's Capturer.schedule_from_slate gets of each ESPN game (copies; the rest is the slate's own)
 CAPTURE_KEYS = ("id", "league", "espn_id", "odds_id", "start", "status", "home", "away", "venue", "_ts", "_time_ok",
                 "_ids", "_neutral")
@@ -752,7 +760,8 @@ class SlateBuilder:
                  ratings: Any = None, markets_every: float = MARKETS_EVERY, log_consensus: bool = True,
                  on_change: Optional[Callable[..., Any]] = None, context: Any = None,
                  context_every: float = CONTEXT_EVERY, player_board: Any = None,
-                 players_every: float = PLAYERS_EVERY, preload: bool = False, capturer: Any = None) -> None:
+                 players_every: float = PLAYERS_EVERY, preload: bool = False, capturer: Any = None,
+                 every_game: bool = True) -> None:
         self.odds = odds
         self.espn = espn
         self.store = store
@@ -848,6 +857,12 @@ class SlateBuilder:
         self._capture_at = -math.inf
         self._capture_failed = -math.inf  # when the last hand-off failed
         self._capture_logged = -math.inf  # when a failure was last logged in full (at most hourly)
+        # The brain's every-game record (learn/every_game.py, _log_brain): what each game last got, raw.db's pre-start
+        # summary lines as last read (rechecked every BRAIN_RAW_RECHECK seconds) and the last round's counts
+        self.every_game = bool(every_game)
+        self._brain_memo: Dict[Tuple[str, str], str] = {}
+        self._brain_raw: Dict[Tuple[str, str], Tuple[Optional[Tuple[float, Any]], float]] = {}
+        self.brain_counts: Dict[str, int] = {}
 
     # --- serving -----------------------------------------------------------------------------------
 
@@ -1021,6 +1036,10 @@ class SlateBuilder:
                 self._apply_markets(games, now)
             except Exception:  # the markets brain must never cost the scores
                 log.exception("Slate: the markets brain failed this round")
+            try:
+                self._log_brain(games, now)
+            except Exception:  # the every-game record must never cost the scores
+                log.exception("Slate: the brain's every-game record failed this round")
             self._schedule_markets(games, now)
             self._apply_context(games)
             self._schedule_context(games, now)
@@ -1265,6 +1284,8 @@ class SlateBuilder:
                 continue
             for row in rows:
                 payload = row.get("payload") or {}
+                if payload.get("source"):
+                    continue  # the brain's every-game record (learn/every_game.py), not the NBA model's prediction
                 home_win = payload.get("home_win")
                 if not isinstance(home_win, (int, float)) or not 0 <= home_win <= 1:
                     continue
@@ -1742,6 +1763,41 @@ class SlateBuilder:
             self._t24_logged = set(list(self._t24_logged)[-10000:])
         if len(self._logged_sig) > 20000:  # games long gone
             self._logged_sig = dict(list(self._logged_sig.items())[-10000:])
+
+    def _log_brain(self, games: Sequence[Mapping[str, Any]], now: float) -> None:
+        """The brain's every-game record (learn/every_game.py): each team-league game starting within the hour gets the
+        brain's view logged, updated each round until its start, from what this round already holds (the odds board's
+        book sources, else ESPN's own line from the boards and summaries already fetched, else the ratings). Nothing
+        is fetched for it: no Odds API board, no ESPN request."""
+        if self.store is None or not self.every_game or not hasattr(self.store, "log_ai_prediction"):
+            return
+        from ..learn import every_game
+        raw = getattr(self.capturer, "raw", None)
+
+        def raw_summary(league: str, espn_id: str) -> Optional[Tuple[float, Any]]:
+            key = (league, espn_id)
+            held = self._brain_raw.get(key)
+            if held is not None and now - held[1] < BRAIN_RAW_RECHECK:
+                return held[0]
+            found = None
+            try:
+                payload = raw.latest(f"espn:{espn_id}", "espn_site", "summary") if raw is not None else None
+                if payload is not None:
+                    found = (float(payload.fetched_at), payload.json())
+            except Exception as exc:
+                self._log_failure("every-game record's raw summary", exc, detail=False)
+            self._brain_raw[key] = (found, now)
+            if len(self._brain_raw) > 5000:
+                self._brain_raw = dict(list(self._brain_raw.items())[-2500:])
+            return found
+
+        def line_of(game: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+            return every_game.held_line(self.espn, game["league"], str(game["espn_id"]), game["_ts"],
+                                        raw=raw_summary if raw is not None else None)
+
+        self.brain_counts = every_game.log_round(self.store, games, self._markets, line_of,
+                                                 lambda league: brain_params(league, self.store), now,
+                                                 memo=self._brain_memo)
 
     def _schedule_markets(self, games: Sequence[Mapping[str, Any]], now: float) -> None:
         """Start a markets worker round when one is due: the leagues with games to come or on, and ESPN's

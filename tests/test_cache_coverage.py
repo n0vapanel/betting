@@ -247,7 +247,7 @@ FETCHES = {
     "EspnHistory": {"events", "summary", "odds", "scoreboard", "mlb_season"},
 }
 NO_FETCH = {
-    "EspnClient": {"event_state", "game_state", "board_state"},
+    "EspnClient": {"event_state", "game_state", "board_state", "event_line", "held_summary"},  # memory, a cache peek
     "PlayerData": set(),
     # budgeted only marks the slate's already-counted board for the thread (a fetch inside it is league_games')
     "OddsService": {"odds_loaded_at", "saved_games", "consensus_inputs", "board_params", "quota", "region_units",

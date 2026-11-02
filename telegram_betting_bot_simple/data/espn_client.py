@@ -242,6 +242,9 @@ class EspnClient:
         self._states: "OrderedDict[Tuple[str, str], Tuple[str, Optional[int], Optional[int], Optional[float]]]" = \
             OrderedDict()
         self._states_lock = threading.Lock()
+        # ESPN's own line per game, from the boards this client loaded (their competitions' "odds", which the lean copy
+        # drops): learn/every_game.py's every-game record reads it through event_line; nothing is fetched for it
+        self._lines: "OrderedDict[Tuple[str, str], Tuple[List[Dict[str, Any]], float]]" = OrderedDict()
 
     def _get(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """One GET to ESPN (no key needed). Only ever called inside a cache loader."""
@@ -297,6 +300,50 @@ class EspnClient:
             if isinstance(event, dict):
                 self._remember(league, event.get("id"), (event.get("competitions") or [None])[0], at)
 
+    def _remember_lines(self, league: str, events: Any, at: float) -> None:
+        """Keep each game's own line from a board as ESPN sent it (before lean_events drops "odds"), parsed as the
+        every-game record reads it (learn/every_game.parse_lines). Never raises: a board's odds never cost the board."""
+        try:
+            if league not in LEAGUES or not isinstance(events, list):
+                return
+            from ..learn.every_game import parse_lines  # the learn package reads this module: imported on first use
+            found = {}
+            for event in events:
+                competition = (event.get("competitions") or [None])[0] if isinstance(event, dict) else None
+                odds = competition.get("odds") if isinstance(competition, dict) else None
+                if odds and event.get("id") not in (None, ""):
+                    lines = parse_lines(odds)
+                    if lines:
+                        found[(league, str(event["id"]))] = lines
+            if not found:
+                return
+            with self._states_lock:
+                kept = self.__dict__.setdefault("_lines", OrderedDict())
+                for key, lines in found.items():
+                    if key not in kept or kept[key][1] <= at:
+                        kept[key] = (lines, at)
+                        kept.move_to_end(key)
+                while len(kept) > STATES_KEPT:
+                    kept.popitem(last=False)
+        except Exception:  # noqa: BLE001
+            return
+
+    def event_line(self, league: str, event_id: Any) -> Optional[Tuple[List[Dict[str, Any]], float]]:
+        """(ESPN's own line for the game as parse_lines gives it, when its board was fetched on the cache's clock) from
+        the newest board this client loaded; None when none had odds for it. Nothing is fetched."""
+        with self._states_lock:
+            return self.__dict__.get("_lines", {}).get((league, str(event_id)))
+
+    def held_summary(self, league: str, event_id: Any) -> Optional[Tuple[float, Any]]:
+        """(fetched_at, lean summary) of the game's copy already in the cache, or None; never loads one."""
+        peek = getattr(self.cache, "peek", None)
+        if not callable(peek):
+            return None
+        try:
+            return peek(("espn", "summary", league, str(event_id)))
+        except Exception:  # noqa: BLE001
+            return None
+
     def event_state(self, league: str, event_id: Any) -> Optional[Dict[str, Any]]:
         """{"state": "pre"|"live"|"final", "home": score, "away": score} as last read from a scoreboard or a summary
         (the most recently fetched; a "pre" game whose start has passed reads as "live"); None when the client hasn't
@@ -327,7 +374,9 @@ class EspnClient:
             raise KeyError(league)
         sport, path = target
         params = {"dates": day.strftime("%Y%m%d"), "limit": SCOREBOARD_LIMIT, **SCOREBOARD_PARAMS.get(league, {})}
-        events = lean_events(self._get(f"{SITE}/{sport}/{path}/scoreboard", params).get("events", []))
+        raw_events = self._get(f"{SITE}/{sport}/{path}/scoreboard", params).get("events", [])
+        self._remember_lines(league, raw_events, self._cache_now())
+        events = lean_events(raw_events)
         self._remember_events(league, events, self._cache_now())  # here too: a background refresh's count at once
         return events
 
@@ -499,9 +548,11 @@ class EspnClient:
         if not seed:
             return body
         try:
-            events = lean_events(json.loads(body).get("events", []))
+            raw_events = json.loads(body).get("events", [])
+            events = lean_events(raw_events)
         except (ValueError, TypeError, AttributeError):
             return body  # not a board (not JSON): as summary_raw's
+        self._remember_lines(league, raw_events, self._cache_now())
         at = self._seed(self._scoreboard_key(league, day), "scoreboard", events,
                         ttl_for("scoreboard", self.board_state(day, events)))
         self._remember_events(league, events, at)

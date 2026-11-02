@@ -360,7 +360,31 @@ export function normalizeProgress(raw) {
     ai: ai(o.ai),
     health: health(o.health),
     capture: capture(o.capture),
+    everyGame: everyGame(o.every_game),
   };
+}
+
+// The every-game record (v4 P3-lite, learn/every_game.summary): per sport its live and back-tested lines and the
+// priced picks apart, each {predicted, graded, pending, void, scored, hitRate, brainBrier, marketN, marketBrier,
+// marketBrainBrier}
+const EVERY_GAME_BLOCKS = ["live", "retro", "priced"];
+function everyGameBlock(raw) {
+  const o = obj(raw);
+  return {
+    predicted: int(o.predicted) ?? 0, graded: int(o.graded) ?? 0, pending: int(o.pending) ?? 0, void: int(o.void) ?? 0,
+    scored: int(o.scored) ?? 0, hitRate: num(o.hit_rate), brainBrier: num(o.brain_brier), marketN: int(o.market_n) ?? 0,
+    marketBrier: num(o.market_brier), marketBrainBrier: num(o.market_brain_brier),
+  };
+}
+function everyGame(raw) {
+  const o = obj(raw);
+  const sports = list(o.sports).map((s) => {
+    const x = obj(s);
+    const out = { sport: text(x.sport, 20), label: text(x.label, 60) || sportName(x.sport) };
+    for (const name of EVERY_GAME_BLOCKS) out[name] = everyGameBlock(x[name]);
+    return out;
+  }).filter((s) => s.sport);
+  return { sports, games: int(o.games) ?? 0, note: text(o.note, 400), unreadable: text(o.unreadable, 40) };
 }
 
 // --- formats ------------------------------------------------------------------------------------------------------

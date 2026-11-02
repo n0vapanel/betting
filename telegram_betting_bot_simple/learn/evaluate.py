@@ -160,6 +160,8 @@ def ai_records(db: sqlite3.Connection, *, since: Optional[float] = None,
             "SELECT league, start, logged_at, payload, result FROM ai_predictions WHERE status = 'graded'"):
         start = _ts(start_text)
         payload, result = _json(payload) or {}, _json(result) or {}
+        if payload.get("source"):
+            continue  # the brain's every-game record (learn/every_game.py): its games are in the other logs already
         home, away = result.get("home"), result.get("away")
         if start is None or home is None or away is None or home == away:
             continue

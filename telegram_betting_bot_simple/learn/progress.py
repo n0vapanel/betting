@@ -45,6 +45,9 @@ the evaluator and the gate; every status word ("promoted", "rolled back", "held"
                  "shapes": [{"source", "endpoint", "label", "ok", "missing", "json", "at", "league"}],
                  "alarms": [{"kind": "http" | "backfill" | "boards" | "shape" | "disk", "text"}]}}
 
+``"every_game"`` (v4 P3-lite) is learn/every_game.summary: per sport the every-game record's live and back-tested lines
+and the priced picks apart ({"sports": [{"sport", "label", "live", "retro", "priced"}], "games", "note"}).
+
 ``brain_lines(store)`` gives the bot's /brain text (a headline per sport and the last change); ``tool_facts(store)``
 the Ask AI tool's answer to "is the brain getting better?".
 
@@ -1129,9 +1132,19 @@ def progress(store: Any, learner: Optional[Learner] = None, *, owner: bool = Fal
             "sports": [_sport_block(db, store, sport, headlines.get(sport), trials) for sport in sports
                        if sport in registry.SPORTS],
             "changes": _changes(db, trials, owner), "held": _held(db, now), "experiments": _experiments(db),
-            "ai": _ai(db, learner, now), "health": _health(db, store, now)}
+            "ai": _ai(db, learner, now), "every_game": _every_game(store), "health": _health(db, store, now)}
     page["capture"] = _capture(store, learner, now)  # raw.db, read after betting.db is closed
     return page
+
+
+def _every_game(store: Any) -> Dict[str, Any]:
+    """The every-game record per sport (learn/every_game.summary): live, back-tested and the priced picks apart."""
+    try:
+        from .every_game import summary
+        return summary(store)
+    except Exception:  # noqa: BLE001 - the record's block must never cost the page
+        log.exception("Brain progress: the every-game block failed")
+        return {"sports": [], "games": 0, "unreadable": "error"}
 
 
 def brain_lines(store: Any, now: Optional[float] = None) -> List[str]:
@@ -1159,6 +1172,14 @@ def brain_lines(store: Any, now: Optional[float] = None) -> List[str]:
         lines.append(f"Last change ({(last['at'] or '')[:10]}): {last['text']}")
     else:
         lines.append("No change yet: the brain runs on today's defaults until a change passes the gate.")
+    try:
+        from .every_game import brain_lines as every_game_lines
+        record = every_game_lines(store)
+    except Exception:  # noqa: BLE001 - the record's lines must never cost /brain
+        log.exception("/brain: the every-game lines failed")
+        record = []
+    if record:
+        lines.append("Every game it predicts (learning records, not picks):\n" + "\n".join(record))
     return lines
 
 

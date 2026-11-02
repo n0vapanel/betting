@@ -127,6 +127,7 @@ def main() -> None:
         capturer = build_capture(config, service)
         if capturer is not None:
             slate.capturer = capturer
+            service.raw = capturer.raw  # the grader's every-game back-test reads raw.db (learn/every_game.py)
             threading.Thread(target=capture_forever, args=(capturer,), name="capture", daemon=True).start()
             logging.info("Raw capture: on, into %s", capturer.raw.path)
         # The markets brain: the slate's own background worker refreshes Kalshi, Polymarket, ESPN's predictor and

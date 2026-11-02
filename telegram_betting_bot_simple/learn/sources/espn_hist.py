@@ -1,5 +1,5 @@
-"""ESPN's past games for the leagues the app follows (NBA, NHL, MLB, college football and basketball), and MLB
-StatsAPI's season schedule.
+"""ESPN's past games for the leagues the app follows (NBA, NHL, MLB, college football and basketball, the NFL and the
+WNBA), and MLB StatsAPI's season schedule.
 
 - **Event ids:** ``sports.core.api.espn.com/v2/sports/{s}/leagues/{l}/events?dates=A-B&limit=1000`` (a date range,
   paged), one window at a time (``events``).
@@ -47,6 +47,11 @@ LEAGUES: Dict[str, Tuple[str, str, Tuple[int, int], Tuple[int, int]]] = {
     "basketball_ncaab": ("basketball", "mens-college-basketball", (11, 1), (4, 15)),
     "americanfootball_ncaaf": ("football", "college-football", (8, 20), (1, 25)),
     "baseball_mlb": ("baseball", "mlb", (3, 15), (11, 15)),
+    # v4 P3-lite: the NFL and the WNBA too, through the football and basketball parsing college football and the NBA
+    # use. The NFL from Week 1 (the week after Labor Day) to the Super Bowl in February, no preseason (the capture's
+    # window); the WNBA from its May opening to the Finals by late October
+    "americanfootball_nfl": ("football", "nfl", (9, 1), (2, 20)),
+    "basketball_wnba": ("basketball", "wnba", (5, 1), (10, 25)),
 }
 LIVE_PROVIDERS = {"59", "46"}  # "ESPN Bet - Live Odds", "Caesars ... Live Odds": in-play prices
 NOT_BOOKS = ("numberfire", "teamrankings", "accuscore")  # projection sites, not prices

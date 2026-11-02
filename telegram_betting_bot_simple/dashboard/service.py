@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import copy
 import datetime
+import math
 import hashlib
 import json
 import logging
@@ -48,6 +49,7 @@ from ..data.leagues import SPORTS, pick_leagues
 from ..data.odds_service import OddsService, book_roles, is_price_book, moneylines, summarize_markets
 from ..data.store import Store
 from ..engine import bets, calls, consensus, nba_model
+from ..learn import every_game
 from ..engine.odds_math import decimal_to_american, format_american, remove_vig
 from ..engine.slip import Leg, evaluate_slip
 
@@ -1057,12 +1059,17 @@ class DashboardService:
                 box = self.espn.box_score(row["league"], final["espn_id"]) if row["call"].get("props") else None
                 # The AI and the market are scored on their last numbers before tip-off
                 logged = self.store.ai_prediction(row["league"], row["event_id"])
+                if logged and every_game.is_every_game(logged.get("payload")):
+                    logged = None  # the brain's every-game record, not the AI's priced prediction
                 result = calls.grade_call(row["call"], row["ai"], final, box, (logged or {}).get("payload"))
                 self.store.grade_prediction(row["id"], "graded", result, result["points"], result["ai_points"])
                 graded += 1
             except Exception:
                 logging.exception("Couldn't grade call %s", row["id"])
         for row in self.store.ai_predictions(status="pending", started_before=cutoff):
+            if every_game.is_every_game(row.get("payload")):
+                graded += self._grade_every_game(row, now, give_up)
+                continue
             try:
                 final = self.final(row)
                 if final["state"] == "pending":
@@ -1101,11 +1108,59 @@ class DashboardService:
                 logging.exception("Couldn't grade the AI's %s ticket for %s", row["tier"], row["day"])
         graded += self._grade_consensus(cutoff, give_up)
         graded += self._grade_context(cutoff, give_up)
+        graded += self._backtest_every_game(now)
         if self.lab is not None:
             graded += self.lab.grade_due(cutoff, give_up)  # saved bets, then the plan days they belong to
         if self.analysts:
             graded += self.analysts.grade_due(self, cutoff, give_up)
         return graded
+
+    # --- the brain's every-game record (learn/every_game.py) ---------------------------------------------
+
+    def _grade_every_game(self, row: Dict[str, Any], now: datetime.datetime, give_up: str) -> int:
+        """Score one every-game row once its game is final (matched by ESPN's id): the brain's and its market line's
+        hit, Brier score and log loss. While ESPN's boards still show the game on, no summary is asked for; no result
+        by the give-up time: void, as for every prediction."""
+        try:
+            if row["league"] not in ESPN_LEAGUES:
+                self.store.grade_ai_prediction(row["league"], row["event_id"], "void", {"reason": "no game result here"})
+                return 0
+            if every_game.still_on(self.espn, row, now.timestamp()):
+                return 0
+            final = self.final(row)
+            if final["state"] == "pending":
+                if row["start"] < give_up:
+                    self.store.grade_ai_prediction(row["league"], row["event_id"], "void", {"reason": "no result"})
+                return 0
+            if final["state"] != "final":
+                self.store.grade_ai_prediction(row["league"], row["event_id"], "void", final)
+                return 0
+            self.store.grade_ai_prediction(row["league"], row["event_id"], "graded",
+                                           {**final, "brain": every_game.grade(row["payload"], final)})
+            return 1
+        except Exception:
+            logging.exception("Couldn't grade the brain's record of %s", row.get("event_id"))
+            return 0
+
+    def _backtest_every_game(self, now: datetime.datetime) -> int:
+        """The every-game record's walk-forward back-test of the last 14 days (learn/every_game.backtest), at most
+        every RETRO_EVERY seconds per process and never in two at once; it reads raw.db (``self.raw``, set where the
+        capture runs) and the lean cache only. Returns the rows it graded."""
+        raw = getattr(self, "raw", None)
+        ts = now.timestamp()
+        if raw is None or ts - getattr(self, "_backtest_at", -math.inf) < every_game.RETRO_EVERY:
+            return 0
+        try:
+            if not self.store.try_lease("every_game_backtest", 900):
+                return 0
+            self._backtest_at = ts
+            report = every_game.backtest(self.store, raw, getattr(self.espn, "cache", None), now=ts)
+            if report.get("logged"):
+                logging.info("Every-game back-test: %s", {k: v for k, v in report.items() if k != "by_league"})
+            return int(report.get("graded") or 0)
+        except Exception:
+            logging.exception("The every-game back-test failed")
+            return 0
 
     # --- the markets brain ("Markets say") -------------------------------------------------------------
 
@@ -1335,7 +1390,8 @@ class DashboardService:
         if self.store is None:
             return {"games": 0}
         self.grade_due()
-        rows = self.store.ai_predictions(league=league, status="graded")
+        rows = [row for row in self.store.ai_predictions(league=league, status="graded")
+                if not every_game.is_every_game(row.get("payload"))]  # the priced picks only
         record = calls.track_record(rows)
         record["tiers"] = bets.tier_record(self.store.ai_tickets(league=league))
         record["analysts"] = self.analysts.record() if self.analysts else []

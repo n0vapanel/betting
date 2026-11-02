@@ -402,7 +402,8 @@ def test_newest_seasons_first_and_the_last_three(store: Store) -> None:
     assert espn == {f"{league}:{season}" for league, seasons in {
         "basketball_nba": (2026, 2025, 2024), "icehockey_nhl": (2026, 2025, 2024),
         "basketball_ncaab": (2025, 2024, 2023), "americanfootball_ncaaf": (2026, 2025, 2024),
-        "baseball_mlb": (2026, 2025, 2024)}.items() for season in seasons}
+        "baseball_mlb": (2026, 2025, 2024), "americanfootball_nfl": (2026, 2025, 2024),
+        "basketball_wnba": (2026, 2025, 2024)}.items() for season in seasons}
     soccer = sorted(unit.name for unit in units if unit.source == "football-data" and unit.name.startswith("E0:"))
     assert soccer == [f"E0:{season}" for season in range(2019, 2027)]  # football-data from 2019/20
     first = [unit.name for unit in units if unit.tier == 0]

@@ -1147,8 +1147,17 @@ class Store:
 
     # --- the AI's own predictions -------------------------------------------------
 
-    def log_ai_prediction(self, row: Dict[str, Any]) -> None:
-        """Save the AI's latest pre-game prediction for a game (kept until it's graded)."""
+    def log_ai_prediction(self, row: Dict[str, Any], now: Optional[float] = None) -> Optional[int]:
+        """Save the AI's latest pre-game prediction for a game (kept until it's graded).
+
+        A row whose payload names its ``source`` (learn/every_game.py: the brain's every-game record) is held to one
+        row per game, found by its key or its ESPN id: it is inserted when no row has the game yet (a live one only
+        before its start, ``now``), and otherwise only updates its own pending every-game row before that row's start;
+        it never touches a priced prediction (no ``source``) or a graded or started row. Returns the rows it wrote (a
+        priced row: None, written as always)."""
+        payload = row.get("payload")
+        if isinstance(payload, Mapping) and payload.get("source"):
+            return self._log_every_game(row, time.time() if now is None else float(now))
         with closing(self._connect()) as db:
             db.execute(
                 "INSERT INTO ai_predictions (league, event_id, espn_id, home, away, start, logged_at, payload) "
@@ -1158,6 +1167,39 @@ class Store:
                 (row["league"], row["event_id"], row.get("espn_id"), row["home"], row["away"], row["start"],
                  time.time(), json.dumps(row["payload"])),
             )
+        return None
+
+    def _log_every_game(self, row: Dict[str, Any], now: float) -> int:
+        now_iso = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        league, event_id, espn_id = row["league"], str(row["event_id"]), row.get("espn_id")
+        retro = bool(row["payload"].get("retro"))
+        with closing(self._connect()) as db, _transaction(db):
+            held = db.execute(
+                "SELECT event_id, status, start, payload FROM ai_predictions WHERE league = ? AND (event_id = ? OR "
+                "(? IS NOT NULL AND espn_id = ?))", (league, event_id, espn_id, espn_id)).fetchall()
+            if not held:
+                if not retro and str(row["start"]) <= now_iso:
+                    return 0  # started: too late to predict it
+                db.execute(
+                    "INSERT INTO ai_predictions (league, event_id, espn_id, home, away, start, logged_at, payload) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (league, event_id, espn_id, row["home"], row["away"], row["start"], now, json.dumps(row["payload"])))
+                return 1
+            if retro or len(held) != 1:
+                return 0
+            key, status, start, text = held[0]
+            try:
+                loaded = json.loads(text or "{}")
+            except ValueError:
+                loaded = None
+            mine = isinstance(loaded, dict) and bool(loaded.get("source"))
+            if not mine or status != "pending" or str(start) <= now_iso or str(row["start"]) <= now_iso:
+                return 0
+            cursor = db.execute(
+                "UPDATE ai_predictions SET espn_id = COALESCE(?, espn_id), home = ?, away = ?, start = ?, logged_at = ?, "
+                "payload = ? WHERE league = ? AND event_id = ? AND status = 'pending'",
+                (espn_id, row["home"], row["away"], row["start"], now, json.dumps(row["payload"]), league, key))
+            return int(cursor.rowcount or 0)
 
     def ai_predictions(self, league: Optional[str] = None, status: Optional[str] = None,
                        started_before: Optional[str] = None, limit: int = 2000) -> List[Dict[str, Any]]:
