@@ -1116,13 +1116,14 @@ def match_names(players: Iterable[Mapping[str, Any]], names: Iterable[Any]) -> T
     last name ("Doncic", "Payton II", "Gilgeous-Alexander"), an initial or a first name's start with the last name
     ("L. Doncic", "Steph Curry"), or his first name ("Shai"). A name several players answer to ("Curry", "Jalen")
     gets every one's id: sort_names calls it ambiguous. A name that matches nobody as typed may end in a team
-    ("Marcus Sutton (MIA)", "Marcus Sutton MIA": how an ambiguous name's candidates read): that team's players only."""
+    ("Marcus Sutton (MIA)", "Marcus Sutton MIA": how an ambiguous name's candidates read): that team's players only.
+    Two names in a row that read as one in "Last, First" order ("James" then "LeBron") are asked as one, "LeBron
+    James" (the key)."""
     players = list(players)
     keyed = [(str(player.get("athlete_id")), *_name_keys(player.get("name"))) for player in players]
     teams = {str(player.get("athlete_id")): str(player.get("team") or "").upper() for player in players}
-    found: Dict[str, List[str]] = {}
-    missing: List[str] = []
-    for asked in names:
+
+    def lookup(asked: Any) -> List[str]:
         ids: List[str] = []
         for words in _query_forms(asked):
             ids = _matches(keyed, words)
@@ -1134,6 +1135,23 @@ def match_names(players: Iterable[Mapping[str, Any]], names: Iterable[Any]) -> T
                 ids = [pid for pid in _matches(keyed, words) if teams.get(pid) == qualified.group(2).upper()]
                 if ids:
                     break
+        return ids
+
+    # Two names in a row that read as one in "Last, First" order (the finder splits at commas: "James, LeBron" comes
+    # as "James" then "LeBron") are asked as "First Last": the second is one word, "LeBron James" matches a player,
+    # and the two alone don't each match a single one
+    asked_names: List[Any] = []
+    pending = list(names)
+    while pending:
+        last = pending.pop(0)
+        if pending and len(_name_words(pending[0])) == 1 and lookup(f"{pending[0]} {last}") \
+                and not (len(lookup(last)) == 1 and len(lookup(pending[0])) == 1):
+            last = f"{pending.pop(0)} {last}"
+        asked_names.append(last)
+    found: Dict[str, List[str]] = {}
+    missing: List[str] = []
+    for asked in asked_names:
+        ids = lookup(asked)
         if ids:
             found[str(asked)] = ids
         elif str(asked) not in missing:

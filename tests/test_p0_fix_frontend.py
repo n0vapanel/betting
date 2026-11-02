@@ -43,6 +43,9 @@ from urllib.parse import quote
 
 import pytest
 
+from telegram_betting_bot_simple.bot import chat as bot_chat
+from telegram_betting_bot_simple.engine import scan as engine
+
 STATIC = Path(__file__).resolve().parents[1] / "telegram_betting_bot_simple" / "dashboard" / "static"
 NODE = shutil.which("node")
 NBA, NFL, NHL = "basketball_nba", "americanfootball_nfl", "icehockey_nhl"
@@ -924,3 +927,91 @@ def test_v4_ask_ais_refresh_and_finder_link_keep_such_names(draw) -> None:
     # Before: "player=Marvin+Bagley+rd" and "Marcus+Sutton+MIA"
     assert page.refresh_query.endswith(query), page.refresh_query
     assert page.one("div.ask-card-actions a").attrs.get("href", "").endswith(query)
+
+
+# --- small fixes 1: a row whose edge the server withheld says why, wherever its edge is drawn ---------------------------
+
+EDGE_HIDDEN = "Edge hidden: over +50% usually means a stale or wrong price."
+
+
+def suspect(i: int, **over: Any) -> Dict[str, Any]:
+    """A row whose edge the server withheld (engine/scan.py: over EDGE_CAP, ``edge_suspect`` and no ``edge``)."""
+    return {**{key: value for key, value in row(i, **over).items() if key != "edge"}, "edge_suspect": True}
+
+
+def test_small_a_withheld_edge_says_why_on_its_row_and_a_normal_row_doesnt(draw) -> None:
+    long_price = milestone(25, (2.79, "+179"))
+    by_edge = scan(**{**POSTED, "players": POSTED["players"] + [suspect(3, threshold=25, chance=0.64, line=long_price)]})
+    at_20 = scan(players=[row(0), suspect(1, chance=0.64, line=long_price), row(2)])
+    posted_card = card(by_edge, title="Strongest PRA overs (posted lines) · NBA · tonight")
+    page, phone, desk, page_20, desk_20 = draw(
+        card_case(posted_card), finder_case(FINDER_PRA_LINE, by_edge, layout="phone"),
+        finder_case(FINDER_PRA_LINE, by_edge), card_case(card(at_20)), finder_case(FINDER_20, at_20))
+    for where, items, hidden in (("card, by edge", page.select("li.ps-item"), NAMES[3]),
+                                 ("finder (phone), by edge", phone.results.select("li.ps-item"), NAMES[3]),
+                                 ("finder (desk), by edge", table_rows(table_bodies(desk.results)[0]), NAMES[3]),
+                                 ("card, 20+", page_20.select("li.ps-item"), NAMES[1]),
+                                 ("finder (desk), 20+", table_rows(table_bodies(desk_20.results)[0]), NAMES[1])):
+        names = [item.select(".ps-name, .pf-name")[0].text() for item in items]
+        assert len(names) >= 3 and hidden in names, (where, names)
+        # Once, on the withheld row's posted line, in the page's own muted style; never on a row with its edge
+        for name, item in zip(names, items):
+            assert item.text().count(EDGE_HIDDEN) == (name == hidden), (where, name, item.text())
+            assert name == hidden or "Edge hidden" not in item.text(), (where, name)
+        line = items[names.index(hidden)].select(".ps-line, .pf-line")[0]
+        assert [el.classes for el in line.walk() if el.text() == EDGE_HIDDEN] == [{"muted"}], (where, line.text())
+    # The rows with an edge still show it as before (m6), and the withheld one's Edge says nothing
+    assert [tr.one("td.pf-e").text() for tr in table_rows(table_bodies(desk.results)[0])] == \
+        ["+8.1%", "+2.3%", "−1.0%", "–"]
+    assert [dict(numbers(item))["Edge"] for item in page.select("li.ps-item")] == ["+8.1%", "+2.3%", "−1.0%", "–"]
+
+
+# --- small fixes 2: "Last, First" names in the Player finder, the web's and the bot's one rule --------------------------
+
+LAST_FIRST = [
+    ("Porter Jr., Michael", ["Michael Porter Jr."]),
+    ("James, LeBron", ["James", "LeBron"]),  # one word after the comma: the scan reads it on the board (match_names)
+    ("LeBron James, Stephen Curry", ["LeBron James", "Stephen Curry"]),
+    ("Curry", ["Curry"]),
+    ("Michael", ["Michael"]),
+    # Only a last name and its suffix, then one word: anything else splits as before
+    ("Porter, Jr., Michael", ["Michael Porter Jr."]),
+    ("bagley iii, marvin", ["marvin bagley iii"]),
+    ("Michael Porter Jr., Curry", ["Michael Porter Jr.", "Curry"]),
+    ("Porter Jr., Michael Smith", ["Porter Jr.", "Michael Smith"]),
+    ("y" * 56 + " Jr., Bob", ["Bob " + "y" * 56]),  # cut to 60 and trimmed, as a joined suffix is
+]
+# What the scan finds for those names on a board (the brief's "Result"): the same on both sides, since the names are
+LAST_FIRST_BOARD = ["LeBron James", "Bronny James", "Stephen Curry", "Seth Curry", "Michael Porter Jr.",
+                    "Kevin Porter Jr.", "Michael Smith"]
+LAST_FIRST_FOUND = [
+    {"Michael Porter Jr.": ["Michael Porter Jr."]},
+    {"LeBron James": ["LeBron James"]},  # not "James" (two players) and "LeBron"
+    {"LeBron James": ["LeBron James"], "Stephen Curry": ["Stephen Curry"]},
+    {"Curry": ["Stephen Curry", "Seth Curry"]},  # as before: ambiguous
+    {"Michael": ["Michael Porter Jr.", "Michael Smith"]},  # as before: ambiguous
+]
+
+
+def test_small_last_first_names_follow_one_rule_on_the_web_and_in_the_bot(draw) -> None:
+    cases = LAST_FIRST + V4_NAMES + V4_HOSTILE
+    web = draw(*(clean_case(value) for value, _ in cases))
+    # Parity: the finder's cleanNames and the bot's finder button (_finder_names), character for character
+    assert web == [bot_chat._finder_names(value if isinstance(value, list) else [value]) for value, _ in cases]
+    assert web == [want for _, want in cases], [(value, out) for (value, _), out in zip(cases, web)]
+    assert draw(*(clean_case(names) for names in web)) == web  # and cleaning what it gives changes nothing
+    board = [{"athlete_id": str(i), "name": name} for i, name in enumerate(LAST_FIRST_BOARD)]
+    for names, want in zip(web, LAST_FIRST_FOUND):
+        found, missing = engine.match_names(board, names)
+        assert {asked: [LAST_FIRST_BOARD[int(i)] for i in ids] for asked, ids in found.items()} == want and not missing
+
+
+def test_small_the_finder_sends_last_first_names_as_one(draw) -> None:
+    head = "#/players?league=basketball_nba&stat=pts&at=20&day=today"
+    (page,) = draw(finder_case(f"{head}&player={quote('Porter Jr., Michael')}&player={quote('LeBron James, Stephen Curry')}",
+                               scan()))
+    names = "&player=Michael+Porter+Jr.&player=LeBron+James&player=Stephen+Curry"
+    assert page.replaced == [head + names], page.replaced  # "Porter Jr., Michael" in the address is one player
+    (again,) = draw(finder_case(head + names, scan()))
+    assert again.replaced == [] and again.fetched[0].endswith(names), again.fetched
+    assert again.controls.one("#pf-player").attrs.get("value") == "Michael Porter Jr., LeBron James, Stephen Curry"

@@ -48,13 +48,19 @@ class Clock:
         return self.now
 
 
+TIP_OFF = 120  # tonight's game starts two minutes after the clock
+
+
 def _start_clock() -> Clock:
-    """Real time (the service reads the real clock in places), moved two hours back late in ESPN's day so tonight's
-    game, two minutes away, falls on the same ESPN day."""
-    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
-    if datetime.datetime.fromtimestamp(now, ESPN_DAY_TZ).hour >= 23:
-        now -= 2 * 3600
-    return Clock(float(int(now)))
+    """Real time, so that the service's own reads of the real clock (the odds board's age, whether a game has started)
+    agree with it: never moved back, which made the saved board look old and the game already under way. Only when
+    the game, TIP_OFF away, would fall on the next ESPN day does it start at that midnight instead (at most TIP_OFF
+    ahead of real time: the board still fresh, the game still to come), so the game is on the clock's ESPN day."""
+    now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+    day = datetime.datetime.fromtimestamp(now, ESPN_DAY_TZ).date()
+    if datetime.datetime.fromtimestamp(now + TIP_OFF, ESPN_DAY_TZ).date() != day:
+        now = int(datetime.datetime.combine(day + datetime.timedelta(days=1), datetime.time(), ESPN_DAY_TZ).timestamp())
+    return Clock(float(now))
 
 
 def _team(team: Tuple[str, str, str]) -> Dict[str, Any]:
@@ -150,7 +156,7 @@ class Process:
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     clock = _start_clock()
-    start = clock.now + 120  # tip-off in two minutes
+    start = clock.now + TIP_OFF  # tip-off in two minutes
     espn = Espn(start)
     monkeypatch.setattr(requests.sessions.Session, "request",
                         lambda session, method, url, **kwargs: espn.request(session, method, url, **kwargs))

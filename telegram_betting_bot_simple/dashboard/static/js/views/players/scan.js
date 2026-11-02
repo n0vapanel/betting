@@ -118,6 +118,8 @@ export const EDGES = "edges"; // the finder's "Best edges (all stats)": the rout
 
 // A piece that is only a name's suffix: it belongs to the name before it ("Michael Porter, Jr.")
 const NAME_SUFFIX = /^(?:jr|sr|ii|iii|iv|2nd|3rd)\.?$/i;
+// A last name and its suffix ("Porter Jr."): with one word after its comma, a name in "Last, First" order
+const LAST_AND_SUFFIX = /^[^ ]+ (?:jr|sr|ii|iii|iv|2nd|3rd)\.?$/i;
 /** Text cut to ``max`` characters (code points, as the route counts them), then trimmed. */
 const cutText = (text, max) => Array.from(text).slice(0, max).join("").trim();
 
@@ -127,8 +129,10 @@ const cutText = (text, max) => Array.from(text).slice(0, max).join("").trim();
  * piece every character that isn't a letter (any alphabet), a digit, a space or one of . ' ’ - ( ) becomes a space;
  * spaces collapsed and trimmed, at most MAX_NAME characters; a piece that is only a suffix (Jr, Sr, II, III, IV, 2nd
  * or 3rd, any case, with a period or not) joins the name before it ("Michael Porter, Jr." is "Michael Porter Jr.",
- * still at most MAX_NAME); then no empty names, no repeats (ignoring case) and at most MAX_NAMES. So "Marvin Bagley
- * 3rd" and "Marcus Sutton (MIA)" stay whole, and markup never survives ("<img onerror=…>" is "img onerror").
+ * still at most MAX_NAME); a last name and its suffix followed by one word is "Last, First" ("Porter Jr., Michael" is
+ * "Michael Porter Jr.", still at most MAX_NAME; the server reads "James, LeBron" from the board); then no empty names,
+ * no repeats (ignoring case) and at most MAX_NAMES. So "Marvin Bagley 3rd" and "Marcus Sutton (MIA)" stay whole, and
+ * markup never survives ("<img onerror=…>" is "img onerror").
  */
 export function cleanNames(values) {
   const pieces = [];
@@ -137,6 +141,7 @@ export function cleanNames(values) {
       const name = cutText(part.replace(/[^\p{L}\p{Nd} .'’()-]/gu, " ").replace(/ +/g, " ").trim(), MAX_NAME);
       if (!name) continue;
       if (pieces.length && NAME_SUFFIX.test(name)) pieces[pieces.length - 1] = cutText(`${pieces.at(-1)} ${name}`, MAX_NAME);
+      else if (pieces.length && LAST_AND_SUFFIX.test(pieces.at(-1)) && !name.includes(" ")) pieces[pieces.length - 1] = cutText(`${name} ${pieces.at(-1)}`, MAX_NAME);
       else pieces.push(name);
     }
   }
@@ -218,6 +223,10 @@ export function shownEdge(row) {
   if (edge === null || edge === undefined || edge === "" || !Number.isFinite(Number(edge))) return null;
   return row?.line?.stale ? null : Number(edge);
 }
+
+/** Why a row shows no edge when the server withheld it (``edge_suspect``: over +50%, the model's tail against a long
+ * price), as the bot says it (bot/chat.py EDGE_HIDDEN). */
+export const EDGE_HIDDEN = "Edge hidden: over +50% usually means a stale or wrong price.";
 
 /**
  * Whether a row is a yes/no stat (anytime TD, anytime goal, double-double): the server's ``kind``, else the stat's
@@ -406,7 +415,8 @@ export function chanceHtml(chance) {
 /**
  * "DraftKings 20+ −250 · Edge +4.2%" with an old-line chip, or "No line posted" ("No under line posted" when only an
  * over-only price is posted for an under). ``edge`` false leaves the edge out; ``stat`` leads with the row's own stat
- * (edges mode: "PRA (P+R+A) DraftKings O 44.5 −110"). An old line never shows an edge.
+ * (edges mode: "PRA (P+R+A) DraftKings O 44.5 −110"). An old line never shows an edge; a row whose edge the server
+ * withheld (``edge_suspect``) says why (EDGE_HIDDEN), wherever its edge is drawn.
  */
 export function lineHtml(row, side, { edge: withEdge = true, stat = "" } = {}) {
   const parts = lineParts(row?.line, side);
@@ -416,6 +426,7 @@ export function lineHtml(row, side, { edge: withEdge = true, stat = "" } = {}) {
   if (!parts) return `${what}<span class="muted">${side === "under" && row?.line ? "No under line posted" : "No line posted"}</span>`;
   return `${what}<span class="ps-line-main">${parts.book ? `<span class="muted">${esc(parts.book)}</span> ` : ""}<b>${esc(parts.label)}</b>${parts.price ? ` <b class="num">${esc(parts.price)}</b>` : ""}</span>${
     edge ? ` <span class="ps-edge${value > 0 ? " pos" : ""}">Edge <b class="num">${esc(edge)}</b></span>` : ""}${
+    row?.edge_suspect ? ` <span class="muted">${esc(EDGE_HIDDEN)}</span>` : ""}${
     parts.stale ? ` <span class="badge warn">${icon("clock", { size: 12 })}Old line</span>` : ""}`;
 }
 

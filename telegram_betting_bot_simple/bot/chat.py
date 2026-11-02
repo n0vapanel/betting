@@ -340,6 +340,10 @@ MAX_SCAN_SHOWN = 5  # a player scan's rows numbered (the rest it returned follow
 MAX_SCAN_VIEW = 3  # "View player" buttons under a scan: its top rows
 SCAN_PLAYER_GONE = "This player isn't available any more."
 FINDER_BUTTON = "🔎 Open the Player finder"
+# A row whose edge the scan withheld (edge_suspect: over +50%, the model's tail against a long price): "edge hidden"
+# where its edge would be, and the card says why once (the app's finder says it on the row: scan.js EDGE_HIDDEN)
+EDGE_HIDDEN_MARK = "edge hidden"
+EDGE_HIDDEN = "Edge hidden: over +50% usually means a stale or wrong price."
 # The leagues the Player finder covers (dashboard/static/js/views/players/scan.js SCAN_LEAGUES: engine/scan.py's)
 FINDER_DEFAULT_LEAGUE = "basketball_nba"
 FINDER_MAX_NAMES, FINDER_MAX_NAME = 5, 60
@@ -347,6 +351,8 @@ FINDER_MAX_NAMES, FINDER_MAX_NAME = 5, 60
 
 # A piece that is only a name's suffix ("Jr.", "III", "3rd"): it belongs to the name before it ("Michael Porter, Jr.")
 _FINDER_SUFFIX = re.compile(r"^(?:jr|sr|ii|iii|iv|2nd|3rd)\.?$", re.I)
+# A last name and its suffix ("Porter Jr."): with one word after its comma, a name in "Last, First" order
+_FINDER_LAST_AND_SUFFIX = re.compile(r"^[^ ]+ (?:jr|sr|ii|iii|iv|2nd|3rd)\.?$", re.I)
 _FINDER_KEEP = " .'’-()"
 
 
@@ -361,9 +367,11 @@ def _finder_names(names: Any) -> List[str]:
     """The Player finder's cleanNames (dashboard/static/js/views/players/scan.js), character for character: each value
     NFC-normalised and split on commas; each piece cleaned (_finder_clean), empty ones skipped; a piece that is only a
     suffix ("Jr.", "III", "3rd") joins the previous name with a space (across the list too; cut to 60 and trimmed
-    again, as the finder's cutText does), or stands alone with no name before it; then repeats dropped (compared
-    lower-cased, the first kept), at most 5. "Marvin Bagley 3rd" stays whole, "Michael Porter, Jr." is "Michael Porter
-    Jr." and "Marcus Sutton (MIA)" keeps its brackets."""
+    again, as the finder's cutText does), or stands alone with no name before it; a last name and its suffix followed
+    by one word is "Last, First" ("Porter Jr., Michael" is "Michael Porter Jr.", cut and trimmed the same way; the
+    scan reads "James, LeBron" from the board: engine/scan.py match_names); then repeats dropped (compared lower-cased,
+    the first kept), at most 5. "Marvin Bagley 3rd" stays whole, "Michael Porter, Jr." is "Michael Porter Jr." and
+    "Marcus Sutton (MIA)" keeps its brackets."""
     pieces: List[str] = []
     for value in names if isinstance(names, (list, tuple)) else [names]:
         for part in unicodedata.normalize("NFC", "" if value is None else str(value)).split(","):
@@ -372,6 +380,8 @@ def _finder_names(names: Any) -> List[str]:
                 continue
             if pieces and _FINDER_SUFFIX.match(name):
                 pieces[-1] = f"{pieces[-1]} {name}"[:FINDER_MAX_NAME].strip()  # cut and trimmed, as the finder does
+            elif pieces and _FINDER_LAST_AND_SUFFIX.match(pieces[-1]) and " " not in name:
+                pieces[-1] = f"{name} {pieces[-1]}"[:FINDER_MAX_NAME].strip()
             else:
                 pieces.append(name)
     out: List[str] = []
@@ -445,6 +455,17 @@ def scan_line_text(line: Any) -> Optional[str]:
     return text + (" (may be out of date)" if line.get("stale") else "")
 
 
+def _scan_edge(row: Dict[str, Any], card: Dict[str, Any]) -> Optional[str]:
+    """A row's edge on a scan ranked by it ("edge +6.8%"), EDGE_HIDDEN_MARK when the scan withheld it (edge_suspect,
+    a player who plays), else None."""
+    if not scan_by_edge(card):
+        return None
+    edge = edge_text(row.get("edge"))
+    if edge is None and row.get("edge_suspect") and not row.get("ruled_out"):
+        return EDGE_HIDDEN_MARK
+    return edge
+
+
 def _scan_row_text(row: Dict[str, Any], number: int, under: bool, card: Optional[Dict[str, Any]] = None) -> List[str]:
     """One scan row: its number, name, matchup and status, then the projection (never for a yes/no event: its chance
     is the answer), the chance, the L10 and season hits and the posted line and price, the edge on a row ranked by
@@ -485,9 +506,9 @@ def _scan_row_text(row: Dict[str, Any], number: int, under: bool, card: Optional
     line = scan_line_text(row.get("line"))
     if line:
         bits.append(esc(line))
-    edge = edge_text(row.get("edge")) if scan_by_edge(card) else None
+    edge = _scan_edge(row, card)
     if edge:
-        bits.append(edge)
+        bits.append(esc(edge))
     lines = [head]
     if bits:
         lines.append("   " + " · ".join(bits))
@@ -516,7 +537,7 @@ def _scan_short(row: Dict[str, Any], card: Dict[str, Any]) -> str:
                and not scan_yes_no(row, card) else None,
                (scan_chance_text(row, card, under) if card.get("sort") in ("hot", "cold") else pct(row["chance"]))
                if isinstance(row.get("chance"), (int, float)) else None,
-               edge_text(row.get("edge")) if scan_by_edge(card) else None]
+               _scan_edge(row, card)]
     numbers = [esc(part) for part in numbers if part]
     return bit + (f" ({', '.join(numbers)})" if numbers else "")
 
@@ -546,9 +567,12 @@ def _scan_text(card: Dict[str, Any]) -> str:
     if more:
         lines.append(f"📱 {esc(more)}")
     close = [row for row in card.get("close") or [] if isinstance(row, dict)]
-    if close and not also and not more:
+    near = close[:5] if close and not also and not more else []
+    if near:
         lines.append(("Also close: " if players else "Closest: ") + "; ".join(_scan_short(row, card)
-                                                                              for row in close[:5]))
+                                                                              for row in near))
+    if any(_scan_edge(row, card) == EDGE_HIDDEN_MARK for row in players + near):
+        lines.append(f"<i>{esc(EDGE_HIDDEN)}</i>")  # why the rows marked "edge hidden" show no edge
     if not players and not close and scan_says_empty(card):
         lines += [esc(line) for line in scan_empty_text(card)]
     lines += [f"<i>{esc(note)}</i>" for note in scan_notes(card)]
