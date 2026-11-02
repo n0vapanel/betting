@@ -973,14 +973,14 @@ function showSignIn(note = "") {
   if (sheet.isOpen) sheet.close();
   showGate(`<form id="sign-in" novalidate>
       <h1 id="gate-title">Sign in</h1>
-      <p class="muted">Enter the dashboard password from your server setup.</p>
+      <p class="muted">Enter your access password to continue.</p>
       ${note ? notice(note, "warn") : ""}
       <label class="sr-only" for="password">Dashboard password</label>
       <input class="input" id="password" type="password" name="password" placeholder="Dashboard password" autocomplete="current-password" required>
       <div class="form-error" role="alert"></div>
       <button class="btn btn-primary block" type="submit">Sign in</button>
     </form>
-    <p class="muted small">Private app for the owner and friends. Gambling can be addictive · Help 24/7: 1-800-GAMBLER / 0808 8020 133</p>`);
+    <p class="muted small">Sports predictions and betting analysis for adults (18+). Predictions are estimates and can be wrong. Gambling can be addictive · Help 24/7: 1-800-GAMBLER / 0808 8020 133</p>`);
   const form = $("#sign-in");
   form.elements.password.focus();
   form.addEventListener("submit", async (event) => {

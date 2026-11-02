@@ -267,3 +267,13 @@ def test_a_link_to_one_section_opens_it_and_scrolls_to_it(drawn) -> None:
     [case] = _cases(drawn, "open")
     assert case["open"] == ["brain"]  # the others stay folded
     assert 0 <= case["brainTop"] <= 120, case["brainTop"]  # scrolled to it (72 px stays clear for the header)
+
+
+def test_the_browser_sign_in_speaks_to_the_public_not_the_owner() -> None:
+    """The sign-in screen is for anyone with access now: no "owner and friends", the 18+ line and the helpline."""
+    from pathlib import Path
+    app = (Path(__file__).resolve().parent.parent / "telegram_betting_bot_simple" / "dashboard" / "static" / "js" /
+           "app.js").read_text(encoding="utf-8")
+    assert "owner and friends" not in app and "from your server setup" not in app
+    assert "for adults (18+)" in app and "Predictions are estimates and can be wrong" in app
+    assert "1-800-GAMBLER" in app and 'id="sign-in"' in app and 'name="password"' in app
