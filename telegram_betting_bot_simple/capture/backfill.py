@@ -7,9 +7,11 @@ forward_due=None).run_night(budget=None) -> report``
 
 **Which games.** For each league, the season still being played (up to the newest settled day: a US Eastern day
 whose games finished SETTLE_HOURS ago, as the learn backfill; forward capture's sweep and final jobs hold the newer
-days) and the last ``seasons`` completed seasons. Newest season first: every league's newest season in wave order
-(plan section 1.3: NBA, NFL, the ten wave-1 soccer leagues, then NHL, UFC and MLB), then every league's season before,
-and so on; within a season the newest week first.
+days) and the last ``seasons`` completed seasons, on all 58 ESPN paths (plan.PATHS, ``ORDER``). Newest season first:
+every league's newest season in wave order (plan section 1.3: NBA, NFL, the ten wave-1 soccer leagues, then NHL, UFC
+and MLB; then wave 3, ``WAVE3`` (v4 P1b): college basketball and football, the WNBA, the other 38 soccer competitions,
+the CFL, the NBL, then the ATP and WTA tours), then every league's season before, and so on; within a season the newest
+week first.
 
 **Season windows** (``WINDOWS``; a season is named by the calendar year it starts in):
 
@@ -19,6 +21,20 @@ and so on; within a season the newest week first.
   the last rounds, play-offs and relegation play-offs by the end of May.
 - The Champions League 1 Sep - 15 Jun: the league phase from mid-September, the final in late May or early June.
 - UFC the calendar year: cards most weeks, all year.
+- Wave 3 (fallback windows, kept tight): college basketball 1 Nov - 15 Apr and football 20 Aug - 25 Jan (the learn
+  backfill's), the WNBA May - October, the CFL June - November, the NBL September - March, the calendar-year soccer
+  of the Americas, Japan, the Nordic leagues, Ireland and the Copas (each from its opening month to its final), the
+  autumn-spring soccer from its July or August opening to its last play-off in May or June, tennis the calendar year.
+
+**ESPN's calendar bounds each wave-3 season** (``calendar_bound``, ``bounded_span``; waves 1-2 keep their plain
+windows, request for request): its first step reads the board of its window's middle day (a day the walk reads
+anyway: from raw.db then, at no cost), and the season's start and end dates and days with games in that board's
+``leagues[0]`` (a whitelist of days on soccer, basketball and tennis boards, season parts with dates on football's)
+take off the empty days at either end, as far as that season covers them (a day outside it belongs to a season the
+calendar says nothing about, and is kept; a season still being played keeps its newest days, its play-offs may not be
+listed yet). Without a usable calendar (no season dates, ESPN refusing the board ITEM_TRIES times, an outage through
+PROBE_WAITS waits) the fallback window is walked whole. The projection counts what that saves against the plain
+windows (``PLAIN``: the calendar year, August-May, college November-April and August-January, the NBL September-March).
 
 **Per 7-day window**, newest first: the window's one-day scoreboards, newest day first (ESPN's site API answers a
 ``dates`` range with HTTP 400, so a window is 7 boards), each kept raw under ``scoreboard_key(league, "YYYYMMDD")``
@@ -26,7 +42,9 @@ and so on; within a season the newest week first.
 untrimmed and, for the wave-1 soccer leagues, the core plays, every page. UFC reads its season's cards from one
 board's ``leagues[0].calendar``, then for each past card its day's board and the card's ``fightcenter``
 (``espn:<cardEventId>``). Each NFL season also gets nflverse's play-by-play file once
-(``static:nflverse:pbp:<season>``). Never MLB StatsAPI (its terms are non-bulk) and never The Odds API.
+(``static:nflverse:pbp:<season>``). Tennis reads its day boards only, as forward capture does (plan.KINDS): a day's
+board is its matches' record, every finished singles match on it seen and stored, and no match is fetched on its
+own. Never MLB StatsAPI (its terms are non-bulk) and never The Odds API.
 
 **Budget, disk and politeness.** Every request goes through the shared PoliteHttp (its per-host token buckets)
 inside ``http.guard``, whose check refuses a request outside the window (01:00-06:00 in ``tz``: the worker passes
@@ -82,7 +100,23 @@ EASTERN = ZoneInfo("America/New_York")  # ESPN's days (data/espn_client.ESPN_DAY
 NFL = "americanfootball_nfl"
 UFC = plan.UFC
 UCL = "soccer_uefa_champs_league"
-ORDER: Tuple[str, ...] = plan.WAVE1 + plan.WAVE2  # the wave order (plan section 1.3)
+WAVES_1_2: Tuple[str, ...] = plan.WAVE1 + plan.WAVE2  # the wave order (plan section 1.3)
+# Wave 3 (v4 P1b, the owner's "all sports that the APIs cover"): the other 43 of the 58 paths, after waves 1-2
+WAVE3: Tuple[str, ...] = (
+    "basketball_ncaab", "americanfootball_ncaaf", "basketball_wnba", "soccer_uefa_europa_league", "soccer_usa_mls",
+    "soccer_mexico_ligamx", "soccer_brazil_campeonato", "soccer_argentina_primera_division",
+    "soccer_turkey_super_league", "soccer_belgium_first_div", "soccer_uefa_europa_conference_league",
+    "soccer_conmebol_copa_libertadores", "soccer_saudi_arabia_pro_league", "soccer_japan_j_league",
+    "soccer_australia_aleague", "soccer_austria_bundesliga", "soccer_switzerland_superleague",
+    "soccer_denmark_superliga", "soccer_greece_super_league", "soccer_norway_eliteserien", "soccer_sweden_allsvenskan",
+    "soccer_russia_premier_league", "soccer_chile_campeonato", "soccer_spain_segunda_division", "soccer_italy_serie_b",
+    "soccer_germany_bundesliga2", "soccer_france_ligue_two", "soccer_england_league1", "soccer_england_league2",
+    "soccer_brazil_serie_b", "soccer_conmebol_copa_sudamericana", "soccer_england_efl_cup", "soccer_germany_dfb_pokal",
+    "soccer_uefa_nations_league", "soccer_uefa_champs_league_women", "soccer_sweden_superettan",
+    "soccer_finland_veikkausliiga", "soccer_league_of_ireland", "basketball_wncaab", "americanfootball_cfl",
+    "basketball_nbl", "tennis_atp", "tennis_wta")
+ORDER: Tuple[str, ...] = WAVES_1_2 + WAVE3  # the walk's order: each of the 58 paths (plan.PATHS) once
+CALENDAR_LEAGUES = frozenset(WAVE3)  # seasons bounded by ESPN's own calendar (waves 1-2 keep their plain windows)
 PLAYS_LEAGUES = frozenset(plan.WAVE1_SOCCER)      # core plays, every page
 PER_NIGHT_DEFAULT = 6000   # CAPTURE_BACKFILL_PER_NIGHT
 SEASONS_DEFAULT = 3        # CAPTURE_BACKFILL_SEASONS: completed seasons, besides the one being played
@@ -97,6 +131,7 @@ STOP_AFTER_ERRORS = 10     # failures of one kind in a row (boards, summaries, p
                            # kind for the night: ESPN is down or has changed, and the rest waits for a later night
 SKIPPED_KEPT = 100         # given-up items a cursor lists (the newest; "given_up" counts them all)
 CALENDAR_REFRESH = 7 * 86400.0  # a season still being played reads UFC's calendar again after this
+PROBE_WAITS = 4            # a wave-3 season whose calendar board fails transiently this often keeps its plain window
 CURSOR_VERSION = 1
 # A status name that means the game was not played to the end (its final record comes later, or never)
 VOID_WORDS = ("POSTPONED", "CANCELED", "CANCELLED", "SUSPENDED", "ABANDONED", "DELAYED")
@@ -109,22 +144,99 @@ WINDOWS: Dict[str, Tuple[Tuple[int, int], Tuple[int, int]]] = {
     **{league: ((8, 1), (5, 31)) for league in plan.WAVE1_SOCCER if league != UCL},
     UCL: ((9, 1), (6, 15)),
     UFC: ((1, 1), (12, 31)),
+    # Wave 3's fallback windows, kept tight (ESPN's calendar bounds each season first: calendar_bound). College
+    # basketball and football are the learn backfill's (1 Nov - 15 Apr, 20 Aug - 25 Jan) from espn_hist above.
+    "basketball_wnba": ((5, 1), (10, 25)),        # preseason in early May; the Finals by late October
+    "basketball_wncaab": ((11, 1), (4, 10)),      # opening night in early November; the title game in early April
+    "basketball_nbl": ((9, 10), (3, 31)),         # Round 1 mid-September; the grand final series in March
+    "americanfootball_cfl": ((6, 1), (11, 25)),   # Week 1 in early June (no preseason); the Grey Cup mid-November
+    # Calendar-year soccer: the Americas, Japan, the Nordic leagues (Denmark's runs July-May), Ireland, the Copas
+    "soccer_usa_mls": ((2, 15), (12, 15)),        # late February to MLS Cup in early December
+    "soccer_brazil_campeonato": ((1, 20), (12, 15)),  # April to December, from late January in 2026
+    "soccer_brazil_serie_b": ((3, 15), (12, 5)),
+    "soccer_argentina_primera_division": ((1, 15), (12, 22)),  # the Apertura from late January, the Clausura's final
+    "soccer_chile_campeonato": ((1, 25), (12, 15)),
+    "soccer_japan_j_league": ((2, 1), (12, 15)),  # February to early December (from 2026-27 August-May, with a winter
+                                                  # break from mid-December to February: inside the same days)
+    "soccer_norway_eliteserien": ((3, 15), (12, 10)),
+    "soccer_sweden_allsvenskan": ((3, 25), (11, 30)),
+    "soccer_sweden_superettan": ((3, 25), (11, 30)),
+    "soccer_finland_veikkausliiga": ((3, 25), (11, 15)),
+    "soccer_league_of_ireland": ((2, 5), (11, 20)),
+    "soccer_conmebol_copa_libertadores": ((2, 1), (12, 5)),  # qualifying from early February to the final
+    "soccer_conmebol_copa_sudamericana": ((3, 1), (11, 30)),
+    # Autumn-spring soccer: opening weekends from mid-July to August, the last rounds, play-offs and finals by June
+    "soccer_uefa_europa_league": ((9, 1), (5, 31)),   # the league phase (no qualifiers, as the Champions League's)
+    "soccer_uefa_europa_conference_league": ((9, 1), (6, 10)),  # the 2023 final was on 7 June
+    "soccer_uefa_champs_league_women": ((9, 1), (6, 5)),
+    "soccer_uefa_nations_league": ((9, 1), (6, 20)),  # the league phase in the autumn, the finals in June
+    "soccer_mexico_ligamx": ((6, 25), (5, 31)),   # the Apertura from late June or July, the Clausura's final in May
+    "soccer_turkey_super_league": ((8, 1), (6, 5)),
+    "soccer_belgium_first_div": ((7, 20), (6, 5)),
+    "soccer_saudi_arabia_pro_league": ((8, 5), (6, 5)),
+    "soccer_australia_aleague": ((10, 1), (6, 10)),  # October to the grand final in late May or early June
+    "soccer_austria_bundesliga": ((7, 20), (6, 5)),
+    "soccer_switzerland_superleague": ((7, 15), (6, 5)),
+    "soccer_denmark_superliga": ((7, 10), (6, 5)),
+    "soccer_greece_super_league": ((8, 10), (5, 31)),
+    "soccer_russia_premier_league": ((7, 10), (6, 5)),
+    "soccer_spain_segunda_division": ((8, 5), (6, 25)),  # the promotion play-off final in late June
+    "soccer_italy_serie_b": ((8, 10), (6, 15)),
+    "soccer_germany_bundesliga2": ((7, 25), (5, 31)),
+    "soccer_france_ligue_two": ((7, 25), (6, 5)),
+    "soccer_england_league1": ((8, 1), (5, 31)),
+    "soccer_england_league2": ((8, 1), (5, 31)),
+    "soccer_england_efl_cup": ((8, 1), (3, 31)),  # the first round in August, the final in February or March
+    "soccer_germany_dfb_pokal": ((8, 1), (5, 31)),
+    "tennis_atp": ((1, 1), (12, 31)),             # the calendar year (the calendar leaves December's quiet weeks out)
+    "tennis_wta": ((1, 1), (12, 31)),
 }
 
-# The projected total (logged once): games in a whole season (UFC: cards, the Contender Series' included), with the
-# preseason and spring-training games inside the windows; compressed kilobytes per final game (plan section 9.4: the
-# summary, soccer's core plays apart; P1 measures the real sizes), per board and per nflverse file
+# The plain windows wave 3 is measured against (the projection's "saved"): the calendar year, August-May, college
+# basketball November-April and football August-January, the NBL September-March
+CALENDAR_YEAR = frozenset({
+    "basketball_wnba", "americanfootball_cfl", "soccer_usa_mls", "soccer_brazil_campeonato", "soccer_brazil_serie_b",
+    "soccer_argentina_primera_division", "soccer_chile_campeonato", "soccer_japan_j_league",
+    "soccer_norway_eliteserien", "soccer_sweden_allsvenskan", "soccer_sweden_superettan",
+    "soccer_finland_veikkausliiga", "soccer_league_of_ireland", "soccer_conmebol_copa_libertadores",
+    "soccer_conmebol_copa_sudamericana", "tennis_atp", "tennis_wta"})
+PLAIN: Dict[str, Tuple[Tuple[int, int], Tuple[int, int]]] = {
+    **{league: ((1, 1), (12, 31)) if league in CALENDAR_YEAR else ((8, 1), (5, 31)) for league in WAVE3},
+    "basketball_ncaab": ((11, 1), (4, 30)), "basketball_wncaab": ((11, 1), (4, 30)),
+    "americanfootball_ncaaf": ((8, 1), (1, 31)), "basketball_nbl": ((9, 1), (3, 31)),
+}
+
+# The projected total (logged once): games in a whole season (UFC: cards, the Contender Series' included; tennis:
+# none fetched, its day boards are the matches' record), with the preseason and spring-training games inside the
+# windows; compressed kilobytes per final game (plan section 9.4: the summary, soccer's core plays apart, college
+# basketball's smaller; P1 measures the real sizes), per board and per nflverse file
 GAMES: Dict[str, int] = {
     "basketball_nba": 1390, NFL: 286, "soccer_epl": 380, "soccer_efl_champ": 557, "soccer_spain_la_liga": 380,
     "soccer_germany_bundesliga": 308, "soccer_italy_serie_a": 380, "soccer_france_ligue_one": 308,
     "soccer_spl": 228, "soccer_netherlands_eredivisie": 306, "soccer_portugal_primeira_liga": 306, UCL: 189,
-    "icehockey_nhl": 1400, UFC: 52, "baseball_mlb": 2625}
+    "icehockey_nhl": 1400, UFC: 52, "baseball_mlb": 2625,
+    # Wave 3: Division I's whole board (groups 50) for college basketball, FBS for college football
+    "basketball_ncaab": 5800, "americanfootball_ncaaf": 850, "basketball_wnba": 300, "basketball_wncaab": 5500,
+    "basketball_nbl": 180, "americanfootball_cfl": 86, "soccer_uefa_europa_league": 189, "soccer_usa_mls": 540,
+    "soccer_mexico_ligamx": 342, "soccer_brazil_campeonato": 380, "soccer_argentina_primera_division": 500,
+    "soccer_turkey_super_league": 306, "soccer_belgium_first_div": 300, "soccer_uefa_europa_conference_league": 153,
+    "soccer_conmebol_copa_libertadores": 155, "soccer_saudi_arabia_pro_league": 306, "soccer_japan_j_league": 380,
+    "soccer_australia_aleague": 165, "soccer_austria_bundesliga": 197, "soccer_switzerland_superleague": 228,
+    "soccer_denmark_superliga": 192, "soccer_greece_super_league": 220, "soccer_norway_eliteserien": 240,
+    "soccer_sweden_allsvenskan": 240, "soccer_russia_premier_league": 240, "soccer_chile_campeonato": 240,
+    "soccer_spain_segunda_division": 468, "soccer_italy_serie_b": 390, "soccer_germany_bundesliga2": 308,
+    "soccer_france_ligue_two": 310, "soccer_england_league1": 557, "soccer_england_league2": 557,
+    "soccer_brazil_serie_b": 380, "soccer_conmebol_copa_sudamericana": 157, "soccer_england_efl_cup": 93,
+    "soccer_germany_dfb_pokal": 63, "soccer_uefa_nations_league": 100,  # a season in two: the league runs every other
+    "soccer_uefa_champs_league_women": 80, "soccer_sweden_superettan": 240, "soccer_finland_veikkausliiga": 162,
+    "soccer_league_of_ireland": 180, "tennis_atp": 0, "tennis_wta": 0}
 GAME_KB: Dict[str, float] = {"basketball": 60, "football": 65, "soccer": 45, "hockey": 55, "mma": 40,
-                             "baseball": 90}
+                             "baseball": 90, "tennis": 0}
+LEAGUE_GAME_KB: Dict[str, float] = {"basketball_ncaab": 35, "basketball_wncaab": 35}  # section 9.4: college basketball
 PLAYS_PAGES = 5            # a match's core plays (1,481 items is 5 pages of 300)
 PLAYS_KB = 180.0           # all of them
 BOARD_KB: Dict[str, float] = {"basketball": 15, "football": 5, "soccer": 3, "hockey": 15, "mma": 8,
-                              "baseball": 20}
+                              "baseball": 20, "tennis": 30}  # a tennis day: every tournament's draw (~450 KB raw)
 PBP_KB = 20 * 1024.0       # play_by_play_<season>.csv.gz
 
 _EVENT_REF = re.compile(r"/events/(\d+)")
@@ -141,10 +253,15 @@ def season_window(league: str) -> Tuple[Tuple[int, int], Tuple[int, int]]:
         raise ValueError(f"the backfill has no season window for {league!r}") from None
 
 
+def _window_days(window: Tuple[Tuple[int, int], Tuple[int, int]], season: int
+                 ) -> Tuple[datetime.date, datetime.date]:
+    (m1, d1), (m2, d2) = window
+    return datetime.date(season, m1, d1), datetime.date(season + (1 if (m2, d2) < (m1, d1) else 0), m2, d2)
+
+
 def season_dates(league: str, season: int) -> Tuple[datetime.date, datetime.date]:
     """The first and last day of ``season`` (the calendar year it starts in)."""
-    (m1, d1), (m2, d2) = season_window(league)
-    return datetime.date(season, m1, d1), datetime.date(season + (1 if (m2, d2) < (m1, d1) else 0), m2, d2)
+    return _window_days(season_window(league), season)
 
 
 def settled_day(now: float) -> datetime.date:
@@ -245,6 +362,66 @@ def calendar_cards(data: Any, season: int) -> Optional[List[Tuple[str, str]]]:
         if match and start is not None and start.tzinfo is not None:
             cards.add((start.astimezone(EASTERN).date().isoformat(), match.group(1)))
     return sorted(cards, reverse=True) if cards else None
+
+
+def _eastern_day(text: Any) -> Optional[datetime.date]:
+    when = _when(text) if text not in (None, "") else None
+    return when.astimezone(EASTERN).date() if when is not None and when.tzinfo is not None else None
+
+
+def calendar_bound(data: Any) -> Optional[Tuple[datetime.date, datetime.date, datetime.date, datetime.date]]:
+    """ESPN's own bound of a board's season (v4 P1b) from its ``leagues[0]``, as US Eastern days: (the season's first
+    day, its last day, its first day with a game, its last day with a game). The season is its start and end dates
+    (else the calendar's); the game days are the calendar's: a whitelist of days (soccer's, basketball's and tennis's
+    boards) or of season parts with their dates (football's, the off season left out). A calendar of days without
+    games (MLB's) or none at all gives the season's own dates. None when the board has no season dates."""
+    leagues = data.get("leagues") if isinstance(data, Mapping) else None
+    league = leagues[0] if isinstance(leagues, list) and leagues and isinstance(leagues[0], Mapping) else {}
+    season = league.get("season") if isinstance(league.get("season"), Mapping) else {}
+    first = _eastern_day(season.get("startDate")) or _eastern_day(league.get("calendarStartDate"))
+    last = _eastern_day(season.get("endDate")) or _eastern_day(league.get("calendarEndDate"))
+    if first is None or last is None or last < first:
+        return None
+    days: List[datetime.date] = []
+    calendar = league.get("calendar")
+    if isinstance(calendar, list) and league.get("calendarIsWhitelist") is True:
+        for entry in calendar:
+            if not isinstance(entry, Mapping):
+                days.append(_eastern_day(entry))  # type: ignore[arg-type]
+            elif "offseason" not in re.sub(r"[^a-z]", "", str(entry.get("label") or "").lower()):
+                days += [_eastern_day(entry.get("startDate")), _eastern_day(entry.get("endDate"))]  # type: ignore
+    games = [day for day in days if day is not None and first <= day <= last]
+    return (first, last, min(games), max(games)) if games else (first, last, first, last)
+
+
+def bounded_span(first: datetime.date, last: datetime.date, bound: Sequence[Any], tail: bool = True
+                 ) -> Tuple[datetime.date, datetime.date]:
+    """A season's days ``first``..``last`` less the days ESPN's calendar (``bound``: calendar_bound's four days, as
+    dates or ISO text) shows have no game: the head before its first game day when the calendar's season covers the
+    whole head, the tail after its last game day when it covers the whole tail and ``tail`` is set (a calendar read
+    while the season was being played may not list its play-offs yet). Days outside the calendar's season are kept:
+    they belong to a season this calendar says nothing about. An empty span comes back with ``last`` < ``first``."""
+    try:
+        season_first, season_last, game_first, game_last = (
+            day if isinstance(day, datetime.date) else _day(str(day)) for day in bound)
+    except (TypeError, ValueError):
+        return first, last
+    if season_first <= first < game_first:
+        first = game_first
+    if tail and game_last < last <= season_last:
+        last = game_last
+    return first, last
+
+
+def tennis_finals(data: Any) -> Dict[str, float]:
+    """A tennis board's singles matches played to the end, {competition id: start} (capture/worker.py's own rule)."""
+    from .worker import _tennis_finals  # here: the worker loads this module lazily too
+    return _tennis_finals(data)
+
+
+def wave_of(league: str) -> Optional[int]:
+    """A league's wave in the backfill's order: 1 and 2 (plan section 1.3), 3 (WAVE3); None off the 58 paths."""
+    return 1 if league in plan.WAVE1 else 2 if league in plan.WAVE2 else 3 if league in WAVE3 else None
 
 
 def summary_state(body: Any) -> Tuple[str, Optional[str]]:
@@ -364,7 +541,7 @@ class RawBackfill:
         self.clock = clock or time.time
         unknown = sorted(set(leagues or ()) - set(ORDER))
         if unknown:
-            raise ValueError(f"the backfill covers the wave 1-2 leagues ({', '.join(ORDER)}), not {unknown}")
+            raise ValueError(f"the backfill covers the 58 ESPN paths (plan.PATHS), not {unknown}")
         self.leagues = tuple(ORDER) if leagues is None else tuple(league for league in ORDER if league in set(leagues))
         self.seasons = max(0, int(seasons))
         self.per_night = max(0, int(per_night))
@@ -412,8 +589,13 @@ class RawBackfill:
 
     def projection(self, now: Optional[float] = None) -> Dict[str, Any]:
         """The projected requests and size of the whole backfill in scope: {"requests", "gb", "nights",
-        "leagues": {league: {"seasons", "requests", "mb"}}} (from GAMES, GAME_KB, BOARD_KB...: estimates)."""
+        "waves": {1, 2, 3: {"leagues", "requests", "gb", "nights"}}, "saved" (wave 3's boards of days the plain
+        windows (PLAIN) hold that its tight windows and ESPN's calendars leave out), "beyond" (wave 3's days read
+        outside the plain windows: a July opener, a June final), "leagues": {league: {"seasons", "requests", "mb"}}}
+        (from GAMES, GAME_KB, BOARD_KB...: estimates). A wave-3 season whose calendar its probe read counts its
+        bounded days (its cursor's), any other season its window's."""
         leagues: Dict[str, Dict[str, Any]] = {}
+        saved = beyond = 0
         for unit in self.units(now):
             sport = plan.sport_of(unit.league) or ""
             whole_first, whole_last = season_dates(unit.league, unit.season)
@@ -424,11 +606,20 @@ class RawBackfill:
                 requests = boards + games
                 kb = boards * BOARD_KB[sport] + games * GAME_KB[sport]
             else:
+                first, last = self._span(unit, self._known_cursor(unit))
                 pages = PLAYS_PAGES if unit.league in PLAYS_LEAGUES else 0
-                boards = days
+                boards = max(0, (last - first).days + 1)  # the window's days (a wave-3 calendar's, once read)
                 requests = boards + games * (1 + pages) + (1 if unit.league == NFL else 0)
-                kb = (boards * BOARD_KB[sport] + games * (GAME_KB[sport] + (PLAYS_KB if pages else 0))
+                kb = (boards * BOARD_KB[sport] + games * (LEAGUE_GAME_KB.get(unit.league, GAME_KB[sport])
+                                                         + (PLAYS_KB if pages else 0))
                       + (PBP_KB if unit.league == NFL else 0))
+                if unit.league in PLAIN:
+                    plain_first, plain_last = _window_days(PLAIN[unit.league], unit.season)
+                    plain_last = min(plain_last, unit.last) if unit.current else plain_last
+                    plain = max(0, (plain_last - plain_first).days + 1)
+                    inside = max(0, (min(plain_last, last) - max(plain_first, first)).days + 1)
+                    saved += plain - inside
+                    beyond += boards - inside
             entry = leagues.setdefault(unit.league, {"seasons": 0, "requests": 0.0, "mb": 0.0})
             entry["seasons"] += 1
             entry["requests"] += requests
@@ -436,10 +627,28 @@ class RawBackfill:
         for entry in leagues.values():
             entry["requests"] = int(round(entry["requests"]))
             entry["mb"] = round(entry["mb"], 1)
-        requests = sum(entry["requests"] for entry in leagues.values())
-        gb = round(sum(entry["mb"] for entry in leagues.values()) / 1024.0, 2)
-        nights = round(requests / self.per_night, 1) if self.per_night else None
-        return {"requests": requests, "gb": gb, "nights": nights, "leagues": leagues}
+
+        def total(part: Mapping[str, Mapping[str, Any]]) -> Dict[str, Any]:
+            requests = sum(entry["requests"] for entry in part.values())
+            return {"leagues": len(part), "requests": requests,
+                    "gb": round(sum(entry["mb"] for entry in part.values()) / 1024.0, 2),
+                    "nights": round(requests / self.per_night, 1) if self.per_night else None}
+
+        whole = total(leagues)
+        waves = {wave: total({league: entry for league, entry in leagues.items() if wave_of(league) == wave})
+                 for wave in (1, 2, 3)}
+        return {"requests": whole["requests"], "gb": whole["gb"], "nights": whole["nights"], "waves": waves,
+                "saved": saved, "beyond": beyond, "leagues": leagues}
+
+    def _known_cursor(self, unit: Unit) -> Mapping[str, Any]:
+        """A wave-3 season's saved cursor (its calendar's bound, once read), for the projection; {} otherwise."""
+        if unit.league not in CALENDAR_LEAGUES:
+            return {}
+        try:
+            found = self.raw.get_cursor(unit.league, unit.season)
+        except Exception:  # noqa: BLE001 - a stand-in store without cursors: the plain window
+            return {}
+        return found if isinstance(found, Mapping) and found.get("v") == CURSOR_VERSION else {}
 
     def _log_projection(self) -> None:
         global _projected
@@ -452,11 +661,16 @@ class RawBackfill:
         except Exception:  # noqa: BLE001 - a projection never stops the backfill
             log.exception("Couldn't project the raw backfill's size")
             return
+        waves = "; ".join(f"wave {wave} ({entry['leagues']} leagues) {entry['requests']:,} requests "
+                          f"{entry['gb']:.2f} GB, about {entry['nights']} nights"
+                          for wave, entry in found["waves"].items() if entry["leagues"])
         each = "; ".join(f"{league} {entry['requests']:,} requests {entry['mb'] / 1024.0:.2f} GB"
                          for league, entry in found["leagues"].items())
         log.info("Raw backfill of older games: projected %s requests and %.1f GB (%s completed seasons and the one "
-                 "being played, %d leagues), about %s nights at %s a night. %s", f"{found['requests']:,}",
-                 found["gb"], self.seasons, len(found["leagues"]), found["nights"], f"{self.per_night:,}", each)
+                 "being played, %d leagues), about %s nights at %s a night: %s. Wave 3's tight windows and ESPN's "
+                 "calendars save %s requests against its plain windows. %s", f"{found['requests']:,}", found["gb"],
+                 self.seasons, len(found["leagues"]), found["nights"], f"{self.per_night:,}", waves,
+                 f"{found['saved']:,}", each)
 
     def progress(self) -> List[Dict[str, Any]]:
         """backfill_progress for the leagues here: {"league", "season", "done", "games_seen", "games_stored",
@@ -636,6 +850,8 @@ class RawBackfill:
             return True
         if unit.league == UFC and cur.get("cards") != "days":
             return self._ufc_step(unit, cur)
+        if unit.league in CALENDAR_LEAGUES and "bound" not in cur:  # wave 3: ESPN's calendar bounds the season first
+            return self._probe(unit, cur)
         found = self._next_window(unit, cur)
         if found is None:
             return self._finish(unit, cur)
@@ -645,16 +861,18 @@ class RawBackfill:
 
     def _next_window(self, unit: Unit, cur: Mapping[str, Any]) -> Optional[Tuple[datetime.date, datetime.date]]:
         """The next 7 days to read: the newest week first, back to the season's first day; for a season still being
-        played, the days settled since come first (``top``: the newest day read; ``bottom``: the oldest)."""
-        if unit.last < unit.first:
+        played, the days settled since come first (``top``: the newest day read; ``bottom``: the oldest). A wave-3
+        season's days are those its calendar leaves (``_span``)."""
+        first, last = self._span(unit, cur)
+        if last < first:
             return None
         if cur.get("top") is None:
-            return max(unit.first, unit.last - datetime.timedelta(days=WINDOW_DAYS - 1)), unit.last
+            return max(first, last - datetime.timedelta(days=WINDOW_DAYS - 1)), last
         top, bottom = _day(cur["top"]), _day(cur["bottom"])
-        if top < unit.last:
-            return top + datetime.timedelta(days=1), min(unit.last, top + datetime.timedelta(days=WINDOW_DAYS))
-        if bottom > unit.first:
-            return max(unit.first, bottom - datetime.timedelta(days=WINDOW_DAYS)), bottom - datetime.timedelta(days=1)
+        if top < last:
+            return top + datetime.timedelta(days=1), min(last, top + datetime.timedelta(days=WINDOW_DAYS))
+        if bottom > first:
+            return max(first, bottom - datetime.timedelta(days=WINDOW_DAYS)), bottom - datetime.timedelta(days=1)
         return None
 
     def _close_window(self, unit: Unit, cur: Dict[str, Any]) -> None:
@@ -677,6 +895,62 @@ class RawBackfill:
             cur["finished"] = done
             self._save(unit, cur, done=done)
         return False
+
+    # -- wave 3: ESPN's calendar bounds each season --
+
+    def _span(self, unit: Unit, cur: Mapping[str, Any]) -> Tuple[datetime.date, datetime.date]:
+        """The days of ``unit`` the walk reads: its window, less the days without a game ESPN's calendar shows once a
+        wave-3 season's probe read one (``bound``: calendar_bound's four days; bounded_span)."""
+        bound = cur.get("bound") if unit.league in CALENDAR_LEAGUES else None
+        if not bound:
+            return unit.first, unit.last
+        return bounded_span(unit.first, unit.last, bound, tail=not cur.get("bound_current"))
+
+    def _probe(self, unit: Unit, cur: Dict[str, Any]) -> bool:
+        """A wave-3 season's first step: its calendar, from the board of its window's middle day (a day the walk reads
+        anyway, then from raw.db at no cost). ``bound`` becomes calendar_bound's four days (widened to that day when
+        its board shows a game played), or [] (the plain window) when the board has no season dates or ESPN refuses
+        it ITEM_TRIES times; a transient failure reads it again after a wait (``bound_wait``: the season waits),
+        PROBE_WAITS times at most."""
+        wait = cur.get("bound_wait")
+        if wait and self.clock() < float(wait[0]):
+            return self._finish(unit, cur)
+        if unit.last < unit.first:
+            cur["bound"] = []
+            self._save(unit, cur)
+            return True
+        day = unit.first + (unit.last - unit.first) // 2
+        data, status, _why = self._read_board(unit, cur, day, day)
+        if status == "ok":
+            found = calendar_bound(data)
+            if found is not None and self._played(unit, data):
+                found = (found[0], found[1], min(found[2], day), max(found[3], day))
+            cur["bound"] = [part.isoformat() for part in found] if found is not None else []
+            cur["bound_current"], cur["tries"] = unit.current, 0
+            cur.pop("bound_wait", None)
+        elif status == "transient":
+            waits = int((wait or [0, 0])[1]) + 1
+            if waits >= PROBE_WAITS:
+                cur["bound"] = []
+                cur.pop("bound_wait", None)
+            else:
+                cur["bound_wait"] = [self.clock() + min(RETRY_WAIT_CAP, RETRY_WAIT * 2 ** (waits - 1)), waits]
+                self._deferred += 1
+        else:
+            tries = int(cur.get("tries") or 0) + 1
+            if tries >= ITEM_TRIES:
+                cur["bound"], tries = [], 0
+            cur["tries"] = tries
+        self._save(unit, cur)
+        self._check_streak("board")
+        return True
+
+    @staticmethod
+    def _played(unit: Unit, data: Any) -> bool:
+        """Whether a board shows a game played to the end (a tennis board: a singles match)."""
+        if unit.league in plan.TENNIS:
+            return bool(tennis_finals(data))
+        return any(completed(event_status(event)) for event in board_events(data))
 
     # -- fetching, keeping, failing --
 
@@ -780,7 +1054,8 @@ class RawBackfill:
         """Whether the season still waits for something a transient failure held up: a retry, the NFL's file, UFC's
         calendar. Such a season is never marked done."""
         return (bool(cur.get("retry")) or (unit.league == NFL and cur.get("pbp") is not True)
-                or (unit.league == UFC and cur.get("cards") is None and bool(cur.get("calendar_wait"))))
+                or (unit.league == UFC and cur.get("cards") is None and bool(cur.get("calendar_wait")))
+                or (unit.league in CALENDAR_LEAGUES and "bound" not in cur and bool(cur.get("bound_wait"))))
 
     def _due_retry(self, cur: Mapping[str, Any]) -> Optional[int]:
         """The first retry whose wait is over, or None."""
@@ -883,7 +1158,12 @@ class RawBackfill:
         self._check_streak("board")
 
     def _queue_finals(self, unit: Unit, cur: Dict[str, Any], data: Any) -> Tuple[int, int]:
-        """Queue what a board's finished games still need; (games seen, games already stored)."""
+        """Queue what a board's finished games still need; (games seen, games already stored). A tennis board is its
+        matches' record (as forward capture's sweep marks their jobs done from it): its finished singles matches are
+        seen and stored, and nothing is queued."""
+        if unit.league in plan.TENNIS:
+            finals = len(tennis_finals(data))
+            return finals, finals
         seen = stored = 0
         card = unit.league == UFC  # UFC without a calendar ("days"), or a card day's board read again
         for event in board_events(data):
@@ -1123,7 +1403,9 @@ class RawBackfill:
         self._save(unit, cur, seen=seen, stored=stored)
         self._check_streak("board")
 
-__all__ = ["RawBackfill", "Unit", "ORDER", "WINDOWS", "PLAYS_LEAGUES", "PER_NIGHT_DEFAULT", "SEASONS_DEFAULT",
+__all__ = ["RawBackfill", "Unit", "ORDER", "WAVES_1_2", "WAVE3", "CALENDAR_LEAGUES", "PLAIN", "WINDOWS",
+           "PLAYS_LEAGUES", "PER_NIGHT_DEFAULT", "SEASONS_DEFAULT",
            "WINDOW_HOURS", "SETTLE_HOURS", "season_window", "season_dates", "seasons_for", "settled_day",
            "completed", "event_status", "board_events", "calendar_cards", "summary_state", "summary_start",
-           "stored_summary", "keep_summary", "backfill_tz", "DEFAULT_TZ", "RETRY_WAIT", "RETRY_WAIT_CAP"]
+           "stored_summary", "keep_summary", "backfill_tz", "DEFAULT_TZ", "RETRY_WAIT", "RETRY_WAIT_CAP",
+           "calendar_bound", "bounded_span", "tennis_finals", "wave_of"]

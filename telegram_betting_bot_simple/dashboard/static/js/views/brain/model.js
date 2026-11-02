@@ -33,8 +33,9 @@
 //              prices, per_day, backfill, backfill_night, per_night, night, night_open},
 //              http: {since, requests, errors, share, counted, days} | null (forward capture),
 //              backfill_http: {since, requests, errors, share} | null (the older-games backfill), backfill: [{league,
-//              seasons: [{season, done, games_seen, games_stored}], done, begun, planned, games_seen, games_stored,
-//              updated_at}], errors: [{at, league, game_key, what, error}],
+//              wave (1, 2 or 3), seasons: [{season, done, games_seen, games_stored}], done, begun, planned, games_seen,
+//              games_stored, updated_at}], backfill_waves: [{wave, leagues, begun, done, waiting: [league]}],
+//              errors: [{at, league, game_key, what, error}],
 //              alarms: [{kind: http|backfill|boards|shape|disk, text}]} (v4 P1: the raw capture's health, from raw.db)}
 //
 //   normalizeProgress(raw) -> the checked payload (never throws)
@@ -320,11 +321,17 @@ function capture(raw) {
       const o = obj(b);
       return {
         league: text(o.league, 64), done: int(o.done) ?? 0, begun: int(o.begun) ?? 0, planned: int(o.planned), stored: int(o.games_stored) ?? 0,
-        seen: int(o.games_seen) ?? 0, updated: when(o.updated_at),
+        seen: int(o.games_seen) ?? 0, updated: when(o.updated_at), wave: int(o.wave),
         seasons: list(o.seasons).map((s) => ({ season: int(obj(s).season), done: obj(s).done === true, stored: int(obj(s).games_stored) ?? 0 }))
           .filter((s) => s.season !== null).slice(0, 12),
       };
     }).filter((b) => b.league).slice(0, 60),
+    // The waves' summaries (wave 3 is one line on the card, its leagues in a fold)
+    backfillWaves: list(raw.backfill_waves).map((w) => {
+      const o = obj(w);
+      return { wave: int(o.wave), leagues: int(o.leagues) ?? 0, begun: int(o.begun) ?? 0, done: int(o.done) ?? 0,
+        waiting: list(o.waiting).map((k) => text(k, 64)).filter(Boolean).slice(0, 60) };
+    }).filter((w) => w.wave !== null).slice(0, 5),
     errors: list(raw.errors).map((e) => {
       const o = obj(e);
       return { at: when(o.at), league: text(o.league, 64), key: text(o.game_key, 80), what: text(o.what, 80), error: text(o.error, 240) };

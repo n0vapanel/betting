@@ -38,6 +38,7 @@ from typing import Any, Dict, Iterator, List, Mapping, NamedTuple, Optional, Tup
 
 import pytest
 
+from telegram_betting_bot_simple.capture import backfill as raw_backfill
 from telegram_betting_bot_simple.capture import raw_store as raw_store_module
 from telegram_betting_bot_simple.capture.raw_store import DISK_FLOOR_SHARE, Job, RawStore, disk_room, min_free_bytes
 from telegram_betting_bot_simple.data.store import Store
@@ -1008,6 +1009,11 @@ def tiles(card: El) -> Dict[str, Tuple[str, str]]:
     return out
 
 
+def summary_of(fold: El) -> str:
+    """A fold's own summary line (not a fold's inside it)."""
+    return next(child for child in fold.children if isinstance(child, El) and child.tag == "summary").text()
+
+
 def card_case(capture: Any) -> Dict[str, Any]:
     return {"kind": "card", "payload": {"capture": capture}}
 
@@ -1057,10 +1063,13 @@ def test_the_whole_page_draws_the_card_from_the_real_payload(draw, tmp_path, dis
     rows = {li.find("span")[0].text(): li.one("b").text() for li in card.find("li") if li.parent and "bp-kv" in li.parent.classes}
     assert rows["Basketball"].startswith("100%") and rows["Soccer"].startswith("100%")
     assert rows["Ice hockey"] == "0.0% · 0 of 1"
-    fold = card.find("details", "bp-cap-fold")
-    assert fold[0].one("summary").text() == "Older games: 1 league · 1 of 4 seasons done · 1,429 games"
+    fold = [el for el in card.find("details", "bp-cap-fold") if "bp-cap-wave" not in el.classes]
+    assert summary_of(fold[0]) == "Older games: 1 league · 1 of 4 seasons done · 1,429 games"
     assert "NBA" in fold[0].text() and "2026 200 so far · 2025 done" in fold[0].text()
     assert fold[1].one("summary").text() == "Latest errors (1)" and "timed out" in fold[1].text()
+    wave3 = fold[0].one("details", "bp-cap-wave")  # wave 3 not begun yet: one line, its leagues named in the fold
+    assert wave3.one("summary").text() == "Wave 3: 0 of 43 leagues done"
+    assert wave3.one("p", "bp-meta").text().startswith("Not started yet: basketball_ncaab · americanfootball_ncaaf")
     assert ".bp .bp-cap" in page.css  # the card's rules come with the page's own styles
 
 
@@ -1206,6 +1215,50 @@ def test_a_malformed_block_never_breaks_the_page(draw, bad) -> None:
     [card] = draw(card_case(bad))
     if card.html:
         assert card.one("section", id="bp-capture") and "undefined" not in card.html and "NaN" not in card.html
+
+
+def backfill_58(tmp_path: Path) -> Dict[str, Any]:
+    """The capture block over a raw.db with the backfill on all 58 paths, each league's seasons in scope by the
+    backfill's own rule: waves 1-2 under way (all but the season being played done), wave 3's first 12 leagues done,
+    the next 21 under way and the last 10 not begun."""
+    raw = RawStore(str(tmp_path / "raw58.db"))
+    settled = raw_backfill.settled_day(NOW)
+    for n, league in enumerate(raw_backfill.ORDER):
+        place = n - len(raw_backfill.WAVES_1_2)  # in wave 3
+        if place >= 33:
+            continue
+        for tier, (season, *_rest) in enumerate(raw_backfill.seasons_for(league, settled, 3)):
+            done = place < 12 if place >= 0 else tier > 0
+            raw.set_cursor(league, season, {"v": 1}, done=done, games_seen=100 + n, games_stored=100 + n,
+                           now=NOW - n * 60)
+    return health(tmp_path / "raw58.db", settings={"seasons": 3})
+
+
+def test_the_backfill_of_58_leagues_shows_waves_1_and_2_as_rows_and_wave_3_as_one_folded_line(
+        draw, tmp_path, disk) -> None:
+    block = backfill_58(tmp_path)
+    waves = {wave["wave"]: wave for wave in block["backfill_waves"]}
+    assert [(w["leagues"], w["begun"], w["done"]) for w in waves.values()] == [(12, 12, 0), (3, 3, 0), (43, 33, 12)]
+    assert waves[3]["waiting"] == list(raw_backfill.WAVE3[33:])
+    assert [row["wave"] for row in block["backfill"]] == [1] * 12 + [2] * 3 + [3] * 33
+    [card] = draw(card_case(capture_block(backfill=block["backfill"], backfill_waves=block["backfill_waves"])))
+    outer = card.find("details", "bp-cap-fold")[0]
+    assert summary_of(outer).startswith("Older games: 48 leagues · ")
+    rows = [li for li in outer.find("li") if li.parent is not None and li.parent.parent is outer]
+    assert len(rows) == 16  # waves 1-2 a row each, as before, then wave 3's one line
+    assert [li.one("b").text() for li in rows[:15]] == [TITLES.get(lg, lg) for lg in raw_backfill.WAVES_1_2]
+    assert all(len(li.find("span", "meter")) == 1 for li in rows[:15])  # each with its meter, as before
+    wave3 = rows[15].one("details", "bp-cap-wave")
+    assert wave3.one("summary").text() == "Wave 3: 12 of 43 leagues done" and "open" not in wave3.attrs
+    listed = [li.one("b").text() for li in wave3.find("li")]
+    assert listed == [TITLES.get(lg, lg) for lg in raw_backfill.WAVE3[:33]]  # in the walk's order
+    assert wave3.one("p", "bp-meta").text() == "Not started yet: " + " · ".join(raw_backfill.WAVE3[33:])
+    # Everything still goes in through esc()
+    hostile = capture_block(backfill=[{"league": HOSTILE, "wave": 3, "seasons": [], "done": 0, "begun": 1,
+                                       "planned": 4, "games_stored": 1}],
+                            backfill_waves=[{"wave": 3, "leagues": 43, "begun": 1, "done": 0, "waiting": [HOSTILE]}])
+    [bad] = draw(card_case(hostile))
+    assert not bad.find("img") and bad.text().count('<img src=x onerror="alert(1)">') == 2
 
 
 def test_the_card_never_paints_words_in_the_warning_hue() -> None:
@@ -1356,11 +1409,15 @@ def test_the_card_fits_a_360_px_phone(tmp_path, disk) -> None:
     store = world(tmp_path)
     disk["usage"] = Usage(80 * GB, 60 * GB, 20 * GB)
     real = json.loads(json.dumps(progress.progress(store, None, now=NOW)))
-    for payload in (real, {**real, "capture": worst_case()}):
+    many = backfill_58(tmp_path)
+    many = {**real, "capture": {**real["capture"], "backfill": many["backfill"],
+                                "backfill_waves": many["backfill_waves"]}}
+    titles = {**{league: " ".join(league.split("_")[1:]).upper() for league in raw_backfill.ORDER}, **TITLES}
+    for payload in (real, {**real, "capture": worst_case()}, many):
         script = tmp_path / "layout.cjs"
         script.write_text(LAYOUT, encoding="utf-8")
-        data = json.dumps({"static": str(STATIC), "html": PAGE % json.dumps(TITLES), "appStub": app_stub(),
-                           "payload": payload})
+        data = json.dumps({"static": str(STATIC), "html": PAGE % json.dumps(titles if payload is many else TITLES),
+                           "appStub": app_stub(), "payload": payload})
         done = subprocess.run([NODE, str(script)], input=data, capture_output=True, text=True, encoding="utf-8",
                               timeout=180, cwd=tmp_path, env={**os.environ, "NODE_PATH": joined, "NODE_OPTIONS": ""})
         assert done.returncode == 0, done.stderr[-3000:]
@@ -1373,4 +1430,5 @@ def test_the_card_fits_a_360_px_phone(tmp_path, disk) -> None:
             assert result["problems"] == [], result["problems"]
             assert result["width"] == 360 and result["page"] <= 360, result
             assert result["overflow"] == [], result["overflow"]
-            assert result["open"] == 2 and result["notices"] == len(payload["capture"]["alarms"])
+            wave3 = any(w.get("wave") == 3 for w in payload["capture"].get("backfill_waves") or [])
+            assert result["open"] == 2 + wave3 and result["notices"] == len(payload["capture"]["alarms"])

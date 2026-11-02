@@ -388,21 +388,36 @@ function captureUnread(c) {
   return `<p class="hint bp-cap-unread">${esc(`The sweep couldn't read ${unread.length === 1 ? "this board" : "these boards"}, so ${unread.length === 1 ? "its" : "their"} games aren't counted: ${items.join(" · ")}.`)}</p>`;
 }
 
+function backfillRow(b) {
+  const whole = b.planned ?? b.begun;
+  const seasons = b.seasons.map((s) => `${s.season} ${s.done ? "done" : `${s.stored.toLocaleString()} so far`}`).join(" · ");
+  return `<li class="bp-progress">
+      <div class="row-between"><b>${esc(leagueTitle(b.league) || b.league)}</b><span>${esc(`${b.done.toLocaleString()} of ${plural(whole, "season")}`)}</span></div>
+      ${whole ? meter(b.done, whole, `${b.done} of ${whole} seasons loaded`) : ""}
+      <span class="bp-meta">${esc([seasons, `${plural(b.stored, "game")} stored`, b.updated ? `last ${ago(b.updated)}` : ""].filter(Boolean).join(" · "))}</span>
+    </li>`;
+}
+
+/** Wave 3 (43 leagues) as one line, "Wave 3: 12 of 43 leagues done", its leagues in a fold: begun ones as rows, the
+ * rest named on one line. */
+function backfillWave3(rows, w) {
+  const leagues = w ? Math.max(w.leagues, rows.length) : rows.length;
+  const done = w ? w.done : rows.filter((b) => b.done && b.done >= (b.planned ?? b.begun)).length;
+  const waiting = w && w.waiting.length
+    ? `<p class="bp-meta">${esc(`Not started yet: ${w.waiting.map((k) => leagueTitle(k) || k).join(" · ")}`)}</p>` : "";
+  return `<li class="bp-progress"><details class="bp-more bp-cap-fold bp-cap-wave"><summary>${icon("down", { size: 16 })}<span>${esc(`Wave 3: ${done.toLocaleString()} of ${plural(leagues, "league")} done`)}</span></summary>${rows.length ? `<ul class="bp-list">${rows.map(backfillRow).join("")}</ul>` : ""}${waiting}</details></li>`;
+}
+
 function captureBackfill(c) {
   if (!c.backfill.length) return "";
   const done = c.backfill.reduce((n, b) => n + b.done, 0);
   const planned = c.backfill.reduce((n, b) => n + (b.planned ?? b.begun), 0);
   const stored = c.backfill.reduce((n, b) => n + b.stored, 0);
   const head = `Older games: ${plural(c.backfill.length, "league")} · ${done.toLocaleString()} of ${plural(planned, "season")} done · ${plural(stored, "game")}`;
-  const rows = c.backfill.map((b) => {
-    const whole = b.planned ?? b.begun;
-    const seasons = b.seasons.map((s) => `${s.season} ${s.done ? "done" : `${s.stored.toLocaleString()} so far`}`).join(" · ");
-    return `<li class="bp-progress">
-      <div class="row-between"><b>${esc(leagueTitle(b.league) || b.league)}</b><span>${esc(`${b.done.toLocaleString()} of ${plural(whole, "season")}`)}</span></div>
-      ${whole ? meter(b.done, whole, `${b.done} of ${whole} seasons loaded`) : ""}
-      <span class="bp-meta">${esc([seasons, `${plural(b.stored, "game")} stored`, b.updated ? `last ${ago(b.updated)}` : ""].filter(Boolean).join(" · "))}</span>
-    </li>`;
-  }).join("");
+  // Waves 1-2 a row each; wave 3 one line with a fold (58 leagues × 4 seasons would bury the rest)
+  const wave3 = c.backfill.filter((b) => b.wave === 3);
+  const w = c.backfillWaves.find((x) => x.wave === 3);
+  const rows = c.backfill.filter((b) => b.wave !== 3).map(backfillRow).join("") + (wave3.length || (w && w.leagues) ? backfillWave3(wave3, w) : "");
   return `<details class="bp-more bp-cap-fold"><summary>${icon("down", { size: 16 })}<span>${esc(head)}</span></summary><ul class="bp-list">${rows}</ul></details>`;
 }
 

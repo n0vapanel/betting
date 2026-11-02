@@ -41,6 +41,11 @@ EXPLAIN_MODEL = "claude-opus-5-5"
 EXPLAIN_EFFORT = "medium"
 MAX_TEXT = 700  # characters per explanation field: a verdict is a sentence or two, not an essay
 MIN_OUTPUT_TOKENS = 1024  # a request that can't afford this many output tokens isn't sent (thinking uses some)
+# Anthropic answers an account with no prepaid API credits with a 400 ("Your credit balance is too low to access
+# the Anthropic API..."): said plainly, with where the owner tops up (a claude.ai plan doesn't fund the API)
+NO_CREDITS_SIGN = "credit balance is too low"
+NO_CREDITS = ("The AI is paused: the app's Anthropic account has no API credits left. The owner can add credits "
+              "at console.anthropic.com under Plans & Billing")
 
 
 class AIError(Exception):
@@ -84,6 +89,8 @@ class ClaudeCaller:
             # The app's own request was refused: the detail is for the server log, not the person
             detail = str(exc.message)[:500]
             logging.warning("Claude refused a %s request: %s", model, detail)
+            if NO_CREDITS_SIGN in detail.lower():  # a 400 that is about billing, not the request
+                raise AIError(NO_CREDITS, temporary=False, detail=detail) from None
             raise AIError("Claude didn't accept the app's request (the details are in the server log)",
                           temporary=False, detail=detail) from None
         except anthropic.APIStatusError as exc:

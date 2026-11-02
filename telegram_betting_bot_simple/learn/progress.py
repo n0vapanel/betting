@@ -37,8 +37,10 @@ the evaluator and the gate; every status word ("promoted", "rolled back", "held"
                               "night", "night_open"},
                  "http": {"since", "requests", "errors", "share", "counted", "days": {"today", "yesterday"}},
                  "backfill_http": {"since", "requests", "errors", "share"} | None,
-                 "backfill": [{"league", "seasons": [{"season", "done", "games_seen", "games_stored", "updated_at"}],
+                 "backfill": [{"league", "wave", "seasons": [{"season", "done", "games_seen", "games_stored",
+                                                               "updated_at"}],
                                "done", "begun", "planned", "games_stored", "updated_at"}],
+                 "backfill_waves": [{"wave", "leagues", "begun", "done", "waiting"}],
                  "errors": [{"at", "league", "game_key", "what", "error"}],
                  "shapes": [{"source", "endpoint", "label", "ok", "missing", "json", "at", "league"}],
                  "alarms": [{"kind": "http" | "backfill" | "boards" | "shape" | "disk", "text"}]}}
@@ -65,7 +67,7 @@ import time
 import urllib.parse
 import zlib
 from contextlib import closing
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from ..data.espn_client import ESPN_DAY_TZ, espn_path
 from . import brain_store as bs
@@ -470,7 +472,8 @@ SHAPES: Tuple[Tuple[str, str, Optional[str], Tuple[str, ...], str], ...] = (
 )
 JOB_WORDS = {"todo": "capture job, retrying", "partial": "capture job, partly stored", "done": "capture job",
              "gave_up": "capture job, given up", "void": "capture job, called off"}
-# The backfill's league order (the spec's waves: wave 1, then wave 2); any other league after them, by key
+# The backfill's league order when capture/backfill.py can't load (its own ORDER otherwise: waves 1 and 2, then wave
+# 3's 43 leagues); any other league after them, by key
 BACKFILL_ORDER = ("basketball_nba", "americanfootball_nfl", "soccer_epl", "soccer_efl_champ", "soccer_spain_la_liga",
                   "soccer_germany_bundesliga", "soccer_italy_serie_a", "soccer_france_ligue_one", "soccer_spl",
                   "soccer_netherlands_eredivisie", "soccer_portugal_primeira_liga", "soccer_uefa_champs_league",
@@ -616,7 +619,8 @@ def _skeleton(now: float, enabled: Optional[bool] = True, settings: Optional[Map
             "size": None, "requests": {"day": _utc_day(now), "capture": 0, "prices": 0,
                                        "per_day": settings.get("per_day"), "backfill_night": None, "backfill": 0,
                                        "per_night": settings.get("per_night"), "night": None, "night_open": False},
-            "http": None, "backfill_http": None, "backfill": [], "errors": [], "shapes": [], "alarms": []}
+            "http": None, "backfill_http": None, "backfill": [], "backfill_waves": [], "errors": [], "shapes": [],
+            "alarms": []}
 
 
 def _has_final_kind(kinds_done: Any) -> bool:
@@ -909,8 +913,35 @@ def _planned_seasons(league: str, seasons: Any, now: float) -> Optional[int]:
         return seasons + 1
 
 
+def _backfill_waves_of() -> Tuple[Tuple[str, ...], Dict[str, Optional[int]]]:
+    """(the backfill's league order, {league: its wave}) by capture/backfill.py's own ORDER and wave_of; waves 1-2
+    alone (BACKFILL_ORDER, no waves) when the capture package can't load."""
+    try:
+        from ..capture import backfill as raw_backfill
+        return tuple(raw_backfill.ORDER), {league: raw_backfill.wave_of(league) for league in raw_backfill.ORDER}
+    except Exception:  # noqa: BLE001 - the page never fails over the capture package
+        return BACKFILL_ORDER, {}
+
+
+def _backfill_waves(rows: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    """The backfill's waves (capture/backfill.py: 1 and 2, then wave 3's 43 leagues) for the card's summary lines:
+    {"wave", "leagues" (in the wave), "begun" (with a season begun), "done" (every planned season done),
+    "waiting" (the wave's leagues not begun yet, in the walk's order)}."""
+    order, waves = _backfill_waves_of()
+    by_league = {row["league"]: row for row in rows}
+    out = []
+    for wave in sorted({wave for wave in waves.values() if wave is not None}):
+        members = [league for league in order if waves.get(league) == wave]
+        begun = [by_league[league] for league in members if league in by_league]
+        done = [row for row in begun if row["done"] and row["done"] >= (row["planned"] or row["begun"])]
+        out.append({"wave": wave, "leagues": len(members), "begun": len(begun), "done": len(done),
+                    "waiting": [league for league in members if league not in by_league]})
+    return out
+
+
 def _backfill_rows(db: sqlite3.Connection, settings: Mapping[str, Any], now: float) -> List[Dict[str, Any]]:
-    """The older-games backfill per league (capture/backfill.py's backfill_progress), seasons newest first."""
+    """The older-games backfill per league (capture/backfill.py's backfill_progress) in the walk's order (its wave
+    with each), seasons newest first."""
     by_league: Dict[str, List[Dict[str, Any]]] = {}
     for league, season, done, seen, stored, updated in db.execute(
             "SELECT league, season, done, games_seen, games_stored, updated_at FROM backfill_progress"):
@@ -918,12 +949,14 @@ def _backfill_rows(db: sqlite3.Connection, settings: Mapping[str, Any], now: flo
             "season": int(season), "done": bool(done), "games_seen": int(seen or 0), "games_stored": int(stored or 0),
             "updated_at": None if updated is None else float(updated)})
     seasons = settings.get("seasons")
-    order = {league: i for i, league in enumerate(BACKFILL_ORDER)}
+    walk, waves = _backfill_waves_of()
+    order = {league: i for i, league in enumerate(walk)}
     out = []
     for league in sorted(by_league, key=lambda key: (order.get(key, len(order)), key)):
         rows = sorted(by_league[league], key=lambda row: -row["season"])
         times = [row["updated_at"] for row in rows if row["updated_at"] is not None]
-        out.append({"league": league, "seasons": [{**row, "updated_at": iso(row["updated_at"])} for row in rows],
+        out.append({"league": league, "wave": waves.get(league),
+                    "seasons": [{**row, "updated_at": iso(row["updated_at"])} for row in rows],
                     "done": sum(row["done"] for row in rows), "begun": len(rows),
                     "planned": _planned_seasons(league, seasons, now),
                     "games_seen": sum(row["games_seen"] for row in rows),
@@ -1051,6 +1084,7 @@ def capture_health(path: Optional[str], now: Optional[float] = None, *, enabled:
                 block["errors"] = _errors(db, floor, now)
             if "backfill_progress" in tables:
                 block["backfill"] = _backfill_rows(db, settings, now)
+                block["backfill_waves"] = _backfill_waves(block["backfill"])
     except (sqlite3.Error, OSError, ValueError, zlib.error) as exc:
         log.warning("Brain progress: raw.db couldn't be read for the capture block (%s)", type(exc).__name__)
         block["unreadable"] = type(exc).__name__

@@ -136,3 +136,42 @@ def test_the_scan_reads_two_names_in_a_row_as_one_last_first_name_where_the_boar
     # The scan's notes: "James, LeBron" is LeBron James, with no "more than one James" note
     named = engine.sort_names(PLAYERS, [], ["James", "LeBron"])
     assert named == {"found": {"LeBron James": ["0"]}, "missing": [], "ambiguous": [], "started": []}
+
+
+# --- 4. Claude's 400 for an account with no API credits says so ---------------------------------------------------
+
+def _refusal(text: str) -> Exception:
+    import anthropic
+    import httpx
+    return anthropic.BadRequestError(text, response=httpx.Response(
+        400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")), body=None)
+
+
+class _Refusing:
+    """A client whose every request is refused with ``error`` (ClaudeCaller only touches beta.messages.create)."""
+
+    def __init__(self, error: Exception) -> None:
+        def create(**_: Any) -> Any:
+            raise error
+        self.beta = type("Beta", (), {"messages": type("Messages", (), {"create": staticmethod(create)})()})()
+
+
+def test_no_api_credits_is_said_plainly_with_where_to_top_up() -> None:
+    import pytest
+    from telegram_betting_bot_simple.ai.explain import NO_CREDITS, AIError, ClaudeCaller
+    error = _refusal("Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to "
+                     "upgrade or purchase credits.")
+    with pytest.raises(AIError) as caught:
+        ClaudeCaller(_Refusing(error)).create("claude-haiku-5-5", max_tokens=10, messages=[])
+    assert str(caught.value) == NO_CREDITS and "console.anthropic.com" in str(caught.value)
+    assert caught.value.temporary is False and "credit balance" in (caught.value.detail or "")
+
+
+def test_any_other_refused_request_keeps_the_server_log_wording() -> None:
+    import pytest
+    from telegram_betting_bot_simple.ai.explain import AIError, ClaudeCaller
+    with pytest.raises(AIError) as caught:
+        ClaudeCaller(_Refusing(_refusal("The compiled grammar is too large."))).create(
+            "claude-haiku-5-5", max_tokens=10, messages=[])
+    assert "server log" in str(caught.value) and "credits" not in str(caught.value)
+    assert caught.value.temporary is False

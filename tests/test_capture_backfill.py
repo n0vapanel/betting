@@ -9,6 +9,7 @@ from __future__ import annotations
 import collections
 import copy
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -23,7 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import pytest
 
 from telegram_betting_bot_simple.capture import backfill as bf
-from telegram_betting_bot_simple.capture import raw_store
+from telegram_betting_bot_simple.capture import plan, raw_store
 from telegram_betting_bot_simple.capture.backfill import RawBackfill
 from telegram_betting_bot_simple.capture.http import HttpResponse, PoliteHttp
 from telegram_betting_bot_simple.capture.raw_store import RawStore
@@ -91,7 +92,7 @@ CODE = {league: 10 + n for n, league in enumerate(bf.ORDER)}
 FINAL = {"id": "3", "name": "STATUS_FINAL", "state": "post", "completed": True, "description": "Final"}
 POSTPONED = {"id": "6", "name": "STATUS_POSTPONED", "state": "post", "completed": False, "description": "Postponed"}
 BOARDS = {"basketball": "sb_nba.json", "football": "sb_nfl.json", "soccer": "sb_epl.json", "hockey": "sb_nhl.json",
-          "baseball": "sb_mlb.json", "mma": "sb_ufc.json"}
+          "baseball": "sb_mlb.json", "mma": "sb_ufc.json", "tennis": "sb_atp.json"}
 SUMMARIES = {"basketball": "sum_nba.json", "football": "sum_nfl.json", "soccer": "sum_epl.json",
              "hockey": "sum_nhl.json", "baseball": "sum_mlb.json"}
 PLAY_PAGES = 2
@@ -121,11 +122,18 @@ def games_on(league: str, day: datetime.date) -> int:
         return 1
     if league == UFC:
         return 1 if is_card_day(day) else 0
+    if league in plan.TENNIS:
+        return 3 if weekday < 6 else 0  # singles matches every day but Sunday
     return 0
 
 
-def event_ids(league: str, day: datetime.date) -> List[str]:
-    return [f"{CODE[league]}{day:%Y%m%d}{n}" for n in range(games_on(league, day))]
+def event_ids(league: str, day: datetime.date, count: Optional[int] = None) -> List[str]:
+    return [f"{CODE[league]}{day:%Y%m%d}{n}" for n in range(games_on(league, day) if count is None else count)]
+
+
+def espn_time(day: datetime.date, hour: int = 7) -> str:
+    """A day as ESPN's calendars write it: midnight Pacific in UTC (07:00Z in summer, 08:00Z in winter)."""
+    return f"{day:%Y-%m-%d}T{hour:02d}:00Z"
 
 
 def ufc_calendar(year: int) -> List[Dict[str, Any]]:
@@ -147,9 +155,11 @@ class World:
     """ESPN's site, core and fightcenter APIs and nflverse's GitHub releases, faked for PoliteHttp._send: boards for
     any day (games on fixed weekdays, every game of a past day final), each game's summary, two pages of core plays,
     a UFC card every other Saturday with its fightcenter and the season's calendar on every UFC board, and a
-    play-by-play file per NFL season. ``calls`` records (kind, league, what, host, time); ``fail`` maps
-    (kind, what) to answers given before the real one (a status, or "reset" for a dropped connection);
-    ``postponed`` holds event ids whose games were postponed."""
+    play-by-play file per NFL season, a tennis day's singles matches in one tournament. ``calls`` records (kind,
+    league, what, host, time); ``fail`` maps (kind, what) to answers given before the real one (a status, or "reset"
+    for a dropped connection); ``postponed`` holds event ids whose games were postponed; ``schedule`` maps a league
+    to its games on a day (instead of games_on) and ``calendars`` to its board's season and calendar on a day
+    (merged into ``leagues[0]``; None: a board with neither)."""
 
     def __init__(self, clock: Clock, per_request: float = 0.0) -> None:
         self.clock = clock
@@ -159,6 +169,8 @@ class World:
         self.fail_always: Dict[str, int] = {}
         self.outage: Dict[Tuple[str, str], float] = {}  # (kind, what) -> answers 503 until this time
         self.postponed: set = set()
+        self.schedule: Dict[str, Callable[[datetime.date], int]] = {}
+        self.calendars: Dict[str, Callable[[datetime.date], Optional[Dict[str, Any]]]] = {}
         self.boards = {name: load(file) for name, file in BOARDS.items()}
         self.summaries = {name: (FIX / file).read_bytes() for name, file in SUMMARIES.items()}
         plays = load("core_epl_plays.json")
@@ -210,9 +222,17 @@ class World:
     def board(self, league: str, dates: str) -> bytes:
         day = datetime.datetime.strptime(dates, "%Y%m%d").date()
         data = copy.deepcopy(self.boards[sport(league)])
+        ids = event_ids(league, day, self.schedule[league](day) if league in self.schedule else None)
+        if league in self.calendars:
+            for key in ("calendar", "calendarType", "calendarIsWhitelist", "calendarStartDate", "calendarEndDate"):
+                data["leagues"][0].pop(key, None)
+            data["leagues"][0]["season"] = {"year": day.year}
+            data["leagues"][0].update(self.calendars[league](day) or {})
+        if sport(league) == "tennis":
+            return self.tennis_board(data, day, ids)
         proto = data["events"][0]
         events = []
-        for event_id in event_ids(league, day):
+        for event_id in ids:
             event = copy.deepcopy(proto)
             status = POSTPONED if event_id in self.postponed else FINAL
             event.update({"id": event_id, "date": f"{day}T23:00Z"})
@@ -226,6 +246,22 @@ class World:
         data["leagues"][0]["season"]["year"] = day.year
         if league == UFC:
             data["leagues"][0]["calendar"] = ufc_calendar(day.year)
+        return json.dumps(data).encode()
+
+    @staticmethod
+    def tennis_board(data: Dict[str, Any], day: datetime.date, ids: List[str]) -> bytes:
+        """A tennis day (sb_atp.json's shape): one tournament, its singles matches that day, every one final."""
+        event = data["events"][0]
+        singles = next(g for g in event["groupings"] if g["grouping"]["slug"] == "mens-singles")
+        proto = singles["competitions"][0]
+        singles["competitions"] = []
+        for match_id in ids:
+            match = copy.deepcopy(proto)
+            match.update({"id": match_id, "date": f"{day}T15:00Z", "startDate": f"{day}T15:00Z"})
+            match["status"]["type"] = dict(FINAL)
+            singles["competitions"].append(match)
+        event["groupings"] = [singles]
+        data["events"] = [event] if ids else []
         return json.dumps(data).encode()
 
     # -- what was asked --
@@ -283,9 +319,10 @@ def days(first: datetime.date, last: datetime.date) -> List[str]:
 # --- season windows and scope ------------------------------------------------------------------------------------
 
 def test_the_season_windows_follow_the_real_calendars() -> None:
-    assert bf.ORDER == (NBA, NFL, "soccer_epl", "soccer_efl_champ", "soccer_spain_la_liga",
-                        "soccer_germany_bundesliga", "soccer_italy_serie_a", "soccer_france_ligue_one", "soccer_spl",
-                        "soccer_netherlands_eredivisie", "soccer_portugal_primeira_liga", UCL, NHL, UFC, MLB)
+    assert bf.ORDER[:15] == bf.WAVES_1_2 == (
+        NBA, NFL, "soccer_epl", "soccer_efl_champ", "soccer_spain_la_liga", "soccer_germany_bundesliga",
+        "soccer_italy_serie_a", "soccer_france_ligue_one", "soccer_spl", "soccer_netherlands_eredivisie",
+        "soccer_portugal_primeira_liga", UCL, NHL, UFC, MLB)
     assert set(bf.WINDOWS) == set(bf.ORDER)
 
     def inside(league: str, season: int, *moments: Tuple[int, int, int]) -> None:
@@ -335,10 +372,11 @@ def test_the_scope_is_the_season_being_played_and_the_last_three_completed() -> 
     env_units = RawBackfill(SimpleNamespace(), PoliteHttp(), lambda: NOW).units()
     assert [(u.tier, u.rank) for u in env_units] == sorted((u.tier, u.rank) for u in env_units)
     assert [(u.league, u.season) for u in env_units[:3]] == [(NBA, 2026), (NFL, 2026), ("soccer_epl", 2026)]
-    assert [(u.league, u.season) for u in env_units[15:17]] == [(NBA, 2025), (NFL, 2025)]
-    assert len(env_units) == 15 * 4
-    with pytest.raises(ValueError):
-        RawBackfill(SimpleNamespace(), PoliteHttp(), lambda: NOW, leagues=["basketball_ncaab"])
+    assert [(u.league, u.season) for u in env_units[58:60]] == [(NBA, 2025), (NFL, 2025)]  # after every newest one
+    assert len([u for u in env_units if u.league in bf.WAVES_1_2]) == 15 * 4
+    assert {sum(u.league == league for u in env_units) for league in bf.ORDER} == {3, 4}  # 3: none being played
+    with pytest.raises(ValueError):  # a tennis tournament's own key is not one of the 58 paths (its tour is)
+        RawBackfill(SimpleNamespace(), PoliteHttp(), lambda: NOW, leagues=["tennis_atp_paris_masters"])
 
 
 def test_the_projected_total_is_logged_once(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
@@ -351,14 +389,299 @@ def test_the_projected_total_is_logged_once(monkeypatch: pytest.MonkeyPatch, cap
     lines = [r.getMessage() for r in caplog.records if "projected" in r.getMessage()]
     assert len(lines) == 1 and "requests" in lines[0] and "GB" in lines[0]
     found = first.projection()
-    # About 85,000 requests of summaries and core plays plus the one-day boards (~14,000), about 4 GB
-    assert 90_000 <= found["requests"] <= 110_000 and 3.5 <= found["gb"] <= 4.5, found
+    # Waves 1-2: about 85,000 requests of summaries and core plays plus the one-day boards (~14,000), about 4 GB
+    early = [found["waves"][1], found["waves"][2]]
+    requests = sum(wave["requests"] for wave in early)
+    assert 90_000 <= requests <= 110_000 and 3.5 <= sum(wave["gb"] for wave in early) <= 4.5, found
     assert set(found["leagues"]) == set(bf.ORDER)
-    assert all(entry["seasons"] == 4 for entry in found["leagues"].values())
-    assert 15 <= found["nights"] <= 19  # at 6,000 a night
+    assert all(entry["seasons"] == 4 for league, entry in found["leagues"].items() if league in bf.WAVES_1_2)
+    assert 15 <= sum(wave["nights"] for wave in early) <= 19  # at 6,000 a night
     soccer = sum(found["leagues"][league]["requests"] for league in bf.PLAYS_LEAGUES)
-    assert soccer > found["requests"] / 2  # core plays are most of it
+    assert soccer > requests / 2  # core plays are most of it
     assert str(f"{found['requests']:,}") in lines[0]
+
+
+# --- wave 3: every other ESPN path (v4 P1b) -----------------------------------------------------------------------
+
+MLS, ATP, WTA = "soccer_usa_mls", "tennis_atp", "tennis_wta"
+EASTERN = bf.EASTERN
+
+
+def test_the_order_lists_every_one_of_the_58_paths_once_wave_3_after_waves_1_and_2() -> None:
+    assert bf.ORDER == bf.WAVES_1_2 + bf.WAVE3 and bf.WAVES_1_2 == plan.WAVE1 + plan.WAVE2
+    assert bf.WAVE3 == (
+        "basketball_ncaab", "americanfootball_ncaaf", "basketball_wnba", "soccer_uefa_europa_league", MLS,
+        "soccer_mexico_ligamx", "soccer_brazil_campeonato", "soccer_argentina_primera_division",
+        "soccer_turkey_super_league", "soccer_belgium_first_div", "soccer_uefa_europa_conference_league",
+        "soccer_conmebol_copa_libertadores", "soccer_saudi_arabia_pro_league", "soccer_japan_j_league",
+        "soccer_australia_aleague", "soccer_austria_bundesliga", "soccer_switzerland_superleague",
+        "soccer_denmark_superliga", "soccer_greece_super_league", "soccer_norway_eliteserien",
+        "soccer_sweden_allsvenskan", "soccer_russia_premier_league", "soccer_chile_campeonato",
+        "soccer_spain_segunda_division", "soccer_italy_serie_b", "soccer_germany_bundesliga2",
+        "soccer_france_ligue_two", "soccer_england_league1", "soccer_england_league2", "soccer_brazil_serie_b",
+        "soccer_conmebol_copa_sudamericana", "soccer_england_efl_cup", "soccer_germany_dfb_pokal",
+        "soccer_uefa_nations_league", "soccer_uefa_champs_league_women", "soccer_sweden_superettan",
+        "soccer_finland_veikkausliiga", "soccer_league_of_ireland", "basketball_wncaab", "americanfootball_cfl",
+        "basketball_nbl", ATP, WTA)
+    assert len(bf.ORDER) == len(set(bf.ORDER)) == len(plan.PATHS) == 58 and sorted(bf.ORDER) == sorted(plan.PATHS)
+    assert [bf.wave_of(league) for league in bf.ORDER] == [1] * 12 + [2] * 3 + [3] * 43
+    assert set(bf.WINDOWS) == set(bf.GAMES) == set(bf.ORDER) and set(bf.PLAIN) == set(bf.CALENDAR_LEAGUES) == \
+        set(bf.WAVE3)
+    # The walk takes every league's newest season in that order, and the default scope is all 58
+    backfill = RawBackfill(SimpleNamespace(), PoliteHttp(), lambda: NOW)
+    assert backfill.leagues == bf.ORDER and [u.league for u in backfill.units() if u.tier == 0] == list(bf.ORDER)
+
+
+def test_wave_3s_tight_windows_hold_its_real_seasons() -> None:
+    def inside(league: str, season: int, *moments: Tuple[int, int, int]) -> None:
+        first, last = bf.season_dates(league, season)
+        for moment in moments:
+            assert first <= datetime.date(*moment) <= last, (league, season, moment)
+
+    inside("basketball_ncaab", 2025, (2025, 11, 3), (2026, 4, 6))   # opening night; the title game
+    inside("basketball_wncaab", 2025, (2025, 11, 3), (2026, 4, 5))
+    inside("americanfootball_ncaaf", 2025, (2025, 8, 23), (2026, 1, 19))  # Week 0; the CFP final
+    inside("basketball_wnba", 2025, (2025, 5, 16), (2025, 10, 10))  # opening night; the Finals' last game
+    inside("americanfootball_cfl", 2025, (2025, 6, 5), (2025, 11, 16))  # Week 1; the Grey Cup
+    inside("basketball_nbl", 2025, (2025, 9, 18), (2026, 3, 15))
+    inside(MLS, 2025, (2025, 2, 22), (2025, 12, 6))                  # opening day; MLS Cup
+    inside("soccer_brazil_campeonato", 2026, (2026, 1, 28))          # 2026 opened in January
+    inside("soccer_brazil_campeonato", 2025, (2025, 3, 29), (2025, 12, 7))
+    inside("soccer_japan_j_league", 2025, (2025, 2, 14), (2025, 12, 6))
+    inside("soccer_mexico_ligamx", 2023, (2023, 6, 30), (2024, 5, 26))  # an Apertura from 30 June
+    inside("soccer_uefa_europa_conference_league", 2022, (2023, 6, 7))
+    inside("soccer_uefa_nations_league", 2022, (2023, 6, 18))       # the 2023 final
+    inside("soccer_spain_segunda_division", 2024, (2024, 8, 15), (2025, 6, 22))  # the play-off final
+    inside("soccer_australia_aleague", 2022, (2022, 10, 7), (2023, 6, 3))  # the 2023 grand final
+    inside("soccer_conmebol_copa_libertadores", 2025, (2025, 2, 5), (2025, 11, 29))
+    inside(ATP, 2025, (2025, 1, 1), (2025, 11, 16))                  # the ATP Finals' final
+    # Tight: never longer than the plain window of its kind (calendar year, August-May, ...) by more than the July
+    # openers and June finals the plain August-May one would miss, and together much shorter
+    tight = plain = 0
+    for league in bf.WAVE3:
+        first, last = bf.season_dates(league, 2025)
+        p_first, p_last = bf._window_days(bf.PLAIN[league], 2025)
+        tight, plain = tight + (last - first).days + 1, plain + (p_last - p_first).days + 1
+        assert (last - first).days <= (p_last - p_first).days + 40, league
+    assert tight < plain - 1000
+
+
+def test_espns_calendar_on_the_audits_boards() -> None:
+    day = datetime.date
+    # Soccer: a whitelist of match days inside a June-June season (sb_epl.json: 2026-27 opens on 21 August)
+    assert bf.calendar_bound(load("sb_epl.json")) == (day(2026, 6, 1), day(2027, 5, 31), day(2026, 8, 21),
+                                                      day(2027, 5, 30))
+    # Basketball: the days with games so far (the NBA's 2026-27 regular season: its play-offs aren't listed yet)
+    assert bf.calendar_bound(load("sb_nba.json")) == (day(2026, 9, 30), day(2027, 6, 26), day(2026, 10, 3),
+                                                      day(2027, 4, 11))
+    # Football: a list of season parts with their dates, the off season left out
+    nfl = bf.calendar_bound(load("sb_nfl.json"))
+    assert nfl is not None and nfl[:3] == (day(2026, 8, 6), day(2027, 2, 16), day(2026, 8, 6))
+    assert day(2027, 2, 7) <= nfl[3] <= day(2027, 2, 16)
+    through_summer = load("sb_nfl.json")  # a season whose dates run on through its off season: still no game day
+    through_summer["leagues"][0]["season"]["endDate"] = "2027-08-01T06:59Z"
+    assert bf.calendar_bound(through_summer)[1:] == (day(2027, 8, 1), day(2026, 8, 6), nfl[3])
+    # A calendar of days without games (MLB's is no whitelist): the season's own dates
+    assert bf.calendar_bound(load("sb_mlb.json")) == (day(2026, 2, 19), day(2026, 11, 12), day(2026, 2, 19),
+                                                      day(2026, 11, 12))
+    assert bf.calendar_bound(load("sb_atp.json"))[2:] == (day(2026, 1, 1), day(2026, 11, 14))
+    assert bf.calendar_bound({"leagues": [{"calendar": ["2026-08-21T07:00Z"]}]}) is None  # no season dates
+    assert bf.calendar_bound({"events": []}) is None and bf.calendar_bound(None) is None
+
+
+def test_the_calendar_trims_only_days_it_shows_have_no_game() -> None:
+    d = datetime.date
+    season = (d(2025, 1, 1), d(2025, 12, 31), d(2025, 2, 22), d(2025, 12, 6))
+    assert bf.bounded_span(d(2025, 2, 15), d(2025, 12, 15), season) == (d(2025, 2, 22), d(2025, 12, 6))
+    iso = [part.isoformat() for part in season]  # as a cursor keeps it
+    assert bf.bounded_span(d(2025, 2, 15), d(2025, 12, 15), iso) == (d(2025, 2, 22), d(2025, 12, 6))
+    # A season still being played: the tail is the newest settled day, whatever the calendar listed then
+    assert bf.bounded_span(d(2025, 2, 15), d(2025, 12, 15), season, tail=False) == (d(2025, 2, 22), d(2025, 12, 15))
+    # Days outside the calendar's season are another season's: kept
+    autumn = (d(2025, 8, 1), d(2026, 1, 31), d(2025, 8, 9), d(2026, 1, 20))  # an Apertura-only season
+    assert bf.bounded_span(d(2025, 6, 25), d(2026, 5, 31), autumn) == (d(2025, 6, 25), d(2026, 5, 31))
+    assert bf.bounded_span(d(2025, 8, 1), d(2026, 5, 31), autumn) == (d(2025, 8, 9), d(2026, 5, 31))
+    # A window wholly without games is empty; a bound that can't be read leaves the window
+    first, last = bf.bounded_span(d(2025, 12, 10), d(2025, 12, 15), season)
+    assert last < first
+    assert bf.bounded_span(d(2025, 2, 15), d(2025, 12, 15), ["junk"]) == (d(2025, 2, 15), d(2025, 12, 15))
+
+
+def utc_text(day: datetime.date, hour: int, minute: int = 0) -> str:
+    moment = datetime.datetime.combine(day, datetime.time(hour, minute), EASTERN).astimezone(UTC)
+    return moment.strftime("%Y-%m-%dT%H:%MZ")
+
+
+def whitelist(first: datetime.date, last: datetime.date, game_days: List[datetime.date]) -> Dict[str, Any]:
+    """A board's ``leagues[0]`` season (midnight to 23:59 US Eastern) and its days with games, as soccer's board
+    carries them (sb_epl.json)."""
+    return {"season": {"startDate": utc_text(first, 0), "endDate": utc_text(last, 23, 59)}, "calendarType": "day",
+            "calendarIsWhitelist": True, "calendar": [espn_time(day) for day in sorted(game_days)]}
+
+
+def mls_autumn(env: Env) -> Callable[[datetime.date], List[datetime.date]]:
+    """MLS in the fake world: two games every Saturday from 10 October to 15 November, a calendar-year season whose
+    calendar lists those Saturdays."""
+    def saturdays(year: int) -> List[datetime.date]:
+        day, out = datetime.date(year, 10, 10), []
+        while day <= datetime.date(year, 11, 15):
+            out += [day] if day.weekday() == 5 else []
+            day += datetime.timedelta(days=1)
+        return out
+
+    env.world.schedule[MLS] = lambda day: 2 if day in saturdays(day.year) else 0
+    env.world.calendars[MLS] = lambda day: whitelist(datetime.date(day.year, 1, 1), datetime.date(day.year, 12, 31),
+                                                     saturdays(day.year))
+    return lambda day: event_ids(MLS, day, env.world.schedule[MLS](day))
+
+
+def test_a_wave_3_season_reads_only_the_days_its_espn_calendar_holds(tmp_path: Path, short: Any) -> None:
+    short(((10, 1), (11, 30)), MLS)  # 2026: 1-30 October so far; 2025: 1 October - 30 November
+    env = Env(tmp_path, [MLS], seasons=1)
+    games = mls_autumn(env)
+    report = env.backfill().run_night()
+    assert report["stopped"] == "done", report
+    boards = [what for kind, _league, what, _host, _ts in env.world.calls if kind == "board"]
+    d = datetime.date
+    # 2026, being played: the middle day's board first (its calendar), then 10-30 October newest first: the days
+    # before the first Saturday with games are left out, the newest settled day is still the top
+    first_season = ["20261015"] + [day for day in days(d(2026, 10, 10), d(2026, 10, 30))[::-1] if day != "20261015"]
+    # 2025, completed: its middle day's board, then only its Saturdays' span, 11 October - 15 November
+    second = ["20251031"] + [day for day in days(d(2025, 10, 11), d(2025, 11, 15))[::-1] if day != "20251031"]
+    assert boards == first_season + second  # each board once: the probe's comes back from raw.db
+    assert len(boards) == 21 + 36 < 30 + 61  # 34 empty days not paid for
+    summaries = sorted(what for kind, _l, what, _h, _t in env.world.calls if kind == "summary")
+    expected = [i for first, last in ((d(2026, 10, 1), d(2026, 10, 30)), (d(2025, 10, 1), d(2025, 11, 30)))
+                for n in range((last - first).days + 1) for i in games(first + datetime.timedelta(days=n))]
+    assert summaries == sorted(expected) and len(expected) == 6 + 12  # every game, none twice
+    progress = {row["season"]: row for row in env.raw.progress()}
+    assert progress[2025]["done"] is True and progress[2026]["done"] is False
+    assert progress[2025]["games_stored"] == 12 and progress[2026]["games_stored"] == 6
+    assert progress[2025]["cursor"]["bound"] == ["2025-01-01", "2025-12-31", "2025-10-11", "2025-11-15"]
+    assert progress[2025]["cursor"]["bound_current"] is False and progress[2026]["cursor"]["bound_current"] is True
+    # The next night: 31 October has settled (a Saturday with games): read, then nothing more
+    env.clock.ts = at(2026, 11, 2, 2, 0)
+    calls = len(env.world.calls)
+    assert env.backfill().run_night()["stopped"] == "done"
+    assert [call[2] for call in env.world.calls[calls:]] == ["20261031"] + games(d(2026, 10, 31))
+
+
+def test_without_a_calendar_a_wave_3_season_keeps_its_tight_window(tmp_path: Path, short: Any) -> None:
+    short(((10, 1), (10, 20)), MLS)  # 2026: 1-20 October, completed
+    env = Env(tmp_path, [MLS], seasons=1)
+    env.world.calendars[MLS] = lambda day: None  # a board with neither season dates nor a calendar
+    assert env.backfill().run_night()["stopped"] == "done"
+    boards = [what for kind, _l, what, _h, _t in env.world.calls if kind == "board"]
+    every = days(datetime.date(2026, 10, 1), datetime.date(2026, 10, 20))
+    assert boards[0] == "20261010" and sorted(boards) == every  # the probe, then the whole window, each day once
+    assert env.raw.progress()[0]["cursor"]["bound"] == [] and env.raw.progress()[0]["done"] is True
+
+
+def test_a_calendar_board_espn_refuses_leaves_the_window_and_an_outage_waits(tmp_path: Path, short: Any) -> None:
+    short(((10, 1), (11, 30)), MLS)
+    env = Env(tmp_path, [MLS], seasons=1, name="refused.db")
+    mls_autumn(env)
+    env.world.fail[("board", "20261015")] = [404] * bf.ITEM_TRIES  # the 2026 probe: ESPN refuses it three times
+    env.world.fail[("board", "20251031")] = [503]                    # the 2025 probe: an outage, once
+    first = env.backfill().run_night()
+    assert first["stopped"] == "backoff" and first["deferred"] == 1, first
+    boards = [what for kind, _l, what, _h, _t in env.world.calls if kind == "board"]
+    assert boards[:3] == ["20261015"] * 3 and sorted(boards[3:-1]) == days(datetime.date(2026, 10, 1),
+                                                                           datetime.date(2026, 10, 30))
+    assert boards[-1] == "20251031"  # 2026 read its whole window; 2025 waits for its calendar
+    progress = {row["season"]: row for row in env.raw.progress()}
+    assert progress[2026]["cursor"]["bound"] == [] and "bound" not in progress[2025]["cursor"]
+    assert progress[2025]["done"] is False and progress[2025]["cursor"]["bound_wait"][1] == 1
+    env.clock.ts += bf.RETRY_WAIT + 60  # the wait is over: the calendar is read, then only its span
+    calls = len(env.world.calls)
+    assert env.backfill().run_night()["stopped"] == "done"
+    again = [what for kind, _l, what, _h, _t in env.world.calls[calls:] if kind == "board"]
+    assert again == ["20251031"] + [day for day in days(datetime.date(2025, 10, 11), datetime.date(2025, 11, 15))[::-1]
+                                    if day != "20251031"]
+    # An outage that outlasts PROBE_WAITS waits leaves the plain window too
+    env2 = Env(tmp_path, [MLS], seasons=1, name="outage.db")
+    mls_autumn(env2)
+    env2.world.fail[("board", "20251031")] = [503] * bf.PROBE_WAITS
+    for _ in range(bf.PROBE_WAITS):  # a night each: every wait (at most RETRY_WAIT_CAP) is over by the next
+        env2.backfill().run_night()
+        env2.clock.ts += 86400.0
+    cursor = {row["season"]: row for row in env2.raw.progress()}[2025]["cursor"]
+    assert cursor["bound"] == [] and "bound_wait" not in cursor
+
+
+def test_tennis_reads_day_boards_only_and_counts_their_matches_from_them(tmp_path: Path, short: Any) -> None:
+    short(((10, 20), (11, 5)), ATP, WTA)  # 2026: 20-30 October so far; 2025: 20 October - 5 November
+    env = Env(tmp_path, [ATP, WTA], seasons=1)
+    report = env.backfill().run_night()
+    assert report["stopped"] == "done", report
+    assert {call[0] for call in env.world.calls} == {"board"}  # no summary, no core page: no per-match fetch
+    spans = ((datetime.date(2026, 10, 20), datetime.date(2026, 10, 30)),
+             (datetime.date(2025, 10, 20), datetime.date(2025, 11, 5)))
+    for league in (ATP, WTA):
+        read = [what for kind, lg, what, _h, _t in env.world.calls if lg == league]
+        assert sorted(read) == sorted(days(*spans[0]) + days(*spans[1])), league  # each day once
+    assert {row[2:4] for row in env.rows()} == {("espn_site", "scoreboard")}
+    assert {row[0] for row in env.rows()} == {scoreboard_key(league, what) for _k, league, what, _h, _t
+                                              in env.world.calls}
+    # The day's board is its matches' record: every finished singles match on it is seen and stored
+    for row in env.raw.progress():
+        first, last = spans[0] if row["season"] == 2026 else spans[1]
+        matches = sum(games_on(row["league"], first + datetime.timedelta(days=n))
+                      for n in range((last - first).days + 1))
+        assert row["games_seen"] == row["games_stored"] == matches > 0, row
+        assert row["done"] is (row["season"] == 2025)
+
+
+def test_the_projection_counts_each_wave_and_logs_them_once(monkeypatch: pytest.MonkeyPatch,
+                                                            caplog: pytest.LogCaptureFixture, tmp_path: Path) -> None:
+    monkeypatch.setattr(bf, "_projected", False)
+    raw = RawStore(str(tmp_path / "raw.db"))
+    with caplog.at_level(logging.INFO, logger=bf.__name__):
+        backfill = RawBackfill(raw, PoliteHttp(), lambda: NOW)
+    [line] = [r.getMessage() for r in caplog.records if "projected" in r.getMessage()]
+    found = backfill.projection()
+    waves = found["waves"]
+    assert [waves[wave]["leagues"] for wave in (1, 2, 3)] == [12, 3, 43]
+    assert sum(waves[wave]["requests"] for wave in (1, 2, 3)) == found["requests"]
+    assert abs(sum(waves[wave]["gb"] for wave in (1, 2, 3)) - found["gb"]) <= 0.02
+    assert waves[1]["requests"] + waves[2]["requests"] == sum(n for n, _mb in PROJECTED_BEFORE_WAVE3.values())
+    # Wave 3: about 115,000 requests (college basketball's ~5,800 games a season most of it), about 3 GB
+    assert 100_000 <= waves[3]["requests"] <= 130_000 and 2.5 <= waves[3]["gb"] <= 3.5, waves
+    assert waves[3]["nights"] == round(waves[3]["requests"] / 6000, 1) and found["nights"] == \
+        round(found["requests"] / 6000, 1)
+    for wave in (1, 2, 3):
+        entry = waves[wave]
+        assert f"wave {wave} ({entry['leagues']} leagues) {entry['requests']:,} requests {entry['gb']:.2f} GB, " \
+               f"about {entry['nights']} nights" in line
+    assert f"projected {found['requests']:,} requests" in line and f"save {found['saved']:,} requests" in line
+    # Tennis: its day boards only; college basketball at 35 KB a game (plan section 9.4), the NBA at 60
+    units = backfill.units()
+    atp_days = sum((u.last - u.first).days + 1 for u in units if u.league == ATP)
+    assert found["leagues"][ATP]["requests"] == atp_days
+    assert abs(found["leagues"][ATP]["mb"] - atp_days * bf.BOARD_KB["tennis"] / 1024) <= 0.1
+    ncaab = found["leagues"]["basketball_ncaab"]
+    ncaab_days = sum((u.last - u.first).days + 1 for u in units if u.league == "basketball_ncaab")
+    assert abs(ncaab["mb"] - (ncaab_days * 15 + 3 * 5800 * 35) / 1024) <= 0.1  # 3 whole seasons, none being played
+    # Saved: the plain windows' days the tight windows leave out (no calendar read yet)
+    settled = bf.settled_day(NOW)
+
+    def span(first: datetime.date, last: datetime.date) -> set:
+        return {first + datetime.timedelta(days=n) for n in range((last - first).days + 1)}
+
+    saved = 0
+    for u in units:
+        if u.league in bf.WAVE3:
+            plain = span(*bf._window_days(bf.PLAIN[u.league], u.season))
+            saved += len({day for day in plain if not u.current or day <= settled} - span(u.first, u.last))
+    assert found["saved"] == saved > 5000
+    # Once a season's calendar is read, its bounded days count instead
+    mls = next(u for u in units if u.league == MLS and not u.current)
+    bound = [mls.first.isoformat(), mls.last.isoformat(), (mls.first + datetime.timedelta(days=10)).isoformat(),
+             (mls.last - datetime.timedelta(days=5)).isoformat()]
+    raw.set_cursor(MLS, mls.season, {"v": bf.CURSOR_VERSION, "bound": bound, "bound_current": False}, now=NOW)
+    again = backfill.projection()
+    assert again["leagues"][MLS]["requests"] == found["leagues"][MLS]["requests"] - 15
+    assert again["saved"] == found["saved"] + 15 and again["requests"] == found["requests"] - 15
 
 
 # --- the walk: windows, order, kinds ---------------------------------------------------------------------------------
@@ -405,10 +728,24 @@ def test_a_window_is_seven_one_day_boards_newest_first_then_its_games(tmp_path: 
     assert [call[2] for call in env.world.calls[calls:] if call[0] == "board"] == ["20261031"]
 
 
-def test_newest_season_first_in_wave_order_across_every_league(tmp_path: Path, short: Any) -> None:
-    short(((10, 27), (11, 2)))  # 2026: 27-30 Oct (being played); 2025, 2024, 2023: a week each
-    env = Env(tmp_path, list(bf.ORDER))
-    report = env.backfill().run_night()
+@pytest.fixture(scope="module")
+def every_path(tmp_path_factory: pytest.TempPathFactory) -> SimpleNamespace:
+    """One night's walk over all 58 paths, each with a short season (27 October - 2 November): 2026 being played
+    (27-30 October) and 2025, 2024 and 2023 completed (the order and the waves 1-2 pin below read it)."""
+    mp = pytest.MonkeyPatch()
+    try:
+        mp.setattr(raw_store.shutil, "disk_usage", lambda path: DiskUsage(100e9, 10e9, 90e9))
+        for league in bf.ORDER:
+            mp.setitem(bf.WINDOWS, league, ((10, 27), (11, 2)))
+        env = Env(tmp_path_factory.mktemp("every_path"), list(bf.ORDER))
+        report = env.backfill().run_night()
+    finally:
+        mp.undo()
+    return SimpleNamespace(env=env, report=report)
+
+
+def test_newest_season_first_in_wave_order_across_every_league(every_path: SimpleNamespace) -> None:
+    env, report = every_path.env, every_path.report
     assert report["stopped"] == "done", report
     order = {league: rank for rank, league in enumerate(bf.ORDER)}
 
@@ -425,15 +762,57 @@ def test_newest_season_first_in_wave_order_across_every_league(tmp_path: Path, s
             if league == UFC:
                 continue
             seen = [what for t, rank, what in units if t == tier and rank == order[league]]
+            if league in bf.CALENDAR_LEAGUES:  # wave 3 reads its calendar first, from its middle day's board
+                probe, seen = seen[0], seen[1:]
+                assert probe not in seen and seen[-1] < probe < seen[0], (league, tier)
             assert seen == sorted(seen, reverse=True) and seen, (league, tier)  # newest day first
     # Only ESPN and nflverse's GitHub: never The Odds API, never MLB StatsAPI
     hosts = [call[3] for call in env.world.calls]
     assert set(hosts) <= ESPN_HOSTS | {"github.com"} and "api.the-odds-api.com" not in hosts
-    # Wave 1 (NBA, NFL, the ten soccer leagues) before wave 2 (NHL, UFC, MLB) within a season
-    first_wave2 = next(i for i, call in enumerate(env.world.calls) if call[1] in (NHL, UFC, MLB))
-    last_wave1_2026 = max(i for i, call in enumerate(env.world.calls)
-                          if call[1] not in (NHL, UFC, MLB) and call[0] == "board" and call[2].startswith("2026"))
-    assert last_wave1_2026 < first_wave2
+    # Wave 1 (NBA, NFL, the ten soccer leagues), then wave 2 (NHL, UFC, MLB), then wave 3 within each season
+    for year in ("2026", "2025", "2024", "2023"):
+        at_ = [(bf.wave_of(call[1]), i) for i, call in enumerate(env.world.calls)
+               if call[0] == "board" and call[2].startswith(year)]
+        assert [wave for wave, _i in at_] == sorted(wave for wave, _i in at_), year
+        assert {wave for wave, _i in at_} == {1, 2, 3}
+
+
+def digest(found: Any) -> str:
+    return hashlib.sha256(json.dumps(found).encode()).hexdigest()
+
+
+# Waves 1-2 before wave 3 (head f02f12a): the every_path night with only their 15 leagues (its requests, in order,
+# the rows they stored and their progress), their seasons and the projection's figures with the real windows
+BEFORE_WAVE3 = {"calls": 598, "requests": "efb00eeac3cc6d2b5dce597acb3ff7a08d6275281c754f2ef218cab0470d7796",
+                "rows": "e46220edc08fa8c0c3d7cde0c19506a460bb37aab28812c659f8dc0ab8357ea2",
+                "progress": "b9e54b6d8fa0d0e13fc8ab017a7988d30ccc8deee8151f3b6784ab7e77dd9d8b",
+                "units": "a5d6c93bdd8c0298316792c3a0cca64cf61c6b41d4b073f7cfd3bbbc8dfaa329"}
+PROJECTED_BEFORE_WAVE3 = {
+    "basketball_nba": (5173, 265.7), "americanfootball_nfl": (1540, 143.6), "soccer_epl": (8526, 278.4),
+    "soccer_efl_champ": (12030, 406.7), "soccer_spain_la_liga": (8526, 278.4),
+    "soccer_germany_bundesliga": (7101, 226.2), "soccer_italy_serie_a": (8526, 278.4),
+    "soccer_france_ligue_one": (7101, 226.2), "soccer_spl": (5518, 168.2),
+    "soccer_netherlands_eredivisie": (7062, 224.8), "soccer_portugal_primeira_liga": (7062, 224.8),
+    "soccer_uefa_champs_league": (4563, 135.9), "icehockey_nhl": (5204, 246.3), UFC: (402, 9.4),
+    "baseball_mlb": (11297, 926.8)}
+
+
+def test_waves_1_and_2_ask_for_exactly_what_they_did_before_wave_3(every_path: SimpleNamespace) -> None:
+    env = every_path.env
+    calls = [[kind, league, what] for kind, league, what, _host, _ts in env.world.calls if league in bf.WAVES_1_2]
+    rows = [list(map(str, row)) for row in env.rows() if row[1] in bf.WAVES_1_2]
+    progress = sorted((row["league"], row["season"], row["done"], row["games_seen"], row["games_stored"])
+                      for row in env.raw.progress() if row["league"] in bf.WAVES_1_2)
+    assert len(calls) == BEFORE_WAVE3["calls"] and digest(calls) == BEFORE_WAVE3["requests"]
+    assert digest(rows) == BEFORE_WAVE3["rows"] and digest(progress) == BEFORE_WAVE3["progress"]
+    assert {call[1] for call in env.world.calls} == set(bf.ORDER)  # while wave 3 was walked in the same night
+    backfill = RawBackfill(SimpleNamespace(), PoliteHttp(), lambda: NOW)
+    units = [[u.league, u.season, u.first.isoformat(), u.last.isoformat(), u.current, u.tier, u.rank]
+             for u in backfill.units() if u.league in bf.WAVES_1_2]
+    assert len(units) == 60 and digest(units) == BEFORE_WAVE3["units"]
+    found = backfill.projection()["leagues"]
+    assert {league: (found[league]["requests"], found[league]["mb"]) for league in bf.WAVES_1_2} == \
+        PROJECTED_BEFORE_WAVE3 and all(found[league]["seasons"] == 4 for league in bf.WAVES_1_2)
 
 
 def test_every_kind_is_kept_raw_under_its_game_key(tmp_path: Path, short: Any) -> None:

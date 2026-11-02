@@ -125,9 +125,10 @@ SUMMARY_OF = {"basketball": "sum_nba.json", "football": "sum_nfl.json", "hockey"
               "baseball": "sum_mlb.json", "soccer": "sum_epl.json"}
 PLAY_PAGES = 2
 GAME_PK = 777079  # syn_feed_live.json's gamePk; the MLB schedule maps the recorded day's game to it
-# The backfill's fake seasons: a short window (25-31 October) of every year, a few games a week
+# The backfill's fake seasons: a short window (25-31 October) of every year, a few games a week, for the wave 1-2
+# leagues (wave 3's walk has its own tests: tests/test_capture_backfill.py)
 WINDOW = ((10, 25), (10, 31))
-CODE = {league: 10 + n for n, league in enumerate(bf.ORDER)}
+CODE = {league: 10 + n for n, league in enumerate(bf.WAVES_1_2)}
 
 
 def sport_of(league: str) -> str:
@@ -916,6 +917,7 @@ def _three_nights(tmp: Path, mp: pytest.MonkeyPatch) -> SimpleNamespace:
     mp.setattr(urllib.request, "urlopen", refuse)
     mp.setattr(urllib.request.OpenerDirector, "open", refuse)
     mp.setattr(bf, "_projected", True)
+    mp.setattr(bf, "ORDER", bf.WAVES_1_2)  # the backfill of the wave 1-2 leagues, as the run's world has them
     for league in bf.ORDER:
         mp.setitem(bf.WINDOWS, league, WINDOW)
     mp.setenv("CAPTURE_BACKFILL_PER_NIGHT", str(PER_NIGHT))
@@ -985,7 +987,7 @@ def _three_nights(tmp: Path, mp: pytest.MonkeyPatch) -> SimpleNamespace:
 
 
 def test_the_night_backfill_walks_newest_season_first_in_wave_order(night: Any) -> None:
-    expected = [(league, season) for season in (2026, 2025, 2024) for league in bf.ORDER]
+    expected = [(league, season) for season in (2026, 2025, 2024) for league in bf.WAVES_1_2]
     walked: Dict[str, List[Tuple[str, int]]] = collections.defaultdict(list)  # night -> units in request order
     for ts, who, url in night.world.tags:
         unit = unit_of(url, night.world) if who == "backfill" else None
@@ -997,7 +999,7 @@ def test_the_night_backfill_walks_newest_season_first_in_wave_order(night: Any) 
     firsts = list(dict.fromkeys(walked["2026-11-01"]))
     assert firsts == [unit for unit in expected if unit in firsts] and firsts[0] == (NBA, 2026)
     everything = {unit for units in walked.values() for unit in units}
-    assert len(everything) >= 40 and {league for league, _s in everything} == set(bf.ORDER)
+    assert len(everything) >= 40 and {league for league, _s in everything} == set(bf.WAVES_1_2)
     # within a season the newest day first: each unit's boards come newest first (the days a season still being
     # played settled later come after, as a new top)
     for unit in firsts:
@@ -1066,7 +1068,8 @@ def test_the_backfill_skips_what_forward_capture_stored(night: Any) -> None:
     assert not [url for url in backfill if "dates=20261030" in url or "dates=20261031" in url]
     assert any("dates=20261031" in url for url in forward)
     # 31 October's games (soccer, NHL, a UFC card) came by the sweep's jobs, and the backfill counted them stored
-    october31 = [f"espn:{eid}" for league in bf.ORDER for eid in backfill_games(league, datetime.date(2026, 10, 31))]
+    october31 = [f"espn:{eid}" for league in bf.WAVES_1_2
+                 for eid in backfill_games(league, datetime.date(2026, 10, 31))]
     assert october31 and all(night.raw.has_final(key) or night.raw.has_final(key, "espn_fightcenter", "fightcenter")
                              for key in october31)
 
@@ -1180,7 +1183,7 @@ def test_the_health_block_reports_coverage_size_disk_and_the_backfill_of_the_run
     assert block["http"]["errors"] == 0 and block["http"]["share"] == 0.0
     assert block["backfill_http"]["requests"] == len(backfill) and block["backfill_http"]["errors"] == 0
     # The backfill per league and season, in wave order, all done
-    assert [row["league"] for row in block["backfill"]] == list(bf.ORDER)
+    assert [row["league"] for row in block["backfill"]] == list(bf.WAVES_1_2)
     for row in block["backfill"]:
         assert row["begun"] == row["done"] == 3 and [s["season"] for s in row["seasons"]] == [2026, 2025, 2024]
         assert row["planned"] == 3  # the backfill's own scope: 3 completed seasons, none being played here
