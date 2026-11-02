@@ -42,6 +42,8 @@ const CSS = `
 .view-settings .st-row { display: flex; align-items: center; gap: 10px; min-height: var(--tap); }
 .view-settings .st-row + .st-row { border-top: 1px solid var(--line); }
 .view-settings .st-row > .icon { color: var(--text-2); }
+/* A link that is a row's text ("How the app works, in 60 seconds") fills the row: a 44 px tap target, not 19 px */
+.view-settings .st-row > a.grow { display: flex; align-items: center; min-height: var(--tap); }
 .view-settings .st-budget { padding: 12px; border-radius: 12px; background: var(--card-2); border: 1px solid var(--line); display: grid; gap: 8px; }
 .view-settings .st-budget .row-between b { font-size: 20px; font-weight: 800; }
 .view-settings .st-breaks { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }

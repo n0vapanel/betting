@@ -84,7 +84,7 @@ export function mountBuilder(root, { params, refresh }) {
 
   // --- the league tree (Today's component, in the Scope group or a sheet) -------------------------------
   const tree = createTree({
-    views: false, pins: false, countWords: "in your time window", only: "Only",
+    views: false, pins: false, countWords: "in your time window", only: "Only", pickEmpty: false,
     onSelect(selection) {
       // The container holding the tree isn't redrawn (the tree redraws itself and keeps the focus)
       const home = tree.el.closest("[data-bd-ctl]") || (more?.open && more.body.contains(tree.el) ? more.body : null);

@@ -16,9 +16,12 @@
 // Other screens reuse it (the Builder's "Sports" control): ``views: false`` leaves out the saved views row,
 // ``pins: false`` the "Pin your sports" button; ``countWords`` says what a league's count counts ("on the day
 // shown" on Today, "in your time window" in the Builder) and ``only`` is the verb of its name buttons
-// ("Show only" on Today, "Only" in the Builder).
+// ("Show only" on Today, "Only" in the Builder). ``pickEmpty: false`` (the Builder) makes the name button of a league
+// or sport with no games in the count aria-disabled: muted, saying "No games …", and a tap says so in a toast.
+// A name button whose leagues already are the whole selection is aria-pressed, as "All sports" is when every
+// sport is shown; a tap on it changes nothing, so it says so in a toast (Today still closes its drawer on a phone).
 
-import { esc } from "../../ui.js";
+import { esc, toast } from "../../ui.js";
 import { icon } from "../../icons.js";
 import { triState, groupName, groupIcon } from "./model.js";
 
@@ -34,7 +37,7 @@ let seq = 0;
 const liveHtml = (n) => (n ? `<span class="lt-live" title="${esc(`${n} live now`)}" aria-hidden="true"><span class="live-dot"></span>${esc(n)}</span>` : "");
 
 export function createTree({ onSelect, onPreset = () => {}, onSavePreset = () => {}, onDeletePreset = () => {}, onPin = () => {},
-  views = true, pins = true, countWords = "on the day shown", only = "Show only" }) {
+  views = true, pins = true, countWords = "on the day shown", only = "Show only", pickEmpty = true }) {
   const id = `lt${++seq}`;
   const el = document.createElement("div");
   el.className = "lt";
@@ -56,10 +59,10 @@ export function createTree({ onSelect, onPreset = () => {}, onSavePreset = () =>
     const saved = presets.map((p, i) => `<span class="lt-saved">${button({ key: `saved:${i}`, label: p.name })}<button type="button" class="lt-del" data-preset-del="${i}" aria-label="${esc(`Delete the saved view ${p.name}`)}" title="Delete">${icon("close", { size: 14 })}</button></span>`).join("");
     return `<div class="lt-presets" role="group" aria-label="Views">${builtIn.map(button).join("")}${saved}
         <button type="button" class="lt-preset lt-add" data-preset-save aria-expanded="false" aria-controls="${id}-save">${icon("plus", { size: 14 })}Save view</button></div>
-      <form class="lt-save" id="${id}-save" data-preset-form hidden>
+      <form class="lt-save" id="${id}-save" data-preset-form hidden novalidate>
         <label class="sr-only" for="${id}-name">Name for this view</label>
         <input id="${id}-name" class="input" name="name" maxlength="24" placeholder="Name this view" autocomplete="off" enterkeyhint="done" required>
-        <button type="submit" class="btn btn-primary small">Save</button>
+        <button type="submit" class="btn btn-primary small" data-preset-submit aria-disabled="true">Save</button>
       </form>`;
   }
 
@@ -69,14 +72,21 @@ export function createTree({ onSelect, onPreset = () => {}, onSavePreset = () =>
     return `${liveHtml(c.live)}<span class="odds-dot ${odds}" title="${esc(ODDS_WORDS[odds])}" aria-hidden="true"></span>`;
   }
 
+  /** A name button's state: pressed while its leagues are the whole selection; off (pickEmpty: false) with no games. */
+  const nameState = (keys, count, selection) => {
+    const pressed = Boolean(selection) && selection.size === keys.length && keys.every((k) => selection.has(k));
+    return `aria-pressed="${pressed}"${!pickEmpty && !count ? ' aria-disabled="true"' : ""}`;
+  };
+
   function leagueRow(entry, counts, selection, pinned) {
     const c = counts.get(entry.key) || { count: 0, live: 0 };
     const on = !selection || selection.has(entry.key);
     const week = last?.prepared.week.get(entry.key) || 0;
-    const words = [`${c.count} game${c.count === 1 ? "" : "s"} ${countWords}`, c.live ? `${c.live} live` : "", `${week} in the next 7 days`, ODDS_WORDS[entry.odds] || ODDS_WORDS.none].filter(Boolean).join(", ");
+    const first = !pickEmpty && !c.count ? `No games ${countWords}` : `${c.count} game${c.count === 1 ? "" : "s"} ${countWords}`;
+    const words = [first, c.live ? `${c.live} live` : "", `${week} in the next 7 days`, ODDS_WORDS[entry.odds] || ODDS_WORDS.none].filter(Boolean).join(", ");
     return `<li class="lt-row lt-league${c.count ? "" : " lt-zero"}" data-league="${esc(entry.key)}">
       <label class="lt-hit"><input type="checkbox" class="lt-box" data-lt-box="league" value="${esc(entry.key)}"${on ? " checked" : ""} aria-label="${esc(`Include ${entry.title}`)}"></label>
-      <button type="button" class="lt-name" data-only="${esc(entry.key)}" aria-label="${esc(`${only} ${entry.title}: ${words}`)}" title="${esc(words)}">
+      <button type="button" class="lt-name" data-only="${esc(entry.key)}" ${nameState([entry.key], c.count, selection)} aria-label="${esc(`${only} ${entry.title}: ${words}`)}" title="${esc(words)}">
         <span class="lt-text">${esc(entry.title)}${pinned.includes(entry.key) ? ` ${icon("star", { size: 12, className: "lt-pin", label: "pinned" })}` : ""}</span>
         <span class="lt-dots">${dots(entry, counts)}</span><span class="lt-n">${esc(c.count)}</span>
       </button>
@@ -102,7 +112,7 @@ export function createTree({ onSelect, onPreset = () => {}, onSavePreset = () =>
       return `<li class="lt-group" data-group="${esc(g.key)}">
         <div class="lt-row lt-grow">
           <label class="lt-hit"><input type="checkbox" class="lt-box" data-lt-box="group" data-group="${esc(g.key)}"${state === "on" ? " checked" : ""} data-mixed="${state === "mixed"}" aria-label="${esc(`Include all ${name}`)}"></label>
-          <button type="button" class="lt-name" data-only-group="${esc(g.key)}" aria-label="${esc(`${only} ${name}: ${count} game${count === 1 ? "" : "s"}${live ? `, ${live} live` : ""}`)}">
+          <button type="button" class="lt-name" data-only-group="${esc(g.key)}" ${nameState(keys, count, selection)} aria-label="${esc(`${only} ${name}: ${!pickEmpty && !count ? `No games ${countWords}` : `${count} game${count === 1 ? "" : "s"}`}${live ? `, ${live} live` : ""}`)}"${!pickEmpty && !count ? ` title="${esc(`No games ${countWords}`)}"` : ""}>
             <span class="lt-icon" aria-hidden="true">${esc(groupIcon(g.label))}</span><span class="lt-text">${esc(name)}</span>
             <span class="lt-dots">${liveHtml(live)}</span><span class="lt-n">${esc(count)}</span>
           </button>
@@ -132,6 +142,7 @@ export function createTree({ onSelect, onPreset = () => {}, onSavePreset = () =>
       const f = el.querySelector("[data-preset-form]");
       f.hidden = false;
       f.querySelector("input").value = typed;
+      f.querySelector("[data-preset-submit]").setAttribute("aria-disabled", String(!typed.trim()));
       el.querySelector("[data-preset-save]").setAttribute("aria-expanded", "true");
     }
     if (focusKey) el.querySelector(focusKey)?.focus({ preventScroll: true });
@@ -179,12 +190,23 @@ export function createTree({ onSelect, onPreset = () => {}, onSavePreset = () =>
     const t = event.target;
     const only = t.closest("[data-only]");
     if (only) {
-      onSelect(new Set([only.dataset.only]), { only: true });
+      const title = last?.prepared.leagues.get(only.dataset.only)?.title || "";
+      if (only.getAttribute("aria-disabled") === "true") noGames(title);
+      else {
+        if (only.getAttribute("aria-pressed") === "true") toast(`${title || "This league"} is already the only league picked`);
+        onSelect(new Set([only.dataset.only]), { only: true });
+      }
       return;
     }
     const group = t.closest("[data-only-group]");
     if (group) {
-      onSelect(normal(new Set(groupKeys(group.dataset.onlyGroup))), { only: true, group: group.dataset.onlyGroup });
+      const g = last?.prepared.groups.find((x) => x.key === group.dataset.onlyGroup);
+      const name = g ? groupName(g.label) : "";
+      if (group.getAttribute("aria-disabled") === "true") noGames(name);
+      else {
+        if (group.getAttribute("aria-pressed") === "true") toast(`${name || "This sport"} is already the only sport picked`);
+        onSelect(normal(new Set(groupKeys(group.dataset.onlyGroup))), { only: true, group: group.dataset.onlyGroup });
+      }
       return;
     }
     if (t.closest("[data-only-all]")) {
@@ -234,11 +256,27 @@ export function createTree({ onSelect, onPreset = () => {}, onSavePreset = () =>
     if (!form) return;
     event.preventDefault();
     const name = form.querySelector("input").value.trim().slice(0, 24);
-    if (!name) return;
+    if (!name) {
+      form.querySelector("input").focus(); // Save is off until there's a name: nothing to save yet
+      return;
+    }
     form.querySelector("input").value = "";
     form.hidden = true;
     onSavePreset(name);
+    const opener = el.querySelector("[data-preset-save]");
+    opener?.setAttribute("aria-expanded", "false");
+    if (!el.contains(document.activeElement) || document.activeElement.closest("[data-preset-form]")) opener?.focus({ preventScroll: true });
   });
+
+  el.addEventListener("input", (event) => {
+    const form = event.target.closest("[data-preset-form]");
+    form?.querySelector("[data-preset-submit]")?.setAttribute("aria-disabled", String(!event.target.value.trim()));
+  });
+
+  /** A tap on a name button with no games in the count: why nothing changes. */
+  function noGames(name) {
+    toast(`No ${name ? `${name} ` : ""}games ${countWords}`, { kind: "warn" });
+  }
 
   el.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && event.target.closest("[data-preset-form]")) {

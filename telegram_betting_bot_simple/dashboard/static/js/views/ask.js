@@ -424,9 +424,34 @@ function countText() {
   return n > MAX_MESSAGE - 200 ? `${n} / ${MAX_MESSAGE}` : "";
 }
 
+/** A selector that finds the same control in a box drawn again: its id, else its tag and data-* attributes. */
+function focusKey(el) {
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  const data = [...el.attributes].filter((a) => a.name.startsWith("data-"));
+  return data.length ? `${el.tagName.toLowerCase()}${data.map((a) => `[${a.name}="${CSS.escape(a.value)}"]`).join("")}` : null;
+}
+
+/**
+ * Draw a box again without losing the keyboard focus to the page: these boxes are redrawn when the sports list
+ * arrives, after a reply and on a slip change, maybe while the person is tabbing through them. The control that
+ * had the focus gets it back; one that is gone (a suggestion that was sent) hands it to the composer on a
+ * keyboard (on a phone that would raise the keyboard, so there it stays as the browser leaves it).
+ */
+function setBox(box, html) {
+  const active = document.activeElement;
+  const had = active && active !== box && box.contains(active);
+  const key = had ? focusKey(active) : null;
+  box.innerHTML = html;
+  if (!had || box.contains(document.activeElement)) return;
+  const usable = (el) => Boolean(el?.getClientRects().length) && !el.matches(":disabled");
+  const again = key && box.querySelector(key);
+  const next = usable(again) ? again : finePointer() ? $("#ask-text") : null;
+  if (usable(next)) next.focus({ preventScroll: true });
+}
+
 function drawCredits() {
   const box = $("[data-credits]");
-  if (box) box.innerHTML = creditsHtml();
+  if (box) setBox(box, creditsHtml());
 }
 
 function drawStatus() {
@@ -438,12 +463,12 @@ function drawRequest() {
   const box = $("[data-request]");
   if (!box) return;
   const reason = blockedReason();
-  box.innerHTML = reason === "off" ? "" : requestHtml(state.request, { open: requestOpen(), telegram: inTelegram, disabled: Boolean(reason) || busy() });
+  setBox(box, reason === "off" ? "" : requestHtml(state.request, { open: requestOpen(), telegram: inTelegram, disabled: Boolean(reason) || busy() }));
 }
 
 function drawThread() {
   const box = $("[data-thread]");
-  if (box) box.innerHTML = threadHtml();
+  if (box) setBox(box, threadHtml());
 }
 
 function drawDock() {
@@ -1366,13 +1391,13 @@ function updateRequestBits(changed) {
   if (summary) summary.textContent = requestSummary(state.request);
   if (changed === "stake" || changed === "all") {
     const box = $('[data-req-chips="stake"]');
-    if (box) box.innerHTML = amountChips("stake", STAKES, state.request.stake);
+    if (box) setBox(box, amountChips("stake", STAKES, state.request.stake));
     const targets = $('[data-req-chips="target"]');
-    if (targets) targets.innerHTML = amountChips("target", targetChoices(state.request.stake), state.request.target);
+    if (targets) setBox(targets, amountChips("target", targetChoices(state.request.stake), state.request.target));
   }
   if (changed === "target") {
     const targets = $('[data-req-chips="target"]');
-    if (targets) targets.innerHTML = amountChips("target", targetChoices(state.request.stake), state.request.target);
+    if (targets) setBox(targets, amountChips("target", targetChoices(state.request.stake), state.request.target));
   }
   const error = $("[data-req-error]");
   if (error) error.textContent = "";

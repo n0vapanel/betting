@@ -101,8 +101,10 @@ const CSS = `
   border-radius: 8px; color: var(--text); text-align: left; font-size: 14px;
 }
 .lt-name:hover { background: var(--card-2); }
-.lt-name[aria-pressed="true"] { cursor: default; } /* "All sports" while every sport is already shown */
+.lt-name[aria-pressed="true"] { cursor: default; } /* "All sports" while every sport is shown; a league or sport that is the whole selection */
 .lt-name[aria-pressed="true"]:hover { background: transparent; }
+.lt-name[aria-disabled="true"] { cursor: default; color: var(--text-3); } /* the Builder: no games in the time window */
+.lt-name[aria-disabled="true"]:hover { background: transparent; }
 .lt-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lt-pin { color: var(--warn); vertical-align: -1px; }
 .lt-icon { flex: none; width: 20px; text-align: center; }

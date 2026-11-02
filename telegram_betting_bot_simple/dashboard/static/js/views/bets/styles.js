@@ -13,8 +13,8 @@ const CSS = `
 
 .view-bets .mb-results-head { flex-wrap: wrap; row-gap: 8px; }
 .view-bets .mb-results-head h2 { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 4px; }
-/* 36 px buttons; the shared ::after reaches 4 px above and below, so each period is a 44 px tap target */
-.view-bets .mb-results .seg button { min-height: 36px; font-size: 13px; padding: 0 10px; }
+/* 36 px buttons; the shared ::after reaches 4 px above and below, so each period is a 44 px tap target ("All" too: 44 px wide) */
+.view-bets .mb-results .seg button { min-height: 36px; min-width: 44px; font-size: 13px; padding: 0 10px; }
 .view-bets .mb-net { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-top: 10px; }
 .view-bets .mb-net-v { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
 .view-bets .mb-net-v.up { color: var(--accent); }

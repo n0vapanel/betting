@@ -253,7 +253,7 @@ code { font-size: 0.9em; background: var(--card-2); border-radius: 4px; padding:
   display: flex; align-items: center; gap: 6px; padding: 0 var(--gutter);
 }
 #back { margin-left: -10px; }
-.title { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: var(--tap); color: var(--text); font-weight: 650; }
+.title { display: flex; align-items: center; gap: 10px; min-width: var(--tap); min-height: var(--tap); color: var(--text); font-weight: 650; } /* "FAQ" too */
 .title:hover { text-decoration: none; }
 .title .logo { flex: none; }
 .brand { font-size: 17px; letter-spacing: -0.01em; white-space: nowrap; }
@@ -362,6 +362,7 @@ body.tg-analyse .slip-analyse { display: none; }
 }
 .icon-btn:hover { background: var(--card-2); color: var(--text); }
 .info-btn {
+  flex: none; /* a long flex heading mustn't squeeze it: 28 px and the 8 px ::after are a 44 px target */
   display: inline-grid; place-items: center; width: 28px; height: 28px; margin: -6px 0 -6px 0; vertical-align: middle;
   border-radius: 50%; color: var(--text-3); position: relative;
 }
