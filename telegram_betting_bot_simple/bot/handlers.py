@@ -1111,20 +1111,30 @@ async def brain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(text, disable_web_page_preview=True)
 
 
+# /help: the short version. The app's Help page has every screen, number and button in plain words, so this points
+# there (the "Open app" button, in a private chat when the Mini App is set up). Telegram's limit is 4,096 characters.
+HELP_TEXT = (
+    "SportsBet AI works out how likely each result of a game is and shows it next to the bookmakers' prices. "
+    "It is not a bookmaker: it never takes bets or money. For adults only (18+, 21+ in the US).\n\n"
+    "Commands\n"
+    "/start – games, AI bets (Safe · Risky · Crazy), Ask AI, your calls and the leaderboard\n"
+    "/slip – your bet slip\n"
+    "/brain – how the brain is doing against the market, and its last change\n"
+    "/help – this message\n\n"
+    "In a private chat with the bot you can also send any question as a message, or a bet slip's text or screenshot to have it checked. "
+    "On NBA games, tap 🔮 to make your own call: after the game you and the AI are both scored.\n\n"
+    "Every screen, number and button is explained in plain words in the app's Help: tap 📱 Open app (on /start), "
+    "then Help.\n\n"
+    "Predictions are estimates and can be wrong. Only bet what you can afford to lose.\n"
+    f"{HELPLINE}"
+)
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Provide a list of available commands and brief instructions."""
-    help_text = (
-        "Available commands:\n"
-        "/start – browse games, AI bets, your calls and the leaderboard\n"
-        "/slip – show your multi bet slip\n"
-        "/brain – how the brain is doing against the market, and its last change\n"
-        "/help – display this help message\n\n"
-        "Pick a sport and league, then open a game to see the AI's predicted score, win, spread and "
-        "total chances, injuries and projected top players. In Multi mode, tap picks to build a parlay. "
-        "On NBA games, tap 🔮 to make your own call: after the game you and the AI are both scored."
-    )
+    """The commands in short, and where the full Help is (with the "Open app" button where Telegram allows it)."""
     if update.message:
-        await update.message.reply_text(help_text)
+        rows = _app_rows(update, context)
+        await update.message.reply_text(HELP_TEXT, reply_markup=InlineKeyboardMarkup(rows) if rows else None)
 
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

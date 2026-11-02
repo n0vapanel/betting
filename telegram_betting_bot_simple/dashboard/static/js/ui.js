@@ -893,7 +893,7 @@ export const GLOSSARY = {
   value_mark: {
     title: "▲ and ! on prices",
     short: "▲: the AI rates the pick a little above what its price implies. !: the AI is far from the bookmakers.",
-    body: "▲ shows when the AI's chance is 3 to 8 points above the market's and, by the AI's numbers, the price pays more than it costs on average. It's an opinion, not a guarantee: the bookmakers' prices are hard to beat, and these picks still lose often. ! shows when the gap is 8 points or more, which usually means news the model hasn't caught (an injury, a rested star): check it before trusting the AI. Only NBA games have the AI's chance, so only they get marks.",
+    body: "▲ shows when the AI's chance is 3 to 8 points above the market's and, by the AI's numbers, the price pays more than it costs on average. It's an opinion, not a promise: the bookmakers' prices are hard to beat, and these picks still lose often. ! shows when the gap is 8 points or more, which usually means news the model hasn't caught (an injury, a rested star): check it before trusting the AI. Only NBA games have the AI's chance, so only they get marks.",
     example: "\"AI 55% ▲\" on a price of 2.00 with the market at 48%: the AI expects a small profit on average, and the pick still loses about 45 times in 100.",
     see: "#/today",
   },
@@ -918,8 +918,8 @@ export const GLOSSARY = {
   },
   quota: {
     title: "Odds requests left",
-    short: "The odds feed allows about 500 requests a month.",
-    body: "Each league's odds cost 3 requests to fetch, so they're kept for up to 2 hours and only the sports you pick are fetched. When few are left the app shows the last saved odds.",
+    short: "The odds feed allows a set number of requests a month: 500 on its free plan.",
+    body: "Each league's odds cost 3 requests to fetch, so they're kept for up to 2 hours, and the month's requests are shared out day by day. When few are left the app shows the last saved odds.",
     example: "Keeping NBA and NFL odds fresh for 12 hours uses about 36 requests.",
   },
   brier: {

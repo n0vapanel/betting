@@ -45,7 +45,7 @@ const CSS = `
 .view-help .hp-effects li { padding: 10px 12px; border-radius: 12px; background: var(--card-2); border: 1px solid var(--line); min-width: 0; overflow-wrap: anywhere; }
 .view-help .hp-effects p { margin: 4px 0 0; font-size: 14px; }
 .view-help .hp-effects .hp-src { font-size: 12.5px; color: var(--text-2); }
-.view-help .hp-sure { display: inline-block; margin-left: 4px; font-size: 11px; font-weight: 700; color: var(--text-2); border: 1px dashed var(--line-strong); border-radius: 999px; padding: 0 6px; }
+.view-help .hp-cert { display: inline-block; margin-left: 4px; font-size: 11px; font-weight: 700; color: var(--text-2); border: 1px dashed var(--line-strong); border-radius: 999px; padding: 0 6px; }
 .view-help .hp-step { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; align-items: start; }
 .view-help .hp-step-icon {
   position: relative; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px;
@@ -112,11 +112,49 @@ const CSS = `
 
 .view-help .hp-empty { padding: 20px 4px; color: var(--text-2); text-align: center; overflow-wrap: anywhere; }
 
+/* The plain-English guide: "On this page", then one fold per section, each ending with the same closing line */
+.view-help .hp-sec-n {
+  flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--info-soft); color: var(--info); font-size: 12px; font-weight: 750;
+}
+.view-help .hp-toc .section-head { margin-bottom: 4px; }
+.view-help .hp-toc-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.view-help .hp-toc-list a { display: flex; align-items: center; gap: 8px; min-height: 44px; min-width: 0; color: var(--text); font-size: 14px; line-height: 1.3; overflow-wrap: anywhere; }
+.view-help .hp-toc-list a > span:last-child { min-width: 0; }
+.view-help .hp-secs { display: grid; gap: 10px; margin-top: 12px; }
+.view-help .hp-sec { padding: 0; scroll-margin-top: 72px; }
+.view-help .hp-sec > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 12px 14px;
+  border-radius: var(--radius);
+}
+.view-help .hp-sec > summary::-webkit-details-marker { display: none; }
+.view-help .hp-sec-t { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.view-help .hp-sec-t h2 { font-size: 16px; font-weight: 700; line-height: 1.25; }
+.view-help .hp-sec-t > span { color: var(--text-2); font-size: 13px; line-height: 1.35; }
+.view-help .hp-sec > summary > .icon { flex: none; color: var(--text-3); transition: transform var(--speed); }
+.view-help .hp-sec[open] > summary > .icon { transform: rotate(180deg); }
+.view-help .hp-sec-body { padding: 0 14px 14px; font-size: 14.5px; line-height: 1.5; overflow-wrap: anywhere; min-width: 0; }
+.view-help .hp-sec-body > p { margin-top: 10px; }
+.view-help .hp-sec-body > p:first-child, .view-help .hp-sec-body > dl:first-child { margin-top: 0; }
+.view-help .hp-sub { font-size: 12px; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); margin: 18px 0 2px; }
+.view-help .hp-terms { margin: 8px 0 0; display: grid; gap: 10px; }
+.view-help .hp-terms dt { font-weight: 700; }
+.view-help .hp-terms dd { margin: 2px 0 0; color: var(--text-2); }
+.view-help .hp-bullets { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 6px; }
+.view-help .hp-sec-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.view-help .hp-sec-links .chip { flex: 0 1 auto; max-width: 100%; white-space: normal; text-align: left; line-height: 1.3; padding-top: 6px; padding-bottom: 6px; }
+.view-help .hp-closer {
+  display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line);
+  color: var(--text-2); font-size: 13px;
+}
+.view-help .hp-closer > .icon { flex: none; margin-top: 1px; color: var(--accent); }
+.view-help .hp-all-terms { margin-top: 10px; }
+
 @media (max-width: 359px) {
-  .view-help .hp-guides { grid-template-columns: minmax(0, 1fr); }
+  .view-help .hp-guides, .view-help .hp-toc-list { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .view-help .hp-faq summary .icon { transition: none; }
+  .view-help .hp-faq summary .icon, .view-help .hp-sec > summary > .icon { transition: none; }
 }
 `;
 

@@ -1,5 +1,7 @@
 // Help: how the app works, as static pages (nothing here calls the AI or costs anything).
-//   #/help              search, the guides and the whole glossary by group
+//   #/help              search, then the plain-English guide: "On this page" and fourteen folded sections (SECTIONS in
+//                       help/content.js, in a fixed order, each ending with the same line, CLOSER), then the guides,
+//                       the glossary link and the helplines. #/help?s=<section> opens that section and scrolls to it.
 //   #/help/glossary     the glossary on its own, with the same search
 //   #/help/<guide>      start (the 60-second tour) · ai (how the AI decides) · brain (how the brain learns: the
 //                       honest promise, the gates in plain words, the AI's role and cost) · builder (the Builder's
@@ -10,8 +12,8 @@
 //   #/help/<term>       one glossary entry: the definition, a worked example step by step, the person's
 //                       own slip where the term applies, "See it live" and related terms. Every ⓘ sheet's
 //                       "More in Help" link lands here (the keys are ui.js's GLOSSARY keys).
-// ?q=<words> on #/help or #/help/glossary starts with a search (it matches titles, other names such as
-// "vig" or "parlay", definitions, the guides and the FAQ).
+// ?q=<words> on #/help or #/help/glossary starts with a search (it matches the sections, titles, other names such
+// as "vig" or "parlay", definitions, the guides and the FAQ).
 //
 // The words live in help/content.js. Numbers there are fixed teaching examples worked out by hand; the
 // only live number is the "Your slip" line, which is the server's pricing of the person's own slip.
@@ -22,7 +24,7 @@ import { icon } from "../icons.js";
 import { ensureStyles } from "./help/styles.js";
 import {
   terms, term, GROUPS, TOPICS, topic, START_STEPS, ROLLOVER_TABLE, SURVIVAL, STRATEGIES, HELPLINES, WARNING_SIGNS, FAQ,
-  CONTEXT_CAPS, CONTEXT_EFFECTS,
+  CONTEXT_CAPS, CONTEXT_EFFECTS, SECTIONS, CLOSER,
 } from "./help/content.js";
 
 const chevron = () => icon("chevron", { size: 18 });
@@ -72,6 +74,9 @@ function search(query) {
   const words = phrase.split(" ").filter(Boolean);
   if (!words.length) return null;
   const rank = (list) => list.filter((x) => x.score > 0).sort((a, b) => b.score - a.score);
+  const foundSections = rank(SECTIONS.map((s) => ({
+    item: s, score: score([[norm(s.title), 6], [norm(s.words), 4], [norm(s.blurb), 2], [norm(sectionText(s)), 1]], words, phrase),
+  })));
   const foundTerms = rank(terms().map((t) => ({
     item: t,
     score: score([[norm(t.title), 6], [norm([...t.aliases, ...t.aka].join(" ")), 5], [norm(t.short), 2],
@@ -83,7 +88,16 @@ function search(query) {
   const foundFaq = rank(FAQ.map((f, index) => ({
     item: { ...f, index }, score: score([[norm(f.q), 4], [norm(stripTags(f.a)), 1]], words, phrase),
   })));
-  return { terms: foundTerms.map((x) => x.item), topics: foundTopics.map((x) => x.item), faq: foundFaq.map((x) => x.item) };
+  return {
+    sections: foundSections.map((x) => x.item), terms: foundTerms.map((x) => x.item), topics: foundTopics.map((x) => x.item),
+    faq: foundFaq.map((x) => x.item),
+  };
+}
+
+/** Every word a section shows, for the search. */
+function sectionText(s) {
+  return [s.example, ...s.parts.flatMap((part) => [part.h, part.p, ...(part.list || []), ...(part.terms || []).flatMap(([name, words]) => [name, words]),
+    ...(part.qa || []).flat()])].filter(Boolean).join(" ");
 }
 
 function searchBox(value) {
@@ -96,12 +110,16 @@ function searchBox(value) {
 }
 
 function resultsHtml(found, query) {
-  const count = found.terms.length + found.topics.length + found.faq.length;
+  const count = found.sections.length + found.terms.length + found.topics.length + found.faq.length;
   if (!count) {
     return `<div class="hp-empty"><p>Nothing matches “${esc(query)}”.</p>
       <p class="small">Try another word (for example “parlay”, “juice” or “cash out”), or browse the <a href="#/help/glossary">glossary</a>.</p></div>`;
   }
   const parts = [`<p class="hp-count" role="status">${count} result${count === 1 ? "" : "s"} for “${esc(query)}”</p>`];
+  if (found.sections.length) {
+    parts.push(section("On the Help page", `<ul class="list hp-found-secs">${found.sections.map((s) => `<li><a class="list-item" href="#/help?s=${esc(s.key)}" data-sec-link="${esc(s.key)}">
+      <span class="hp-sec-n" aria-hidden="true">${SECTIONS.indexOf(s) + 1}</span><span class="grow"><b>${esc(s.title)}</b><span>${esc(s.blurb)}</span></span>${chevron()}</a></li>`).join("")}</ul>`));
+  }
   if (found.topics.length) {
     parts.push(section("Guides", `<ul class="list">${found.topics.map((t) => `<li><a class="list-item" href="#/help/${t.key}">
       ${icon(t.iconName, { size: 20 })}<span class="grow"><b>${esc(t.title)}</b><span>${esc(t.blurb)}</span></span>${chevron()}</a></li>`).join("")}</ul>`));
@@ -173,17 +191,85 @@ function guidesHtml() {
     : `<a class="hp-guide${t.key === "responsible" ? " rg" : ""}" href="#/help/${t.key}">${icon(t.iconName, { size: 22 })}<b>${esc(t.title)}</b><span>${esc(t.blurb)}</span></a>`)).join("")}</div>`;
 }
 
+// --- the plain-English guide (the home page's sections) ------------------------------------------------
+
+/** One part of a section as HTML: every string goes through esc() (see SECTIONS in help/content.js). */
+function partHtml(part) {
+  if (part.h) return `<h3 class="hp-sub">${esc(part.h)}</h3>`;
+  if (part.p) return `<p>${esc(part.p)}</p>`;
+  if (part.list) return `<ul class="hp-bullets">${part.list.map((text) => `<li>${esc(text)}</li>`).join("")}</ul>`;
+  if (part.terms) {
+    return `<dl class="hp-terms">${part.terms.map(([name, words, href]) => `<div><dt>${href ? `<a href="${esc(href)}">${esc(name)}</a>` : esc(name)}</dt>
+      <dd>${esc(words)}</dd></div>`).join("")}</dl>`;
+  }
+  if (part.qa) return `<dl class="hp-terms hp-qa">${part.qa.map(([q, a]) => `<div><dt>${esc(q)}</dt><dd>${esc(a)}</dd></div>`).join("")}</dl>`;
+  if (part.helplines) return helplinesHtml();
+  return "";
+}
+
+/** One section as a fold: its number, title and blurb, then its parts, the example, its links and the closing line. */
+function sectionHtml(s, index, open) {
+  return `<details class="card hp-sec" id="hp-s-${esc(s.key)}" data-sec="${esc(s.key)}"${open ? " open" : ""}>
+    <summary><span class="hp-sec-n" aria-hidden="true">${index + 1}</span><span class="hp-sec-t"><h2>${esc(s.title)}</h2><span>${esc(s.blurb)}</span></span>${icon("down", { size: 18 })}</summary>
+    <div class="hp-sec-body">
+      ${s.parts.map(partHtml).join("")}
+      <div class="example"><span class="eyebrow">Example</span>${esc(s.example)}</div>
+      ${s.links.length ? `<div class="hp-sec-links">${s.links.map(([href, label]) => `<a class="chip" href="${esc(href)}">${esc(label)}</a>`).join("")}</div>` : ""}
+      <p class="hp-closer">${icon("shield", { size: 16 })}<span>${esc(CLOSER)}</span></p>
+    </div>
+  </details>`;
+}
+
+function tocHtml() {
+  return `<nav class="card section hp-toc" aria-label="On this page">
+    <div class="section-head"><h2>On this page</h2><button type="button" class="btn btn-ghost small" data-hp-all>Open all</button></div>
+    <ol class="hp-toc-list">${SECTIONS.map((s, i) => `<li><a href="#/help?s=${esc(s.key)}" data-sec-link="${esc(s.key)}"><span class="hp-sec-n" aria-hidden="true">${i + 1}</span><span>${esc(s.title)}</span></a></li>`).join("")}</ol>
+  </nav>`;
+}
+
+/** "On this page" opens a section and scrolls to it (the address keeps it); "Open all" opens or closes every one. */
+function bindSections(root) {
+  const folds = [...root.querySelectorAll(".hp-sec")];
+  const all = root.querySelector("[data-hp-all]");
+  const sync = () => {
+    all.textContent = folds.every((fold) => fold.open) ? "Close all" : "Open all";
+  };
+  folds.forEach((fold) => fold.addEventListener("toggle", sync));
+  all.addEventListener("click", () => {
+    const opening = !folds.every((fold) => fold.open);
+    folds.forEach((fold) => { fold.open = opening; });
+    sync();
+  });
+  root.querySelector(".hp-toc").addEventListener("click", (event) => {
+    const link = event.target.closest("[data-sec-link]");
+    const fold = link && root.querySelector(`#hp-s-${link.dataset.secLink}`);
+    if (!fold) return;
+    event.preventDefault();
+    fold.open = true;
+    fold.scrollIntoView({ block: "start" });
+    fold.querySelector("summary")?.focus({ preventScroll: true });
+    setAddress(`#/help?s=${link.dataset.secLink}`);
+  });
+  sync();
+}
+
 function renderHome(root, params) {
   const q = params.query.get("q") || "";
-  root.innerHTML = `<div class="page-head"><h1>Help</h1><p>How the app works, in plain words. These pages never call the AI.</p></div>
+  const wanted = params.query.get("s");
+  const open = SECTIONS.some((s) => s.key === wanted) ? wanted : null;
+  root.innerHTML = `<div class="page-head"><h1>Help</h1><p>Every screen, number and button in plain words, even if you've never bet. These pages never call the AI.</p></div>
     ${searchBox(q)}
     <div data-results hidden></div>
     <div data-usual>
-      <div class="section">${guidesHtml()}</div>
-      ${section("Glossary", glossaryGroups(), { aside: `<span class="muted small">${terms().length} terms</span>` })}
+      ${tocHtml()}
+      <div class="hp-secs">${SECTIONS.map((s, i) => sectionHtml(s, i, s.key === open)).join("")}</div>
+      ${section("More detail", `${guidesHtml()}<a class="text-link hp-all-terms" href="#/help/glossary">${icon("book", { size: 18 })}The full glossary: ${terms().length} terms${icon("chevron", { size: 16 })}</a>`)}
       ${helplineCard()}
     </div>`;
   bindSearch(root, "#/help");
+  bindSections(root);
+  // After the shell's scroll to the top (it runs once render returns)
+  if (open && !q) requestAnimationFrame(() => root.querySelector(`#hp-s-${open}`)?.scrollIntoView({ block: "start" }));
 }
 
 function renderGlossary(root, params) {
@@ -261,7 +347,7 @@ function aiHtml() {
       ], "info")}`)}
     ${section("2 · Claude explains, it doesn't count", points([
       ["bot", "Claude (Anthropic's model) chooses which of the brain's tools to call (games, odds, players, pricing, the rollover planner) and writes the words around their results."],
-      ["shield", "A check reads every reply before you do: a number that didn't come from this turn's tools, or words like “lock” or “guaranteed”, get it rejected. After a second miss you get a plain template instead."],
+      ["shield", "A check reads every reply before you do: a number that didn't come from this turn's tools, or a word that promises a win, gets it rejected. After a second miss you get a plain template instead."],
       ["check", "It never adds a pick to your slip, never suggests a bigger stake, and says when it doesn't know."],
       ["lifebuoy", "A small, fast model first sorts each message (what you're asking, and any sign of chasing losses or distress). A strong sign switches picks off for 24 hours and shows support instead."],
     ]))}
@@ -305,7 +391,7 @@ function brainHtml() {
       ["book", "<b>Old games</b>: results and closing prices from free public sources (football-data.co.uk, nflverse, ESPN) are loaded a little each night. They test the parts that can be rebuilt from closing prices: the goals model, weather effects on totals, home edge and the spread of margins."],
     ]))}
     ${section("3 · The gates, in plain words", points([
-      ["sliders", "<b>Small nudges</b>, such as a blend weight going from 0.20 to 0.22, keep only the part of the move the evidence is 95% sure of, are capped each week, and go live only if they are no worse on enough held-out games (300 per sport to start). Otherwise they're held, with the number of games still needed."],
+      ["sliders", "<b>Small nudges</b>, such as a blend weight going from 0.20 to 0.22, keep only the part of the move the evidence is 95% confident of, are capped each week, and go live only if they are no worse on enough held-out games (300 per sport to start). Otherwise they're held, with the number of games still needed."],
       ["target", "<b>Bigger changes</b>, such as a new kind of adjustment, a bigger move or any AI proposal, must prove they are better: a significance test on daily totals, corrected for how many changes were tried that week, then two weeks scored in the background on new games."],
       ["refresh", "<b>Rollback</b>: the old version keeps being scored next to the new one. If the new one turns out worse (after 200 games, or sooner when a drift check fires), it is rolled back by itself."],
       ["alert", "<b>Safe mode</b>: if a night's chances are broken, or the brain sits more than 4 points from the sharp price on clearly more games than its starting values would (5 in every 100 games more, over at least 20 games), every sport goes back to its starting values until the owner clears it, and the owner is told."],
@@ -411,7 +497,7 @@ function conditionsHtml() {
       </table></div>
       <p class="note" style="margin-top:6px">The starting 0.5 weight and these caps are design choices, not published values.</p>`, { info: "explains_vs_moves" })}
     ${section("The starting effect sizes", `<p class="small muted">What each effect is worth to start with, in plain words, with where it comes from. They're refitted once the log has enough graded games.</p>
-      <ul class="hp-effects">${CONTEXT_EFFECTS.map((e) => `<li><b>${esc(e.what)}</b>${e.sure ? ` <span class="hp-sure">${esc(e.sure)}</span>` : ""}<p>${esc(e.size)}</p>${e.source ? `<p class="hp-src">Source: ${esc(e.source)}</p>` : ""}</li>`).join("")}</ul>`)}
+      <ul class="hp-effects">${CONTEXT_EFFECTS.map((e) => `<li><b>${esc(e.what)}</b>${e.certainty ? ` <span class="hp-cert">${esc(e.certainty)}</span>` : ""}<p>${esc(e.size)}</p>${e.source ? `<p class="hp-src">Source: ${esc(e.source)}</p>` : ""}</li>`).join("")}</ul>`)}
     ${section("The market usually wins", points([
       ["scale", "Bookmakers already shade totals for strong wind (about 1.5 points for a 15–19 mph NFL forecast), and home field, altitude and rest are priced in: that's why they only explain."],
       ["alert", "Weather and travel effects other than NFL wind are small and noisy: \"small, noisy\" and \"untested\" say so on each one."],
@@ -465,6 +551,15 @@ function rolloverHtml() {
       <a class="btn btn-secondary" href="#/bets?tab=plans">${icon("bets", { size: 18 })}My plans</a></div>`;
 }
 
+function helplinesHtml() {
+  return `<div class="hp-lines">${HELPLINES.map((h) => `<div class="hp-line">
+      <span class="eyebrow">${esc(h.where)}</span><b>${esc(h.name)}</b>
+      <p class="small muted" style="margin-top:2px">${esc(h.note)}</p>
+      <div class="row">${h.tel ? `<a class="btn btn-secondary small" href="tel:${esc(h.tel)}">${icon("lifebuoy", { size: 16 })}Call ${esc(h.phone)}</a>` : ""}
+        <a class="btn btn-ghost small" href="${esc(h.url)}" target="_blank" rel="noopener noreferrer">${icon("external", { size: 16 })}Website</a></div>
+    </div>`).join("")}</div>`;
+}
+
 function responsibleHtml() {
   return `<div class="page-head"><span class="eyebrow">Guide</span><h1>Responsible play</h1>
       <p>Betting should be entertainment that costs money, like a ticket to a game. If it stops being fun, stop.</p></div>
@@ -479,16 +574,11 @@ function responsibleHtml() {
       <p class="small" style="margin-top:10px">If any of these sound familiar, take a break and talk to someone. It's common, and help works.</p>`)}
     ${section("What this app does", points([
       ["scale", "Shows the real chance and the expected cost on every ticket and plan, and your net result, never just “total won”."],
-      ["shield", "Never says “lock”, “guaranteed” or “sure thing”, never suggests a bigger stake, and never adds a pick for you."],
+      ["shield", "Never promises a win, never suggests a bigger stake, and never adds a pick for you."],
       ["lifebuoy", "If a message sounds like chasing losses or distress, the AI stops giving picks for 24 hours and shows support instead."],
       ["check", "Sends no notifications that nudge you to bet."],
     ]))}
-    ${section("Free, confidential help", `<div class="hp-lines">${HELPLINES.map((h) => `<div class="hp-line">
-        <span class="eyebrow">${esc(h.where)}</span><b>${esc(h.name)}</b>
-        <p class="small muted" style="margin-top:2px">${esc(h.note)}</p>
-        <div class="row">${h.tel ? `<a class="btn btn-secondary small" href="tel:${esc(h.tel)}">${icon("lifebuoy", { size: 16 })}Call ${esc(h.phone)}</a>` : ""}
-          <a class="btn btn-ghost small" href="${esc(h.url)}" target="_blank" rel="noopener noreferrer">${icon("external", { size: 16 })}Website</a></div>
-      </div>`).join("")}</div>
+    ${section("Free, confidential help", `${helplinesHtml()}
       <p class="note">In an emergency, or if you're thinking about harming yourself, call your local emergency number.</p>`)}`;
 }
 
