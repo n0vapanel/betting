@@ -172,6 +172,15 @@ export function section(title, body, { info = "", id = "", aside = "", className
 }
 
 /** A short note in a tinted box: notice("Odds are cached for 2 hours", "info"). Kinds: info, warn, danger, good. */
+/** Player-name searches (GET /api/players/search) take up to 60 characters: their fields say so with maxlength. */
+export const SEARCH_MAX = 60;
+
+/** A player-name search's failure in words: a 422 is the server's limit on the name, said plainly. */
+export function searchFailed(error) {
+  return error?.status === 422 ? `Player names are searched by up to ${SEARCH_MAX} characters: try a shorter one.`
+    : String(error?.message || "The search didn't work just now.");
+}
+
 export function notice(text, kind = "info", { html = false } = {}) {
   const iconName = { info: "info", warn: "alert", danger: "alert", good: "check" }[kind] || "info";
   return `<div class="notice ${kind}" role="${kind === "danger" ? "alert" : "note"}">${icon(iconName, { size: 18 })}<div>${html ? text : esc(text)}</div></div>`;
@@ -1292,6 +1301,11 @@ export function bindCheckTree(container, { checked = new Set(), onChange = () =>
       mark(box, all.filter((b) => b.dataset.group === box.dataset.group));
     }
     mark(root.querySelector('[data-ctree-box="all"]'), all);
+    // Select all with every box already checked (or Clear with none) would change nothing: it says so
+    const on = all.filter((b) => b.checked).length;
+    for (const [act, idle] of [["all", on === all.length], ["none", on === 0]]) {
+      root.querySelector(`[data-ctree-act="${act}"]`)?.setAttribute("aria-disabled", String(idle));
+    }
     const count = root.querySelector(".ctree-count");
     if (count) count.textContent = `${all.filter((b) => b.checked).length} of ${all.length} ${root.dataset.unit || "leagues"}`;
   };
@@ -1312,7 +1326,9 @@ export function bindCheckTree(container, { checked = new Set(), onChange = () =>
     changed();
   });
   root.addEventListener("click", (event) => {
-    const act = event.target.closest("[data-ctree-act]")?.dataset.ctreeAct;
+    const actButton = event.target.closest("[data-ctree-act]");
+    const act = actButton?.getAttribute("aria-disabled") === "true" ? null : actButton?.dataset.ctreeAct;
+    if (actButton && !act) return;
     if (act) {
       state.checked = new Set(act === "all" ? items().map((b) => b.value) : []);
       changed();

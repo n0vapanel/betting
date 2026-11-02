@@ -693,6 +693,7 @@ const CSS = `
 /* the board's notes (not .ps-note: that's each list's footnote) */
 .ps-alert { display: flex; align-items: flex-start; gap: 6px; margin: 0; font-size: 12.5px; color: var(--text-2); line-height: 1.45; }
 .ps-alert > .icon { flex: none; margin-top: 2px; }
+.ps-alert > span { min-width: 0; overflow-wrap: anywhere; }
 .ps-alert.warn > .icon { color: var(--warn-ink); }
 .ps-alert.info > .icon { color: var(--info-ink); }
 `;

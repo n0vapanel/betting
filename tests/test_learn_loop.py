@@ -606,8 +606,8 @@ def test_the_weekly_summary_is_three_lines_from_the_gates_counts() -> None:
     lines = text.split("\n")
     assert len(lines) == 3
     assert lines[0] == "Brain, week 2026-W43: 5 candidates tested, no change this week (most weeks end this way)."
-    assert lines[1] == ("NBA, last 200 games: about level with the sharp market (log loss +0.0004, 95% range -0.0011 "
-                        "to +0.0019).")
+    assert lines[1] == ("NBA, last 200 games: about level with the sharp market (brain vs market: 0.0004 worse on log "
+                        "loss, 95% range 0.0011 better to 0.0019 worse).")
     assert lines[2] == "Details: https://bets.example.com/#/bets?tab=brain"
     changed = loop.weekly_summary("2026-W43", {"trials": 5, "promoted": [{"sport": "nba"}], "rolled_back": []},
                                   headlines, None)

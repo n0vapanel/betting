@@ -20,6 +20,21 @@ export const STATS = { pts: "Points", reb: "Rebounds", ast: "Assists", fg3m: "Th
 export const forecastPoints = (p, weight = 1) => Math.round(10 * weight * (25 - 100 * (1 - Math.round(p * 100) / 100) ** 2)) / 10;
 const PROP_WEIGHT = 0.4;
 export const CAUTION_GAP = 0.08; // the AI this far from the bookmakers gets a "check the news" warning
+
+// A call's leaderboard name by the server's own rule (POST /api/calls: ^[\w .'-]{1,24}$, where \w is any letter, mark,
+// digit or connector in any script), checked here so a refusal is said plainly; a curly apostrophe counts as "'"
+const CALL_NAME = /^[\p{Alphabetic}\p{M}\p{Nd}\p{Pc}\p{Join_Control} .'-]{1,24}$/u;
+export const CALL_NAME_HINT = "Use letters, numbers, spaces and . ' - (up to 24)";
+
+/** The name as the server takes it ("Sam’s" is sent as "Sam's"), or null when it can't be. */
+export function callName(raw) {
+  const name = String(raw ?? "").replace(/[\u2018\u2019]/g, "'").trim();
+  return CALL_NAME.test(name) ? name : null;
+}
+
+/** Whether a refused call was refused for its name (the server's 422 on body.name). */
+const nameRefused = (error) => error?.status === 422 && Array.isArray(error.detail)
+  && error.detail.some((d) => Array.isArray(d?.loc) && d.loc[d.loc.length - 1] === "name");
 const signed = (n, digits = 1) => `${n > 0 ? "+" : ""}${Number(n).toFixed(digits)}`;
 const agreement = (p) => (p >= 0.6 ? "AI agrees" : p >= 0.4 ? "Coin flip for the AI" : "AI disagrees");
 const compareConfidence = (yours, ai) => (ai < 0.5 ? "against the AI" : Math.abs(yours - ai) <= 0.05 ? "same as the AI"
@@ -211,22 +226,23 @@ export async function openCallSheet(game, { onSaved } = {}) {
   };
 
   const save = async (button) => {
-    const name = $("[data-name]").value.trim();
+    const typed = $("[data-name]").value.trim();
+    const name = callName(typed);
     if (!name) {
-      $("[data-call-error]").textContent = "Add your name for the leaderboard.";
+      $("[data-call-error]").textContent = typed ? CALL_NAME_HINT : "Add your name for the leaderboard.";
       $("[data-name]").focus();
       return;
     }
-    prefs.setName(name);
     button.disabled = true;
     try {
       await api("/api/calls", { method: "POST", body: { league: game.league, id: game.id, player: getPlayerId(), name, call: payload() } });
+      prefs.setName(name); // kept for next time only once the server took it
       callsCache = null;
       await s.close();
       toast("Call saved: it's scored after the game", { kind: "good" });
       onSaved?.();
     } catch (error) {
-      if (!isQuiet(error)) $("[data-call-error]").textContent = error.message;
+      if (!isQuiet(error)) $("[data-call-error]").textContent = nameRefused(error) ? CALL_NAME_HINT : error.message;
     } finally {
       button.disabled = false;
     }

@@ -7,7 +7,7 @@ const CSS = `
 .view-help .hp-search .icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-3); pointer-events: none; }
 .view-help .hp-search .input { padding-left: 40px; }
 .view-help .hp-search .input::-webkit-search-cancel-button { cursor: pointer; }
-.view-help .hp-count { color: var(--text-2); font-size: 13px; margin-top: 10px; }
+.view-help .hp-count { color: var(--text-2); font-size: 13px; margin-top: 10px; overflow-wrap: anywhere; }
 
 .view-help .hp-guides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .view-help .hp-guide {
@@ -110,7 +110,7 @@ const CSS = `
 .view-help .hp-limit > .icon { color: var(--info); margin-top: 2px; }
 .view-help .hp-limit p { color: var(--text-2); font-size: 14px; margin-top: 2px; }
 
-.view-help .hp-empty { padding: 20px 4px; color: var(--text-2); text-align: center; }
+.view-help .hp-empty { padding: 20px 4px; color: var(--text-2); text-align: center; overflow-wrap: anywhere; }
 
 @media (max-width: 359px) {
   .view-help .hp-guides { grid-template-columns: minmax(0, 1fr); }

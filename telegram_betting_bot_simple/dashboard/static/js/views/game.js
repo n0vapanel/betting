@@ -21,7 +21,7 @@ import { api, request, isQuiet, qs } from "../api.js";
 import { setTitle, refreshMainButton, leagueTitle, sportEmoji, layout, onLayoutChange } from "../app.js";
 import {
   esc, pct, shortName, timeLabel, section, oddsGrid, splitBar, winChances, badge, explain, skeleton, errorState,
-  notice, priceText, pointText, injuryBadge, segmented, emptyState,
+  notice, priceText, pointText, injuryBadge, segmented, emptyState, searchFailed, SEARCH_MAX,
 } from "../ui.js";
 import { icon } from "../icons.js";
 import { analystsHtml, bindAnalysts, openCallSheet, loadMyCalls, callSummary, CAUTION_GAP } from "../legacy.js";
@@ -151,7 +151,7 @@ function playersHtml(game, side) {
   if (!game.players) {
     return `<p class="muted small">Find a player to see their last 10 games, hit rates and news.</p>
       <div class="search-row" style="margin-top:8px"><label class="sr-only" for="game-player-q">Player name</label>
-        <input id="game-player-q" class="input" type="search" placeholder="Search ${esc(leagueTitle(game.league))} players" autocomplete="off" data-player-search></div>
+        <input id="game-player-q" class="input" type="search" placeholder="Search ${esc(leagueTitle(game.league))} players" maxlength="${SEARCH_MAX}" autocomplete="off" data-player-search></div>
       <ul class="list search-results" data-player-results></ul>
       ${scanLeague(game.league) ? `<a class="list-item finder-link" href="${esc(`#/players?league=${encodeURIComponent(game.league)}`)}">${icon("users", { size: 20 })}<span class="grow"><b>Player finder</b><span>${esc(leagueTitle(game.league))} players ranked for a number tonight</span></span>${icon("chevron", { size: 18 })}</a>` : ""}`;
   }
@@ -335,7 +335,7 @@ export async function render(root, params) {
           <span class="grow"><b>${esc(p.name)}</b><span>${esc([p.team, p.position].filter(Boolean).join(" · "))}</span></span>${icon("chevron", { size: 18 })}</a></li>`).join("")
           : `<li class="muted small">No ${esc(leagueTitle(league))} players match “${esc(q)}”.</li>`;
       } catch (error) {
-        if (!isQuiet(error) && root.isConnected) results.innerHTML = `<li>${notice(error.message, "warn")}</li>`;
+        if (!isQuiet(error) && root.isConnected) results.innerHTML = `<li>${notice(searchFailed(error), "warn")}</li>`;
       }
     }, 300);
   });

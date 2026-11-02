@@ -57,8 +57,8 @@ from ..ai.assistant import HELPLINE
 from ..ai.explain import edge_text, scan_edge_label
 from ..config import Config
 from ..dashboard.lab import paused_until
-from ..dashboard.service import CallRejected, NotFound
-from ..data.leagues import SPORTS, pick_leagues
+from ..dashboard.service import AI_LEAGUES, CallRejected, NotFound
+from ..data.leagues import POPULAR_LEAGUES, SPORTS, pick_leagues
 from ..engine import calls
 from ..services import build_service
 from .chat import AGE_BUTTON, MAX_TEXT, setup_chat
@@ -620,8 +620,11 @@ async def show_games(update: Update, context: ContextTypes.DEFAULT_TYPE, league:
 
 async def game_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+    _, league, game_id = (query.data.split(":", 2) + ["", ""])[:3]
+    if not league or not game_id:  # "g:" or "g:<league>": a button from an older menu, answered as the others are
+        await query.answer("This menu has expired. Send /start to begin again.", show_alert=True)
+        return
     await query.answer()
-    _, league, game_id = query.data.split(":", 2)
     await show_game(update, context, league, game_id)
 
 
@@ -1001,6 +1004,33 @@ def bets_text(data: Dict[str, Any], tier: Optional[str], league_title: str) -> s
     return "\n".join(lines)
 
 
+BETS_LEAGUE = "basketball_nba"  # the AI bets screen's league when the last one browsed has no AI model
+BETS_SWITCH = 4  # leagues offered in the AI bets screen's league switch (two rows of two)
+
+
+def _bets_league(context: ContextTypes.DEFAULT_TYPE, opening: bool) -> str:
+    """The AI bets screen's league: on opening, the league last browsed when it has an AI model, else the NBA's;
+    after that, the one picked with the screen's league switch."""
+    chosen = context.user_data.get("bets_league")
+    if opening or not chosen:
+        last = context.user_data.get("league")
+        chosen = last if last in AI_LEAGUES else BETS_LEAGUE
+        context.user_data["bets_league"] = chosen
+    return chosen
+
+
+def bets_switch(sports: List[Dict[str, Any]], league: str, last: Optional[str] = None) -> List[Dict[str, Any]]:
+    """The AI bets screen's other leagues to switch to: in season with games, those with an AI model first, then the
+    league last browsed, then the popular ones; at most BETS_SWITCH."""
+    def rank(sport: Dict[str, Any]) -> tuple:
+        key = sport.get("key")
+        popular = POPULAR_LEAGUES.index(key) if key in POPULAR_LEAGUES else len(POPULAR_LEAGUES)
+        return key not in AI_LEAGUES, key != last, popular, sport.get("title", "")
+    open_now = [s for s in sports if s.get("active") and not s.get("has_outrights") and s.get("key")
+                and s["key"] != league and len(f"betsl:{s['key']}".encode()) <= 64]
+    return sorted(open_now, key=rank)[:BETS_SWITCH]
+
+
 async def show_bets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -1013,18 +1043,28 @@ async def show_bets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if refusal:
         await _show(update, *refusal)
         return
-    league = context.user_data.get("league") or "basketball_nba"
+    league = _bets_league(context, opening=query.data in ("bets", "age:bets"))
     try:
         data = await asyncio.to_thread(service.ai_bets, league)
-        title = next((s["title"] for s in await asyncio.to_thread(service.odds.sports) if s.get("key") == league), league)
+        sports = await asyncio.to_thread(service.odds.sports)
+        title = next((s["title"] for s in sports if s.get("key") == league), league)
     except Exception:
         await _show(update, "Couldn't build bets right now. Try again in a minute.",
                     [[InlineKeyboardButton("« Home", callback_data="home")]])
         return
+    others = bets_switch(sports, league, context.user_data.get("league"))
     rows = [[InlineKeyboardButton(f"{TIER_ICONS[key]} {data['tiers'][key]['title']}", callback_data=f"bets:{key}")
-             for key in ("safe", "risky", "crazy")],
-            [InlineKeyboardButton("« Home", callback_data="home")]]
+             for key in ("safe", "risky", "crazy")]]
+    rows += [[InlineKeyboardButton(s["title"], callback_data=f"betsl:{s['key']}") for s in others[i:i + 2]]
+             for i in range(0, len(others), 2)]
+    rows.append([InlineKeyboardButton("« Home", callback_data="home")])
     await _show(update, bets_text(data, tier, title), rows)
+
+
+async def bets_league_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The AI bets screen's league switch: that league's bets."""
+    context.user_data["bets_league"] = update.callback_query.data.removeprefix("betsl:")
+    await show_bets(update, context)
 
 
 async def confirm_age_for_bets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1131,6 +1171,7 @@ def setup_handlers(application: Application, config: Config) -> None:
     application.add_handler(CallbackQueryHandler(my_calls, pattern=r"^mycalls$"))
     application.add_handler(CallbackQueryHandler(leaderboard, pattern=r"^board$"))
     application.add_handler(CallbackQueryHandler(show_bets, pattern=r"^bets(:(safe|risky|crazy))?$"))
+    application.add_handler(CallbackQueryHandler(bets_league_selected, pattern=r"^betsl:[a-z0-9_]{2,58}$"))
     application.add_handler(CallbackQueryHandler(confirm_age_for_bets, pattern=r"^age:bets$"))
     # The AI chat: plain messages, its buttons and the Ask AI button (before the catch-all below)
     setup_chat(application, config)

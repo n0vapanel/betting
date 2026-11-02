@@ -37,6 +37,7 @@ from typing import Annotated, Any, Callable, Collection, Dict, FrozenSet, List, 
 from urllib.parse import parse_qs
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import Path as PathParam
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -123,7 +124,7 @@ class Pick(BaseModel):
 class SlipRequest(BaseModel):
     mode: Literal["single", "multi"] = "multi"
     stake: float = Field(0, ge=0, le=1_000_000)
-    stakes: Dict[int, float] = Field(default_factory=dict)
+    stakes: Dict[int, Annotated[float, Field(ge=0, le=1_000_000)]] = Field(default_factory=dict)
     picks: List[Pick] = Field(default_factory=list, max_length=20)
 
 
@@ -200,6 +201,10 @@ class CallRequest(JudgeRequest):
 # --- version 2 request bodies: every amount and count is checked here before the Lab sees it ---------
 
 LeagueKey = Annotated[str, Field(pattern=LEAGUE_KEY)]
+# A saved row's id (a slip, plan, pasted slip, chat or call): SQLite keeps whole numbers in 64 bits, so a bigger one is
+# a 422 here rather than an OverflowError in the lookup
+MAX_ROW_ID = 2 ** 63 - 1
+RowId = Annotated[int, PathParam(ge=1, le=MAX_ROW_ID)]
 Money = Annotated[Decimal, Field(ge=Decimal("0.01"), le=Decimal("100000"), decimal_places=2)]
 
 
@@ -326,7 +331,9 @@ class BuilderControls(BaseModel):
     exclude_low_conf: Optional[bool] = None
     exclude_model_price: Optional[bool] = None
     tz: Optional[str] = Field(None, min_length=1, max_length=64)  # IANA zone for the kick-off window
-    ui: Optional[Dict[Annotated[str, Field(max_length=32)], Union[None, bool, float, Annotated[str, Field(max_length=64)]]]] = \
+    # (finite numbers only: JSON has no NaN or infinity, and PUT /api/me keeps these values in users.settings)
+    ui: Optional[Dict[Annotated[str, Field(max_length=32)],
+                      Union[None, bool, Annotated[float, Field(allow_inf_nan=False)], Annotated[str, Field(max_length=64)]]]] = \
         Field(None, max_length=12)
 
 
@@ -385,7 +392,7 @@ class ChatRequest(BaseModel):
 
 
 class ChatBody(BaseModel):
-    thread_id: Optional[int] = Field(None, ge=1)
+    thread_id: Optional[int] = Field(None, ge=1, le=MAX_ROW_ID)
     message: Optional[str] = Field(None, min_length=1, max_length=2000)
     request: Optional[ChatRequest] = None
     slip: Optional[TicketBody] = None  # "ask about my slip"
@@ -407,7 +414,7 @@ class SlipImage(BaseModel):
 class ChatSlipBody(BaseModel):
     """A pasted slip for the AI to read: its text, a screenshot, or both."""
 
-    thread_id: Optional[int] = Field(None, ge=1)
+    thread_id: Optional[int] = Field(None, ge=1, le=MAX_ROW_ID)
     text: Optional[str] = Field(None, max_length=MAX_PASTE_CHARS * 2)  # the exact limit is checked with a message
     image: Optional[SlipImage] = None
 
@@ -422,7 +429,7 @@ class PasteBody(BaseModel):
     """A pasted slip for the free, code-only reader."""
 
     text: str = Field(min_length=1, max_length=MAX_PASTE_CHARS * 2)  # the exact limit is checked with a message
-    thread_id: Optional[int] = Field(None, ge=1)
+    thread_id: Optional[int] = Field(None, ge=1, le=MAX_ROW_ID)
 
 
 class PastedAnalyseBody(BaseModel):
@@ -669,13 +676,41 @@ class LoginGuard:
         return ok
 
 
+# How deep a bad input may nest and still be repeated in a 422 (a crafted body can nest thousands of levels)
+ECHO_DEPTH = 32
+
+
+def echo_safe(value: Any) -> bool:
+    """Whether a bad input can be repeated in a 422 as plain JSON: no NaN or infinity (Python's JSON reader takes
+    them, but JSON has no such numbers), nested at most ECHO_DEPTH deep. Walked without recursion."""
+    stack = [(value, 0)]
+    while stack:
+        item, depth = stack.pop()
+        if depth > ECHO_DEPTH or (isinstance(item, float) and not math.isfinite(item)):
+            return False
+        if isinstance(item, Mapping):
+            stack.extend((child, depth + 1) for child in item.values())
+        elif isinstance(item, (list, tuple)):
+            stack.extend((child, depth + 1) for child in item)
+    return True
+
+
 async def invalid_request(request: Request, exc: RequestValidationError) -> Response:
-    """FastAPI's usual 422 reply, which repeats the bad input back.
+    """FastAPI's usual 422 reply, which repeats the bad input back, but only an input JSON can carry.
 
     JSON can carry a lone surrogate ("\\ud800") that UTF-8 can't encode, so the stock reply would crash
-    with a 500 on such input; escaping it keeps it a plain 422.
+    with a 500 on such input; escaping it keeps it a plain 422. A NaN or an infinity (``{"mode": NaN}``)
+    or a body nested thousands deep isn't repeated at all: each would crash the reply too. Should any other
+    error detail fail to encode, the reply keeps only each error's type, place and message.
     """
-    return AsciiJSONResponse({"detail": jsonable_encoder(exc.errors())}, status_code=422)
+    errors = [{key: value for key, value in error.items() if key != "input" or echo_safe(value)}
+              for error in exc.errors()]
+    try:
+        return AsciiJSONResponse({"detail": jsonable_encoder(errors)}, status_code=422)
+    except (ValueError, TypeError, RecursionError):
+        plain = [{"type": str(error.get("type", "")), "loc": [str(part) for part in error.get("loc", ())][:ECHO_DEPTH],
+                  "msg": str(error.get("msg", ""))} for error in errors]
+        return AsciiJSONResponse({"detail": plain}, status_code=422)
 
 
 def request_uid(request: Request) -> Optional[str]:
@@ -883,6 +918,8 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
             raise HTTPException(404, str(exc)) from None
         except (CallRejected, ValueError) as exc:
             raise HTTPException(400, str(exc)) from None
+        except OverflowError:  # a number too large for SQLite or the maths: the request's fault, not a crash
+            raise HTTPException(422, "A number in this request is too large") from None
         except RuntimeError as exc:
             raise HTTPException(502, str(exc)) from None
 
@@ -961,7 +998,7 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         return calls_errors(lambda: svc.my_calls(f"web:{player}"))
 
     @app.delete("/api/calls/{call_id}", dependencies=signed_in)
-    def delete_call(call_id: int, player: str = Query(pattern=r"^[A-Za-z0-9-]{8,64}$"),
+    def delete_call(call_id: RowId, player: str = Query(pattern=r"^[A-Za-z0-9-]{8,64}$"),
                     svc: DashboardService = Depends(get_service)) -> Dict[str, bool]:
         if not svc.delete_call(f"web:{player}", call_id):
             raise HTTPException(404, "No pending call with that id")
@@ -1232,11 +1269,11 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         return lab_call(lambda: lab.slip_by_share(code, uid))
 
     @app.get("/api/slips/{slip_id}")
-    def get_slip(slip_id: int, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+    def get_slip(slip_id: RowId, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
         return lab_call(lambda: lab.get_slip(uid, slip_id))
 
     @app.delete("/api/slips/{slip_id}")
-    def delete_slip(slip_id: int, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, bool]:
+    def delete_slip(slip_id: RowId, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, bool]:
         return lab_call(lambda: lab.delete_slip(uid, slip_id))
 
     @app.post("/api/rollover/compare")
@@ -1254,17 +1291,17 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         return lab_call(lambda: lab.list_plans(uid, status))
 
     @app.get("/api/plans/{plan_id}")
-    def get_plan(plan_id: int, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+    def get_plan(plan_id: RowId, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
         return lab_call(lambda: lab.get_plan(uid, plan_id))
 
     @app.post("/api/plans/{plan_id}/day")
-    def plan_day(plan_id: int, body: PlanDayBody, uid: str = Depends(person),
+    def plan_day(plan_id: RowId, body: PlanDayBody, uid: str = Depends(person),
                  lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
         """Play the plan's next day on the person's own picks (the stake comes from the plan)."""
         return lab_call(lambda: lab.plan_day(uid, plan_id, body.model_dump()))
 
     @app.post("/api/plans/{plan_id}/stop")
-    def stop_plan(plan_id: int, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+    def stop_plan(plan_id: RowId, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
         return lab_call(lambda: lab.stop_plan(uid, plan_id))
 
     @app.post("/api/chat")
@@ -1285,11 +1322,11 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         return lab_call(lambda: lab.read_free(uid, body.text, thread_id=body.thread_id))
 
     @app.get("/api/pasted/{pasted_id}")
-    def pasted_slip(pasted_id: int, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
+    def pasted_slip(pasted_id: RowId, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
         return lab_call(lambda: lab.pasted_view(uid, pasted_id))
 
     @app.post("/api/pasted/{pasted_id}/analyse")
-    def analyse_pasted(pasted_id: int, body: PastedAnalyseBody, uid: str = Depends(person),
+    def analyse_pasted(pasted_id: RowId, body: PastedAnalyseBody, uid: str = Depends(person),
                        lab: Lab = Depends(get_lab)) -> Dict[str, Any]:
         """The pasted slip re-priced for the card's toggles (legs left out, stake, kind of bet): code only, free."""
         return lab_call(lambda: lab.analyse_pasted(uid, pasted_id, drop=body.drop,
@@ -1301,7 +1338,7 @@ def create_app(service: Optional[DashboardService], password: str, login_delay: 
         return lab_call(lambda: lab.threads(uid))
 
     @app.get("/api/chat/{thread_id}")
-    def chat_messages(thread_id: int, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> List[Dict[str, Any]]:
+    def chat_messages(thread_id: RowId, uid: str = Depends(person), lab: Lab = Depends(get_lab)) -> List[Dict[str, Any]]:
         return lab_call(lambda: lab.messages(uid, thread_id))
 
     # Page, stylesheet and script only; no data is served from here

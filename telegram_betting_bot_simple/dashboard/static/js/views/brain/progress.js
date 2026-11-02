@@ -95,8 +95,18 @@ export function headlineText(s) {
   if (h.text) return h.text;
   if (!h.n) return `${s.label}: no graded games with a market price yet.`;
   if (h.gap === null) return `${s.label}, last ${games(h.n)}: ${h.word || "too few days to say"}.`;
-  const r = range(h.lo, h.hi);
-  return `${s.label}, last ${games(h.n)}: ${h.word || "compared with the sharp market"} (log loss ${ll(h.gap)}${r ? `, 95% range ${r}` : ""}).`;
+  const r = h.lo !== null && h.hi !== null && Number.isFinite(h.lo) && Number.isFinite(h.hi) ? versusRange(h.lo, h.hi) : "";
+  return `${s.label}, last ${games(h.n)}: ${h.word || "compared with the sharp market"} (brain vs market: ${versus(h.gap)} on log loss${r ? `, 95% range ${r}` : ""}).`;
+}
+
+// The headline's number is a gap (the brain's log loss minus the market's): said as better or worse, never as a log loss
+const versus = (gap) => (Number(Math.abs(gap).toFixed(4)) === 0 ? "level" : `${Math.abs(gap).toFixed(4)} ${gap < 0 ? "better" : "worse"}`);
+function versusRange(lo, hi) {
+  if ((lo < 0 && hi < 0) || (lo > 0 && hi > 0)) {
+    const [near, far] = [Math.abs(lo), Math.abs(hi)].sort((a, b) => a - b);
+    return `${near.toFixed(4)} to ${far.toFixed(4)} ${lo < 0 ? "better" : "worse"}`;
+  }
+  return `${versus(lo)} to ${versus(hi)}`;
 }
 
 function headlinesHtml(d, selected) {
@@ -324,8 +334,10 @@ function everyGameLine(label, b) {
   const brier = b.marketN && b.marketBrainBrier !== null && b.marketBrier !== null
     ? `Brier ${fixed(b.marketBrainBrier, 3)} vs the line's ${fixed(b.marketBrier, 3)} (${games(b.marketN)})`
     : b.brainBrier !== null ? `Brier ${fixed(b.brainBrier, 3)}` : "";
-  return `<li><span>${esc(label)}</span><b>${esc([`${b.predicted.toLocaleString()} predicted`, `${b.graded.toLocaleString()} graded`,
-    `${b.pending.toLocaleString()} pending`, b.scored ? `hit rate ${pct(b.hitRate)}` : "", brier].filter(Boolean).join(" · "))}</b></li>`;
+  // Each count stays whole on a phone ("3 pending", never "3" at a line's end and "pending" on the next)
+  const counts = [`${b.predicted.toLocaleString()} predicted`, `${b.graded.toLocaleString()} graded`, `${b.pending.toLocaleString()} pending`,
+    b.scored ? `hit rate ${pct(b.hitRate)}` : ""].filter(Boolean).map((t) => `<span class="bp-nw">${esc(t)}</span>`);
+  return `<li><span>${esc(label)}</span><b>${[...counts, brier ? esc(brier) : ""].filter(Boolean).join(" · ")}</b></li>`;
 }
 
 /** The every-game card: per sport the live record, the 14-day back-test and the priced picks, apart. Learning records, not picks. */

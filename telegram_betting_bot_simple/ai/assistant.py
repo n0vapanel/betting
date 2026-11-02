@@ -99,6 +99,7 @@ from ..engine.pasted import MAX_PASTE_CHARS, NO_LEG_ODDS, basic_parse, looks_lik
 from .explain import (
     ASK_AGAIN_PROBLEM,
     MIN_OUTPUT_TOKENS,
+    NO_CREDITS,
     AIError,
     ClaudeCaller,
     Explanation,
@@ -1288,6 +1289,8 @@ class Assistant:
             if exc.temporary:
                 turn = Turn(f"I couldn't reach the AI just now ({exc}). Try again in a minute.", "error",
                             chips=["Try again"] if text and not paste else [])
+            elif str(exc) == NO_CREDITS:  # its own plain sentence, under no second prefix
+                turn = Turn(f"{NO_CREDITS}.", "error")
             else:
                 turn = Turn(f"The AI can't answer right now: {exc}. Trying again won't help until that's fixed.",
                             "error")

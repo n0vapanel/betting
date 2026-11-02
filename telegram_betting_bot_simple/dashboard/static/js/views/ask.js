@@ -1243,9 +1243,18 @@ async function openThread(id, { quiet = false } = {}) {
   if (messages.length) messages[messages.length - 1].scrollIntoView({ block: "start" });
 }
 
+/** Nothing to start afresh: no message, no chat open or loading, no screenshot waiting, the request bar as new. */
+export function alreadyNew(s = state) {
+  return !s.busy && !s.loading && !s.messages.length && s.threadId == null && !s.attach && s.requestOpen !== false;
+}
+
 function newChat() {
   if (state.busy) {
     toast("Wait for the AI's answer first", { kind: "warn" });
+    return;
+  }
+  if (alreadyNew()) {
+    toast("This is already a new chat: ask away");
     return;
   }
   resetThread();

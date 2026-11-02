@@ -1163,8 +1163,17 @@ def brain_lines(store: Any, now: Optional[float] = None) -> List[str]:
                          f"{' (today’s defaults)' if not version['number'] else ''}{since}.")
         changes = _changes(db, bs.trials(db, limit=200), owner=False)
         safe = bs.safe_mode(db)
+    try:
+        from .every_game import brain_lines as every_game_lines
+        record = every_game_lines(store)
+    except Exception:  # noqa: BLE001 - the record's lines must never cost /brain
+        log.exception("/brain: the every-game lines failed")
+        record = []
     if not lines:
-        lines.append("No graded games with a market price yet, so there is nothing to score.")
+        # The every-game record below is scored against each game's own line: the headline only lacks the sharp price
+        lines.append("No headline against the sharp market yet: no graded game has its price. The record below is "
+                     "scored against each game's own line." if record else
+                     "No graded games with a market price yet, so there is nothing to score.")
     if safe:
         lines.append(f"Safe mode is on: the default settings serve every sport ({safe.get('reason')}).")
     if changes:
@@ -1172,14 +1181,9 @@ def brain_lines(store: Any, now: Optional[float] = None) -> List[str]:
         lines.append(f"Last change ({(last['at'] or '')[:10]}): {last['text']}")
     else:
         lines.append("No change yet: the brain runs on today's defaults until a change passes the gate.")
-    try:
-        from .every_game import brain_lines as every_game_lines
-        record = every_game_lines(store)
-    except Exception:  # noqa: BLE001 - the record's lines must never cost /brain
-        log.exception("/brain: the every-game lines failed")
-        record = []
     if record:
-        lines.append("Every game it predicts (learning records, not picks):\n" + "\n".join(record))
+        lines.append("What it predicts, scored after each final (every-game lines are learning records, not picks; "
+                     "priced picks are kept apart):\n" + "\n".join(record))
     return lines
 
 

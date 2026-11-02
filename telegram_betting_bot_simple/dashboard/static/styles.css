@@ -345,7 +345,8 @@ body.tg-analyse .slip-analyse { display: none; }
   color: var(--text); text-decoration: none;
 }
 .btn:hover { text-decoration: none; }
-.btn:disabled { opacity: 0.5; }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: 0.5; }
+.btn[aria-disabled="true"] { cursor: default; }
 .btn.small { min-height: 36px; padding: 0 12px; font-size: 13.5px; position: relative; }
 .btn.small::after { content: ""; position: absolute; inset: -4px 0; }
 .btn.block { display: flex; width: 100%; }
@@ -547,8 +548,8 @@ select.input { appearance: auto; }
 
 .empty { text-align: center; padding: 28px 16px; border: 1px dashed var(--line-strong); border-radius: var(--radius); background: var(--card); }
 .empty-icon { width: 52px; height: 52px; margin: 0 auto 10px; border-radius: 50%; display: grid; place-items: center; background: var(--card-2); color: var(--text-2); }
-.empty h3 { font-size: 17px; margin-bottom: 4px; }
-.empty p { color: var(--text-2); max-width: 420px; margin: 0 auto; }
+.empty h3 { font-size: 17px; margin-bottom: 4px; overflow-wrap: anywhere; }
+.empty p { color: var(--text-2); max-width: 420px; margin: 0 auto; overflow-wrap: anywhere; }
 .empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 14px; }
 .empty-slip { color: var(--text-2); text-align: center; padding: 18px 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); font-size: 14px; }
 

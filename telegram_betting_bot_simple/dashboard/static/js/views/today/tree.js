@@ -120,7 +120,7 @@ export function createTree({ onSelect, onPreset = () => {}, onSavePreset = () =>
     el.innerHTML = `${views ? presetHtml(next) : ""}
       <div class="lt-row lt-all">
         <label class="lt-hit"><input type="checkbox" class="lt-box" data-lt-box="all"${allState === "on" ? " checked" : ""} data-mixed="${allState === "mixed"}" aria-label="Include every sport"></label>
-        <button type="button" class="lt-name" data-only-all aria-label="${esc(`Show all sports: ${total} game${total === 1 ? "" : "s"}${totalLive ? `, ${totalLive} live` : ""}`)}">
+        <button type="button" class="lt-name" data-only-all aria-pressed="${!selection}" aria-label="${esc(`Show all sports: ${total} game${total === 1 ? "" : "s"}${totalLive ? `, ${totalLive} live` : ""}`)}">
           <span class="lt-text"><b>All sports</b></span><span class="lt-dots">${liveHtml(totalLive)}</span><span class="lt-n">${esc(total)}</span>
         </button>
       </div>

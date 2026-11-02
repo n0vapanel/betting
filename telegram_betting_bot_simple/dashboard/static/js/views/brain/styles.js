@@ -104,6 +104,7 @@ const CSS = `
 .bp .bp-kv li:first-child { border-top: 0; }
 .bp .bp-kv li > span:first-child { color: var(--text-2); min-width: 0; flex: 1 1 auto; }
 .bp .bp-kv li > b { text-align: right; overflow-wrap: anywhere; min-width: 0; flex: 0 1 auto; max-width: 72%; }
+.bp .bp-kv .bp-nw { white-space: nowrap; }
 .bp .bp-empty { color: var(--text-2); font-size: 13.5px; line-height: 1.5; }
 .bp .bp-held-sum { font-size: 14px; font-weight: 650; }
 .bp .bp-cell-note { display: block; font-size: 11.5px; font-weight: 500; color: var(--text-2); text-transform: none; letter-spacing: 0; white-space: normal; }

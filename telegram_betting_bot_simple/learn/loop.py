@@ -378,8 +378,8 @@ def template_memo(facts: Mapping[str, Any]) -> str:
         lines.append(f"AI cost this month: {spend.get('spent_cents', 0):.0f} of {spend.get('cap_cents', 0)} cents.")
     for row in facts.get("scores") or []:
         if row.get("gap") is not None:
-            lines.append(f"{sport_label(row['sport'])}, week {row['week']}: log loss {_signed(row['gap'])} against "
-                         f"the market over {row['n']} games.")
+            lines.append(f"{sport_label(row['sport'])}, week {row['week']}, {row['n']} games: brain vs market "
+                         f"{_versus(row['gap'])} on log loss.")
     return "\n".join(lines)
 
 
@@ -397,15 +397,30 @@ def sport_headline(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     return out
 
 
+def _versus(gap: float) -> str:
+    """The brain's log loss minus the market's in words, lower being better: "0.0004 worse", "0.4479 better"."""
+    return "level" if gap == 0 else f"{stats.signed(abs(gap))[1:]} {'better' if gap < 0 else 'worse'}"
+
+
+def _versus_range(lo: float, hi: float) -> str:
+    """A gap's 95% range in the same words: "0.2912 to 0.6012 better", or "0.0011 better to 0.0019 worse"."""
+    if (lo < 0 and hi < 0) or (lo > 0 and hi > 0):
+        near, far = sorted((abs(lo), abs(hi)))
+        return f"{stats.signed(near)[1:]} to {stats.signed(far)[1:]} {'better' if lo < 0 else 'worse'}"
+    return f"{_versus(lo)} to {_versus(hi)}"
+
+
 def headline_text(sport: str, h: Mapping[str, Any]) -> str:
-    """"NBA, last 200 games: about level with the sharp market (log loss +0.0004, 95% range -0.0011 to +0.0019)"."""
+    """"NBA, last 200 games: about level with the sharp market (brain vs market: 0.0004 worse on log loss, 95% range
+    0.0011 better to 0.0019 worse)". The number is the gap, the brain's log loss minus the market's, so it is said as
+    better or worse, never as a log loss of its own (one can't be negative)."""
     if not h or not h.get("n"):
         return f"{sport_label(sport)}: no graded games with a market price yet."
     games = f"{h['n']} game" + ("s" if h["n"] != 1 else "")
     if h.get("gap") is None or h.get("lo") is None or h.get("hi") is None:
         return f"{sport_label(sport)}, last {games}: {h.get('word') or 'too few games to say yet'}."
-    return (f"{sport_label(sport)}, last {games}: {h['word']} (log loss {_signed(h['gap'])}, 95% range "
-            f"{_signed(h.get('lo'))} to {_signed(h.get('hi'))}).")
+    return (f"{sport_label(sport)}, last {games}: {h['word']} (brain vs market: {_versus(h['gap'])} on log loss, "
+            f"95% range {_versus_range(h['lo'], h['hi'])}).")
 
 
 def gate_summary(report: Mapping[str, Any]) -> Dict[str, Any]:

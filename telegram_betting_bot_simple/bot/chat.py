@@ -60,10 +60,10 @@ from ..ai.assistant import (
     risk_flags,
     support_message,
 )
-from ..ai.explain import (FORM_WORDS, edge_text, first_reason, money, names_text, one_in_text, pct, relaxed_texts,
-                          scan_by_edge, scan_chance_text, scan_edge_label, scan_empty_text, scan_loading_text,
-                          scan_matchup, scan_mode, scan_more_text, scan_notes, scan_says_empty, scan_trend_text,
-                          scan_yes_no)
+from ..ai.explain import (FORM_WORDS, NO_CREDITS, edge_text, first_reason, money, names_text, one_in_text, pct,
+                          relaxed_texts, scan_by_edge, scan_chance_text, scan_edge_label, scan_empty_text,
+                          scan_loading_text, scan_matchup, scan_mode, scan_more_text, scan_notes, scan_says_empty,
+                          scan_trend_text, scan_yes_no)
 from ..ai.slip_reader import MAX_IMAGE_BYTES
 from ..ai.tools import pasted_card, pasted_label
 from ..config import Config
@@ -616,7 +616,8 @@ def reply_text(result: Dict[str, Any], asked: Optional[str] = None) -> str:
     if any(card.get("type") in ("ticket", "plan", "pasted", "picks", "player_scan") for card in shown) \
             and HELPLINE not in body_text(result):
         foot.append(f"<i>{html.escape(HELPLINE)}</i>")
-    if credits.get("daily_cents"):
+    # (not under "no API credits": the person's own allowance left has nothing to do with it)
+    if credits.get("daily_cents") and NO_CREDITS not in str(reply.get("text") or ""):
         foot.append(f"<i>AI analyst · {credits.get('left_cents', 0):g}¢ of {credits['daily_cents']}¢ "
                     "of today's AI credits left</i>")
     body = str(reply.get("text") or "")

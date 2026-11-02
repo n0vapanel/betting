@@ -677,8 +677,9 @@ def summary(store: Any, now: Optional[float] = None) -> Dict[str, Any]:
     order = list(registry.SPORTS)
     out["sports"] = sorted(sports.values(), key=lambda s: order.index(s["sport"]) if s["sport"] in order else 99)
     out["games"] = len(rows)
-    out["note"] = ("Learning records, not picks: every game on ESPN's boards gets the brain's chance an hour before the "
-                   "start, scored after the final. Brier score: lower is better (0.25 is a coin flip on a two-way game).")
+    out["note"] = ("Every game on ESPN's boards gets the brain's chance an hour before the start, scored after the "
+                   "final: learning records, not picks. Priced picks, the app's own priced games, are scored apart. "
+                   "Brier score: lower is better (0.25 is a coin flip on a two-way game).")
     with _summary_lock:
         if len(_summary_cache) > 20:
             _summary_cache.clear()
@@ -700,8 +701,9 @@ def block_text(name: str, block: Mapping[str, Any]) -> Optional[str]:
     if block.get("scored"):
         parts.append(f"hit rate {_pct(block.get('hit_rate'))}")
         if block.get("market_n"):
+            n = block["market_n"]
             parts.append(f"Brier {block['market_brain_brier']:.3f} vs the line's {block['market_brier']:.3f} "
-                         f"({block['market_n']} games)")
+                         f"({n} game{'' if n == 1 else 's'})")
         else:
             parts.append(f"Brier {block['brain_brier']:.3f}")
     return "; ".join(parts) + "."

@@ -402,6 +402,9 @@ def ticket_view(tier: Tier, ticket: Ticket, value_proven: bool = False) -> Dict[
 
 VIG_NOTE = ("Each extra leg adds the bookmaker's cut again: on NBA moneylines about 4% for one leg, 7% for "
             "two, 11% for three and 17% for five.")
+# Any other league's screen: the same arithmetic without NBA's numbers (each league's cut is its own)
+VIG_NOTE_ANY = ("Each extra leg adds the bookmaker's cut again: at a 4% cut a leg, about 7% for two legs, 11% for "
+                "three and 17% for five.")
 
 
 def build_all(candidates: Sequence[Candidate], count: int = 3, value_proven: bool = False,

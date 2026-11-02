@@ -27,7 +27,7 @@ import {
   closeTreeDrawer, setTreeRail, openDetail, inspectorRoute, onInspectorChange, cache, swr, SLATE_URL, SLATE_KEY, prefetch,
   gameUrl, canPrefetchGame, openSportsSheet, rerender, setQuota, warmView,
 } from "../app.js";
-import { esc, emptyState, errorState, notice, skeleton, sheet, ago, toast, explain } from "../ui.js";
+import { esc, emptyState, errorState, notice, skeleton, sheet, ago, toast, explain, searchFailed, SEARCH_MAX } from "../ui.js";
 import { icon } from "../icons.js";
 import { ensureStyles } from "./today/styles.js";
 import { prepare, view, dayStrip, dayKey, leaguesNeedingOdds, SORTS, STATUSES } from "./today/model.js";
@@ -131,7 +131,7 @@ function openSearch() {
     title: "Find a player",
     size: "tall",
     body: `<div class="search-row"><label class="sr-only" for="player-q">Player name</label>
-        <input id="player-q" class="input" type="search" placeholder="e.g. LeBron James" autocomplete="off" enterkeyhint="search"></div>
+        <input id="player-q" class="input" type="search" placeholder="e.g. LeBron James" maxlength="${SEARCH_MAX}" autocomplete="off" enterkeyhint="search"></div>
       <ul class="list search-results" data-results></ul>
       <a class="list-item finder-link" href="#/players">${icon("users", { size: 20 })}<span class="grow"><b>Player finder</b><span>Who's projected for 20+ points, 10+ boards or an anytime TD tonight</span></span>${icon("chevron", { size: 18 })}</a>`,
   });
@@ -158,7 +158,7 @@ function openSearch() {
             <span class="grow"><b>${esc(p.name)}</b><span>${esc([p.team, p.position].filter(Boolean).join(" · "))}</span></span>${icon("chevron", { size: 18 })}</a></li>`).join("")
           : `<li class="muted small">No players match “${esc(q)}”.</li>`;
       } catch (error) {
-        if (!isQuiet(error)) results.innerHTML = `<li>${notice(error.message, "warn")}</li>`;
+        if (!isQuiet(error)) results.innerHTML = `<li>${notice(searchFailed(error), "warn")}</li>`;
       }
     }, 300);
   });

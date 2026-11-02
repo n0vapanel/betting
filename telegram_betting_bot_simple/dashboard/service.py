@@ -1433,12 +1433,13 @@ class DashboardService:
                             point=offer["point"], label=offer["label"], probability=offer["ai"], fair=offer["fair"],
                             prices=prices, push=offer.get("push") or 0.0, start=card["start"],
                         ))
+        vig = bets.VIG_NOTE if league == "basketball_nba" else bets.VIG_NOTE_ANY  # the note matches the league shown
         if league in AI_LEAGUES:
             note = ("Built from the AI's chances and the best price at one bookmaker per bet. The AI leans on the "
-                    "bookmakers, so expect small negative value. " + bets.VIG_NOTE)
+                    "bookmakers, so expect small negative value. " + vig)
         else:
             note = ("No AI model for this league yet, so these use the bookmakers' own chances: "
-                    "expect slightly negative value on all of them. " + bets.VIG_NOTE)
+                    "expect slightly negative value on all of them. " + vig)
         if allowed is not None and not allowed:
             note = "You have no open calls in this league yet: make some in Games, then come back."
         tiers = bets.build_all(candidates)
