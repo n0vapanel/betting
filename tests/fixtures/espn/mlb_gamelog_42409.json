@@ -1,0 +1,407 @@
+{
+ "labels": [
+  "IP",
+  "H",
+  "R",
+  "ER",
+  "HR",
+  "BB",
+  "K",
+  "GB",
+  "FB",
+  "P",
+  "TBF",
+  "GSC",
+  "Dec",
+  "Rel",
+  "ERA"
+ ],
+ "names": [
+  "innings",
+  "hits",
+  "runs",
+  "earnedRuns",
+  "homeRuns",
+  "walks",
+  "strikeouts",
+  "groundBalls",
+  "flyBalls",
+  "pitches",
+  "battersFaced",
+  "avgGameScore",
+  "wins-losses",
+  "saves-blownSaves-holds",
+  "ERA"
+ ],
+ "displayNames": [
+  "Innings pitched",
+  "Hits",
+  "Runs",
+  "Earned runs",
+  "Home Runs",
+  "Walks",
+  "Strikeouts",
+  "Ground Balls",
+  "Fly Balls",
+  "Pitches",
+  "Batters Faced",
+  "Game Score",
+  "Decision",
+  "Saves-Blown Saves-Holds",
+  "Earned Run Average"
+ ],
+ "filters": [
+  {
+   "name": "season",
+   "value": "2026",
+   "options": [
+    {
+     "value": "2026",
+     "displayValue": "2026"
+    }
+   ]
+  }
+ ],
+ "seasonTypes": [
+  {
+   "displayName": "2026 Postseason",
+   "categories": [
+    {
+     "displayName": "Postseason",
+     "type": "event",
+     "events": [
+      {
+       "eventId": "401908030",
+       "stats": [
+        "5.0",
+        "5",
+        "2",
+        "2",
+        "1",
+        "2",
+        "7",
+        "7",
+        "5",
+        "81",
+        "21",
+        "54.0",
+        "L(1-1)",
+        "-",
+        "2.45"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "displayName": "2026 Regular Season",
+   "categories": [
+    {
+     "displayName": "september",
+     "type": "event",
+     "events": [
+      {
+       "eventId": "401817086",
+       "stats": [
+        "7.0",
+        "3",
+        "0",
+        "0",
+        "0",
+        "0",
+        "10",
+        "5",
+        "8",
+        "75",
+        "23",
+        "81.0",
+        "W(12-7)",
+        "-",
+        "2.72"
+       ]
+      },
+      {
+       "eventId": "401817011",
+       "stats": [
+        "5.0",
+        "8",
+        "4",
+        "4",
+        "1",
+        "2",
+        "3",
+        "8",
+        "12",
+        "86",
+        "25",
+        "36.0",
+        "W(11-7)",
+        "-",
+        "2.85"
+       ]
+      },
+      {
+       "eventId": "401816936",
+       "stats": [
+        "7.0",
+        "3",
+        "0",
+        "0",
+        "0",
+        "1",
+        "9",
+        "5",
+        "9",
+        "90",
+        "24",
+        "79.0",
+        "W(10-7)",
+        "-",
+        "2.70"
+       ]
+      },
+      {
+       "eventId": "401816863",
+       "stats": [
+        "7.1",
+        "4",
+        "2",
+        "2",
+        "1",
+        "2",
+        "5",
+        "15",
+        "5",
+        "94",
+        "27",
+        "65.0",
+        "W(9-7)",
+        "-",
+        "2.84"
+       ]
+      },
+      {
+       "eventId": "401816796",
+       "stats": [
+        "5.2",
+        "10",
+        "2",
+        "2",
+        "0",
+        "1",
+        "6",
+        "7",
+        "12",
+        "102",
+        "26",
+        "46.0",
+        "-",
+        "-",
+        "2.86"
+       ]
+      }
+     ]
+    },
+    {
+     "displayName": "august",
+     "type": "event",
+     "events": [
+      {
+       "eventId": "401816706",
+       "stats": [
+        "6.0",
+        "4",
+        "1",
+        "1",
+        "0",
+        "0",
+        "7",
+        "4",
+        "11",
+        "83",
+        "22",
+        "67.0",
+        "-",
+        "-",
+        "2.84"
+       ]
+      },
+      {
+       "eventId": "401816639",
+       "stats": [
+        "7.0",
+        "5",
+        "3",
+        "3",
+        "0",
+        "1",
+        "11",
+        "8",
+        "7",
+        "106",
+        "27",
+        "65.0",
+        "W(8-7)",
+        "-",
+        "2.91"
+       ]
+      },
+      {
+       "eventId": "401816560",
+       "stats": [
+        "6.0",
+        "7",
+        "2",
+        "1",
+        "0",
+        "2",
+        "7",
+        "7",
+        "11",
+        "109",
+        "27",
+        "57.0",
+        "L(7-7)",
+        "-",
+        "2.85"
+       ]
+      },
+      {
+       "eventId": "401816475",
+       "stats": [
+        "5.0",
+        "4",
+        "3",
+        "3",
+        "1",
+        "2",
+        "6",
+        "6",
+        "6",
+        "95",
+        "21",
+        "51.0",
+        "-",
+        "-",
+        "2.93"
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "events": {
+  "401908030": {
+   "id": "401908030",
+   "atVs": "@",
+   "gameDate": "2026-10-12T00:00:00.000+00:00",
+   "score": "2-1",
+   "gameResult": "L",
+   "opponent": {
+    "abbreviation": "MIL",
+    "displayName": "Milwaukee Brewers"
+   }
+  },
+  "401816475": {
+   "id": "401816475",
+   "atVs": "vs",
+   "gameDate": "2026-08-11T02:10:00.000+00:00",
+   "score": "6-5",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "KC",
+    "displayName": "Kansas City Royals"
+   }
+  },
+  "401817086": {
+   "id": "401817086",
+   "atVs": "@",
+   "gameDate": "2026-09-26T02:15:00.000+00:00",
+   "score": "2-0",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "SF",
+    "displayName": "San Francisco Giants"
+   }
+  },
+  "401817011": {
+   "id": "401817011",
+   "atVs": "vs",
+   "gameDate": "2026-09-20T01:10:00.000+00:00",
+   "score": "10-4",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "SF",
+    "displayName": "San Francisco Giants"
+   }
+  },
+  "401816639": {
+   "id": "401816639",
+   "atVs": "vs",
+   "gameDate": "2026-08-22T23:15:00.000+00:00",
+   "score": "4-3",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "PIT",
+    "displayName": "Pittsburgh Pirates"
+   }
+  },
+  "401816863": {
+   "id": "401816863",
+   "atVs": "vs",
+   "gameDate": "2026-09-09T02:10:00.000+00:00",
+   "score": "3-2",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "CIN",
+    "displayName": "Cincinnati Reds"
+   }
+  },
+  "401816706": {
+   "id": "401816706",
+   "atVs": "@",
+   "gameDate": "2026-08-28T22:40:00.000+00:00",
+   "score": "2-1",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "DET",
+    "displayName": "Detroit Tigers"
+   }
+  },
+  "401816560": {
+   "id": "401816560",
+   "atVs": "vs",
+   "gameDate": "2026-08-16T20:10:00.000+00:00",
+   "score": "6-2",
+   "gameResult": "L",
+   "opponent": {
+    "abbreviation": "MIL",
+    "displayName": "Milwaukee Brewers"
+   }
+  },
+  "401816936": {
+   "id": "401816936",
+   "atVs": "@",
+   "gameDate": "2026-09-14T22:40:00.000+00:00",
+   "score": "4-1",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "CIN",
+    "displayName": "Cincinnati Reds"
+   }
+  },
+  "401816796": {
+   "id": "401816796",
+   "atVs": "vs",
+   "gameDate": "2026-09-04T02:10:00.000+00:00",
+   "score": "3-2",
+   "gameResult": "W",
+   "opponent": {
+    "abbreviation": "STL",
+    "displayName": "St. Louis Cardinals"
+   }
+  }
+ }
+}

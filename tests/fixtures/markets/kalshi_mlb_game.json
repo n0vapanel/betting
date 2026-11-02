@@ -1,0 +1,105 @@
+{
+ "cursor": "",
+ "events": [
+  {
+   "event_ticker": "KXMLBGAME-26OCT262000MILTB",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-27T03:00:00Z",
+     "last_price_dollars": "0.7700",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-27T03:00:00Z",
+     "status": "active",
+     "ticker": "KXMLBGAME-26OCT262000MILTB-MIL",
+     "title": "Milwaukee wins",
+     "volume_fp": "3902457.61",
+     "yes_ask_dollars": "0.7700",
+     "yes_bid_dollars": "0.7600",
+     "yes_sub_title": "Milwaukee"
+    },
+    {
+     "expected_expiration_time": "2026-10-27T03:00:00Z",
+     "last_price_dollars": "0.2400",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-27T03:00:00Z",
+     "status": "active",
+     "ticker": "KXMLBGAME-26OCT262000MILTB-TB",
+     "title": "Tampa Bay wins",
+     "volume_fp": "3620505.02",
+     "yes_ask_dollars": "0.2400",
+     "yes_bid_dollars": "0.2300",
+     "yes_sub_title": "Tampa Bay"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXMLBGAME",
+   "sub_title": "MIL vs TB (Oct 26)",
+   "title": "Game 3: Milwaukee vs Tampa Bay"
+  },
+  {
+   "event_ticker": "KXMLBGAME-26OCT272000MILTB",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-28T03:00:00Z",
+     "last_price_dollars": "0.5000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-28T03:00:00Z",
+     "status": "active",
+     "ticker": "KXMLBGAME-26OCT272000MILTB-MIL",
+     "title": "Milwaukee wins",
+     "volume_fp": "128336.94",
+     "yes_ask_dollars": "0.5000",
+     "yes_bid_dollars": "0.4900",
+     "yes_sub_title": "Milwaukee"
+    },
+    {
+     "expected_expiration_time": "2026-10-28T03:00:00Z",
+     "last_price_dollars": "0.5100",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-28T03:00:00Z",
+     "status": "active",
+     "ticker": "KXMLBGAME-26OCT272000MILTB-TB",
+     "title": "Tampa Bay wins",
+     "volume_fp": "56483.27",
+     "yes_ask_dollars": "0.5100",
+     "yes_bid_dollars": "0.5000",
+     "yes_sub_title": "Tampa Bay"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXMLBGAME",
+   "sub_title": "MIL vs TB (Oct 27)",
+   "title": "Game 4: Milwaukee vs Tampa Bay"
+  }
+ ],
+ "milestones": [
+  {
+   "details": {
+    "league": "MLB",
+    "main_game_event_ticker": "KXMLBGAME-26OCT262000MILTB",
+    "status": "inprogress"
+   },
+   "id": "45e42ac8-14d1-5aac-a262-4333d499012b",
+   "primary_event_tickers": [
+    "KXMLBGAME-26OCT262000MILTB"
+   ],
+   "start_date": "2026-10-27T00:00:00Z",
+   "title": "Milwaukee vs Tampa Bay (Game 3)",
+   "type": "baseball_game"
+  },
+  {
+   "details": {
+    "league": "MLB",
+    "main_game_event_ticker": "KXMLBGAME-26OCT272000MILTB",
+    "status": "scheduled"
+   },
+   "id": "ad2f2b6b-27c6-511a-a732-24c90a02bd39",
+   "primary_event_tickers": [
+    "KXMLBGAME-26OCT272000MILTB"
+   ],
+   "start_date": "2026-10-28T00:00:00Z",
+   "title": "Milwaukee vs Tampa Bay (Game 4)",
+   "type": "baseball_game"
+  }
+ ]
+}

@@ -9,7 +9,7 @@ cd "$ROOT"
 
 # --- MMA: Kaggle mdabbert/ultimate-ufc-dataset (fights + BFO closing odds) ---
 echo "== MMA =="
-export KAGGLE_API_TOKEN="${KAGGLE_API_TOKEN:-KGAT_c77c97fe666f687ee1863c29c574ebe9}"
+# kaggle reads KAGGLE_API_TOKEN from your environment (or ~/.kaggle); never hardcode it here.
 mkdir -p backtest/multisport/mma/raw_mdabbert
 if ! kaggle datasets download -f ufc-master.csv mdabbert/ultimate-ufc-dataset \
      -p backtest/multisport/mma/raw_mdabbert 2>/dev/null; then

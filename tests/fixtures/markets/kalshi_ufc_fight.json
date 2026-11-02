@@ -1,0 +1,105 @@
+{
+ "cursor": "",
+ "events": [
+  {
+   "event_ticker": "KXUFCFIGHT-26OCT31REEGAL",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-11-01T02:00:00Z",
+     "last_price_dollars": "0.7400",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-11-01T02:00:00Z",
+     "status": "active",
+     "ticker": "KXUFCFIGHT-26OCT31REEGAL-REE",
+     "title": "Zach Reese wins",
+     "volume_fp": "265.09",
+     "yes_ask_dollars": "0.7400",
+     "yes_bid_dollars": "0.7200",
+     "yes_sub_title": "Zach Reese"
+    },
+    {
+     "expected_expiration_time": "2026-11-01T02:00:00Z",
+     "last_price_dollars": "0.2600",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-11-01T02:00:00Z",
+     "status": "active",
+     "ticker": "KXUFCFIGHT-26OCT31REEGAL-GAL",
+     "title": "Mickey Gall wins",
+     "volume_fp": "539.03",
+     "yes_ask_dollars": "0.2700",
+     "yes_bid_dollars": "0.2600",
+     "yes_sub_title": "Mickey Gall"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXUFCFIGHT",
+   "sub_title": "Reese vs Gall (Oct 31)",
+   "title": "Fight Night: Zach Reese vs Mickey Gall"
+  },
+  {
+   "event_ticker": "KXUFCFIGHT-26OCT31KLEKRO",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-11-01T03:00:00Z",
+     "last_price_dollars": "0.2700",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-11-01T03:00:00Z",
+     "status": "active",
+     "ticker": "KXUFCFIGHT-26OCT31KLEKRO-KLE",
+     "title": "Nick Klein wins",
+     "volume_fp": "297.19",
+     "yes_ask_dollars": "0.2700",
+     "yes_bid_dollars": "0.2500",
+     "yes_sub_title": "Nick Klein"
+    },
+    {
+     "expected_expiration_time": "2026-11-01T03:00:00Z",
+     "last_price_dollars": "0.7500",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-11-01T03:00:00Z",
+     "status": "active",
+     "ticker": "KXUFCFIGHT-26OCT31KLEKRO-KRO",
+     "title": "Joe Kropschot wins",
+     "volume_fp": "27.18",
+     "yes_ask_dollars": "0.7500",
+     "yes_bid_dollars": "0.7200",
+     "yes_sub_title": "Joe Kropschot"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXUFCFIGHT",
+   "sub_title": "Klein vs Kropschot (Oct 31)",
+   "title": "Fight Night: Nick Klein vs Joe Kropschot"
+  }
+ ],
+ "milestones": [
+  {
+   "details": {
+    "league": "UFC",
+    "main_game_event_ticker": "KXUFCFIGHT-26OCT31REEGAL",
+    "status": "not_started"
+   },
+   "id": "e77d15ed-a031-510e-8bb8-819479505784",
+   "primary_event_tickers": [
+    "KXUFCFIGHT-26OCT31REEGAL"
+   ],
+   "start_date": "2026-10-31T21:00:00Z",
+   "title": "Zach Reese vs Mickey Gall",
+   "type": "mma_match"
+  },
+  {
+   "details": {
+    "league": "UFC",
+    "main_game_event_ticker": "KXUFCFIGHT-26OCT31KLEKRO",
+    "status": "not_started"
+   },
+   "id": "1e56194e-2aff-520c-b363-5b153914eb9f",
+   "primary_event_tickers": [
+    "KXUFCFIGHT-26OCT31KLEKRO"
+   ],
+   "start_date": "2026-10-31T22:00:00Z",
+   "title": "Nick Klein vs Joe Kropschot",
+   "type": "mma_match"
+  }
+ ]
+}

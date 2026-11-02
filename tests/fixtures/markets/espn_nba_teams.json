@@ -1,0 +1,67 @@
+{
+ "sports": [
+  {
+   "leagues": [
+    {
+     "teams": [
+      {
+       "team": {
+        "abbreviation": "BOS",
+        "displayName": "Boston Celtics",
+        "id": "2",
+        "location": "Boston",
+        "name": "Celtics",
+        "nickname": "Boston",
+        "shortDisplayName": "Celtics"
+       }
+      },
+      {
+       "team": {
+        "abbreviation": "BKN",
+        "displayName": "Brooklyn Nets",
+        "id": "17",
+        "location": "Brooklyn",
+        "name": "Nets",
+        "nickname": "Brooklyn",
+        "shortDisplayName": "Nets"
+       }
+      },
+      {
+       "team": {
+        "abbreviation": "DET",
+        "displayName": "Detroit Pistons",
+        "id": "8",
+        "location": "Detroit",
+        "name": "Pistons",
+        "nickname": "Detroit",
+        "shortDisplayName": "Pistons"
+       }
+      },
+      {
+       "team": {
+        "abbreviation": "NY",
+        "displayName": "New York Knicks",
+        "id": "18",
+        "location": "New York",
+        "name": "Knicks",
+        "nickname": "New York",
+        "shortDisplayName": "Knicks"
+       }
+      },
+      {
+       "team": {
+        "abbreviation": "OKC",
+        "displayName": "Oklahoma City Thunder",
+        "id": "25",
+        "location": "Oklahoma City",
+        "name": "Thunder",
+        "nickname": "Oklahoma City",
+        "shortDisplayName": "Thunder"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

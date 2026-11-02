@@ -1,0 +1,125 @@
+{
+ "displayName": "2026-27 Splits",
+ "labels": [
+  "GP",
+  "G",
+  "A",
+  "PTS",
+  "+/-",
+  "PIM",
+  "S",
+  "FO%",
+  "PPG",
+  "PPA",
+  "SHG",
+  "SHA",
+  "GWG",
+  "TOI/G",
+  "PROD"
+ ],
+ "names": [
+  "games",
+  "goals",
+  "assists",
+  "points",
+  "plusMinus",
+  "penaltyMinutes",
+  "shotsTotal",
+  "faceoffPercent",
+  "powerPlayGoals",
+  "powerPlayAssists",
+  "shortHandedGoals",
+  "shortHandedAssists",
+  "gameWinningGoals",
+  "timeOnIcePerGame",
+  "production"
+ ],
+ "displayNames": [
+  "Games Played",
+  "Goals",
+  "Assists",
+  "Points",
+  "Plus/Minus Rating",
+  "Penalty Minutes",
+  "Shots",
+  "Faceoff Win Percent",
+  "Power Play Goals",
+  "Power Play Assists",
+  "Short Handed Goals",
+  "Short Handed Assists",
+  "Game-Winning Goals",
+  "Time On Ice Per Game",
+  "Production"
+ ],
+ "splitCategories": [
+  {
+   "name": "split",
+   "displayName": "split",
+   "splits": [
+    {
+     "abbreviation": "Total",
+     "displayName": "All Splits",
+     "stats": [
+      "11",
+      "8",
+      "25",
+      "33",
+      "16",
+      "2",
+      "28",
+      "48.4",
+      "0",
+      "12",
+      "1",
+      "0",
+      "0",
+      "23:38",
+      "7:52"
+     ]
+    },
+    {
+     "abbreviation": "Home",
+     "displayName": "Home",
+     "stats": [
+      "6",
+      "3",
+      "12",
+      "15",
+      "1",
+      "0",
+      "16",
+      "49.1",
+      "0",
+      "7",
+      "0",
+      "0",
+      "0",
+      "24:40",
+      "9:52"
+     ]
+    },
+    {
+     "abbreviation": "Away",
+     "displayName": "Away",
+     "stats": [
+      "5",
+      "5",
+      "13",
+      "18",
+      "15",
+      "2",
+      "12",
+      "47.9",
+      "0",
+      "5",
+      "1",
+      "0",
+      "0",
+      "22:25",
+      "6:13"
+     ]
+    }
+   ]
+  }
+ ]
+}

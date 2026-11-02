@@ -1,0 +1,226 @@
+{
+ "cursor": "",
+ "events": [
+  {
+   "event_ticker": "KXNBASPREAD-26OCT28PHIIND",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 8.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-IND9",
+     "title": "Indiana wins by over 8.5 points",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.3700",
+     "yes_bid_dollars": "0.1700",
+     "yes_sub_title": "Indiana wins by over 8.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 6.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-IND7",
+     "title": "Indiana wins by over 6.5 points",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.4100",
+     "yes_bid_dollars": "0.2200",
+     "yes_sub_title": "Indiana wins by over 6.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 5.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-IND6",
+     "title": "Indiana wins by over 5.5 points",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.4200",
+     "yes_bid_dollars": "0.2400",
+     "yes_sub_title": "Indiana wins by over 5.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 4.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-IND5",
+     "title": "Indiana wins by over 4.5 points",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.4300",
+     "yes_bid_dollars": "0.2800",
+     "yes_sub_title": "Indiana wins by over 4.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 3.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-IND4",
+     "title": "Indiana wins by over 3.5 points",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.4300",
+     "yes_bid_dollars": "0.3100",
+     "yes_sub_title": "Indiana wins by over 3.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 2.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-IND3",
+     "title": "Indiana wins by over 2.5 points",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.4500",
+     "yes_bid_dollars": "0.3300",
+     "yes_sub_title": "Indiana wins by over 2.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 1.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-IND2",
+     "title": "Indiana wins by over 1.5 points",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.4800",
+     "yes_bid_dollars": "0.3500",
+     "yes_sub_title": "Indiana wins by over 1.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 1.5,
+     "last_price_dollars": "0.4800",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-PHI2",
+     "title": "Philadelphia wins by over 1.5 points",
+     "volume_fp": "301.60",
+     "yes_ask_dollars": "0.5200",
+     "yes_bid_dollars": "0.4900",
+     "yes_sub_title": "Philadelphia wins by over 1.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 2.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-PHI3",
+     "title": "Philadelphia wins by over 2.5 points",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.5000",
+     "yes_bid_dollars": "0.4100",
+     "yes_sub_title": "Philadelphia wins by over 2.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 3.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-PHI4",
+     "title": "Philadelphia wins by over 3.5 points",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.4800",
+     "yes_bid_dollars": "0.3900",
+     "yes_sub_title": "Philadelphia wins by over 3.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 4.5,
+     "last_price_dollars": "0.3100",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-PHI5",
+     "title": "Philadelphia wins by over 4.5 points",
+     "volume_fp": "0.01",
+     "yes_ask_dollars": "0.4900",
+     "yes_bid_dollars": "0.3400",
+     "yes_sub_title": "Philadelphia wins by over 4.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 5.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-PHI6",
+     "title": "Philadelphia wins by over 5.5 points",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.4700",
+     "yes_bid_dollars": "0.2800",
+     "yes_sub_title": "Philadelphia wins by over 5.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 6.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-PHI7",
+     "title": "Philadelphia wins by over 6.5 points",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.4500",
+     "yes_bid_dollars": "0.2500",
+     "yes_sub_title": "Philadelphia wins by over 6.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 7.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBASPREAD-26OCT28PHIIND-PHI8",
+     "title": "Philadelphia wins by over 7.5 points",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.4200",
+     "yes_bid_dollars": "0.2200",
+     "yes_sub_title": "Philadelphia wins by over 7.5 points"
+    }
+   ],
+   "mutually_exclusive": false,
+   "series_ticker": "KXNBASPREAD",
+   "sub_title": "PHI vs IND (Oct 28)",
+   "title": "Philadelphia vs Indiana: Spread"
+  }
+ ],
+ "milestones": [
+  {
+   "details": {
+    "league": "NBA",
+    "main_game_event_ticker": "KXNBAGAME-26OCT28PHIIND",
+    "status": "scheduled"
+   },
+   "id": "86299cae-6ba4-5838-8e5c-4c872bde1542",
+   "primary_event_tickers": [
+    "KXNBASPREAD-26OCT28PHIIND"
+   ],
+   "start_date": "2026-10-28T23:00:00Z",
+   "title": "PHI 76ers at IND Pacers",
+   "type": "basketball_game"
+  }
+ ]
+}

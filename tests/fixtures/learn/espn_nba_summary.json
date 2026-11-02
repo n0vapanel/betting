@@ -1,0 +1,371 @@
+{
+ "boxscore": {
+  "teams": [
+   {
+    "homeAway": "away",
+    "statistics": [
+     {
+      "displayValue": "40-82",
+      "name": "fieldGoalsMade-fieldGoalsAttempted"
+     },
+     {
+      "displayValue": "49",
+      "name": "fieldGoalPct"
+     },
+     {
+      "displayValue": "20-47",
+      "name": "threePointFieldGoalsMade-threePointFieldGoalsAttempted"
+     },
+     {
+      "displayValue": "43",
+      "name": "threePointFieldGoalPct"
+     },
+     {
+      "displayValue": "32-38",
+      "name": "freeThrowsMade-freeThrowsAttempted"
+     },
+     {
+      "displayValue": "84",
+      "name": "freeThrowPct"
+     },
+     {
+      "displayValue": "31",
+      "name": "totalRebounds"
+     },
+     {
+      "displayValue": "5",
+      "name": "offensiveRebounds"
+     },
+     {
+      "displayValue": "26",
+      "name": "defensiveRebounds"
+     },
+     {
+      "displayValue": "19",
+      "name": "assists"
+     },
+     {
+      "displayValue": "9",
+      "name": "steals"
+     },
+     {
+      "displayValue": "6",
+      "name": "blocks"
+     },
+     {
+      "displayValue": "10",
+      "name": "turnovers"
+     },
+     {
+      "displayValue": "0",
+      "name": "teamTurnovers"
+     },
+     {
+      "displayValue": "10",
+      "name": "totalTurnovers"
+     },
+     {
+      "displayValue": "0",
+      "name": "technicalFouls"
+     },
+     {
+      "displayValue": "0",
+      "name": "totalTechnicalFouls"
+     },
+     {
+      "displayValue": "0",
+      "name": "flagrantFouls"
+     },
+     {
+      "displayValue": "16",
+      "name": "turnoverPoints"
+     },
+     {
+      "displayValue": "18",
+      "name": "fastBreakPoints"
+     },
+     {
+      "displayValue": "30",
+      "name": "pointsInPaint"
+     },
+     {
+      "displayValue": "24",
+      "name": "fouls"
+     },
+     {
+      "displayValue": "9",
+      "name": "largestLead"
+     },
+     {
+      "displayValue": "6",
+      "name": "leadChanges"
+     },
+     {
+      "displayValue": "43",
+      "name": "leadPercentage"
+     }
+    ],
+    "team": {
+     "displayName": "Los Angeles Lakers"
+    }
+   },
+   {
+    "homeAway": "home",
+    "statistics": [
+     {
+      "displayValue": "46-95",
+      "name": "fieldGoalsMade-fieldGoalsAttempted"
+     },
+     {
+      "displayValue": "48",
+      "name": "fieldGoalPct"
+     },
+     {
+      "displayValue": "10-35",
+      "name": "threePointFieldGoalsMade-threePointFieldGoalsAttempted"
+     },
+     {
+      "displayValue": "29",
+      "name": "threePointFieldGoalPct"
+     },
+     {
+      "displayValue": "21-27",
+      "name": "freeThrowsMade-freeThrowsAttempted"
+     },
+     {
+      "displayValue": "78",
+      "name": "freeThrowPct"
+     },
+     {
+      "displayValue": "52",
+      "name": "totalRebounds"
+     },
+     {
+      "displayValue": "20",
+      "name": "offensiveRebounds"
+     },
+     {
+      "displayValue": "32",
+      "name": "defensiveRebounds"
+     },
+     {
+      "displayValue": "29",
+      "name": "assists"
+     },
+     {
+      "displayValue": "6",
+      "name": "steals"
+     },
+     {
+      "displayValue": "2",
+      "name": "blocks"
+     },
+     {
+      "displayValue": "17",
+      "name": "turnovers"
+     },
+     {
+      "displayValue": "0",
+      "name": "teamTurnovers"
+     },
+     {
+      "displayValue": "17",
+      "name": "totalTurnovers"
+     },
+     {
+      "displayValue": "0",
+      "name": "technicalFouls"
+     },
+     {
+      "displayValue": "0",
+      "name": "totalTechnicalFouls"
+     },
+     {
+      "displayValue": "0",
+      "name": "flagrantFouls"
+     },
+     {
+      "displayValue": "22",
+      "name": "turnoverPoints"
+     },
+     {
+      "displayValue": "4",
+      "name": "fastBreakPoints"
+     },
+     {
+      "displayValue": "58",
+      "name": "pointsInPaint"
+     },
+     {
+      "displayValue": "33",
+      "name": "fouls"
+     },
+     {
+      "displayValue": "18",
+      "name": "largestLead"
+     },
+     {
+      "displayValue": "6",
+      "name": "leadChanges"
+     },
+     {
+      "displayValue": "50",
+      "name": "leadPercentage"
+     }
+    ],
+    "team": {
+     "displayName": "Utah Jazz"
+    }
+   }
+  ]
+ },
+ "gameInfo": {
+  "venue": {
+   "fullName": "Delta Center"
+  }
+ },
+ "header": {
+  "competitions": [
+   {
+    "competitors": [
+     {
+      "homeAway": "home",
+      "linescores": [
+       {
+        "displayValue": "47"
+       },
+       {
+        "displayValue": "24"
+       },
+       {
+        "displayValue": "29"
+       },
+       {
+        "displayValue": "23"
+       }
+      ],
+      "score": "123",
+      "team": {
+       "abbreviation": "UTAH",
+       "displayName": "Utah Jazz",
+       "id": "26"
+      }
+     },
+     {
+      "homeAway": "away",
+      "linescores": [
+       {
+        "displayValue": "29"
+       },
+       {
+        "displayValue": "45"
+       },
+       {
+        "displayValue": "29"
+       },
+       {
+        "displayValue": "29"
+       }
+      ],
+      "score": "132",
+      "team": {
+       "abbreviation": "LAL",
+       "displayName": "Los Angeles Lakers",
+       "id": "13"
+      }
+     }
+    ],
+    "date": "2026-10-25T21:00Z",
+    "id": "401909861",
+    "neutralSite": false,
+    "status": {
+     "type": {
+      "completed": true,
+      "name": "STATUS_FINAL",
+      "state": "post"
+     }
+    }
+   }
+  ],
+  "id": "401909861"
+ },
+ "pickcenter": [
+  {
+   "details": "LAL -6.5",
+   "moneyline": {
+    "away": {
+     "close": {
+      "odds": "-250"
+     },
+     "open": {
+      "odds": "-258"
+     }
+    },
+    "displayName": "Moneyline",
+    "home": {
+     "close": {
+      "odds": "+205"
+     },
+     "open": {
+      "odds": "+210"
+     }
+    },
+    "shortDisplayName": "ML"
+   },
+   "overUnder": 237.5,
+   "pointSpread": {
+    "away": {
+     "close": {
+      "line": "-6.5",
+      "odds": "-110"
+     },
+     "open": {
+      "line": "-6.5",
+      "odds": "-110"
+     }
+    },
+    "displayName": "Spread",
+    "home": {
+     "close": {
+      "line": "+6.5",
+      "odds": "-110"
+     },
+     "open": {
+      "line": "+6.5",
+      "odds": "-110"
+     }
+    },
+    "shortDisplayName": "Spread"
+   },
+   "provider": {
+    "id": "100",
+    "name": "DraftKings"
+   },
+   "spread": 6.5,
+   "total": {
+    "displayName": "Total",
+    "over": {
+     "close": {
+      "line": "o237.5",
+      "odds": "-105"
+     },
+     "open": {
+      "line": "o236.5",
+      "odds": "-105"
+     }
+    },
+    "shortDisplayName": "Total",
+    "under": {
+     "close": {
+      "line": "u237.5",
+      "odds": "-115"
+     },
+     "open": {
+      "line": "u236.5",
+      "odds": "-115"
+     }
+    }
+   }
+  }
+ ]
+}

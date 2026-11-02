@@ -1,0 +1,189 @@
+{
+ "displayName": "2026-27 Splits",
+ "labels": [
+  "GP",
+  "MIN",
+  "FG",
+  "FG%",
+  "3PT",
+  "3P%",
+  "FT",
+  "FT%",
+  "OR",
+  "DR",
+  "REB",
+  "AST",
+  "BLK",
+  "STL",
+  "PF",
+  "TO",
+  "PTS"
+ ],
+ "names": [
+  "gamesPlayed",
+  "avgMinutes",
+  "avgFieldGoalsMade-avgFieldGoalsAttempted",
+  "fieldGoalPct",
+  "avgThreePointFieldGoalsMade-avgThreePointFieldGoalsAttempted",
+  "threePointFieldGoalPct",
+  "Free Throws Made-Attempted Per Game",
+  "freeThrowPct",
+  "avgOffensiveRebounds",
+  "avgDefensiveRebounds",
+  "avgRebounds",
+  "avgAssists",
+  "avgBlocks",
+  "avgSteals",
+  "avgFouls",
+  "avgTurnovers",
+  "avgPoints"
+ ],
+ "displayNames": [
+  "Games Played",
+  "Minutes Per Game",
+  "Field Goals Made-Attempted Per Game",
+  "Field Goal Percentage",
+  "3-Point Field Goals Made-Attempted Per Game",
+  "3-Point Field Goal Percentage",
+  "Free Throws Made-Attempted Per Game",
+  "Free Throw Percentage",
+  "Offensive Rebounds Per Game",
+  "Defensive Rebounds Per Game",
+  "Rebounds Per Game",
+  "Assists Per Game",
+  "Blocks Per Game",
+  "Steals Per Game",
+  "Fouls Per Game",
+  "Turnovers Per Game",
+  "Points Per Game"
+ ],
+ "splitCategories": [
+  {
+   "name": "split",
+   "displayName": "split",
+   "splits": [
+    {
+     "abbreviation": "Total",
+     "displayName": "All Splits",
+     "stats": [
+      "2",
+      "33.5",
+      "5.0-13.5",
+      "37.0",
+      "0.5-3.5",
+      "14.3",
+      "5.0-6.5",
+      "76.9",
+      "1.0",
+      "8.5",
+      "9.5",
+      "6.0",
+      "1.0",
+      "2.0",
+      "3.5",
+      "3.0",
+      "15.5"
+     ]
+    },
+    {
+     "abbreviation": "Home",
+     "displayName": "Home",
+     "stats": [
+      "1",
+      "33.0",
+      "5.0-14.0",
+      "35.7",
+      "1.0-4.0",
+      "25.0",
+      "6.0-7.0",
+      "85.7",
+      "1.0",
+      "9.0",
+      "10.0",
+      "5.0",
+      "1.0",
+      "3.0",
+      "3.0",
+      "5.0",
+      "17.0"
+     ]
+    },
+    {
+     "abbreviation": "Road",
+     "displayName": "Road",
+     "stats": [
+      "1",
+      "34.0",
+      "5.0-13.0",
+      "38.5",
+      "0.0-3.0",
+      "0.0",
+      "4.0-6.0",
+      "66.7",
+      "1.0",
+      "8.0",
+      "9.0",
+      "7.0",
+      "1.0",
+      "1.0",
+      "4.0",
+      "1.0",
+      "14.0"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "byOpponent",
+   "displayName": "Opponent",
+   "splits": [
+    {
+     "abbreviation": "vs CLE",
+     "displayName": "Cleveland Cavaliers",
+     "stats": [
+      "1",
+      "33.0",
+      "5.0-14.0",
+      "35.7",
+      "1.0-4.0",
+      "25.0",
+      "6.0-7.0",
+      "85.7",
+      "1.0",
+      "9.0",
+      "10.0",
+      "5.0",
+      "1.0",
+      "3.0",
+      "3.0",
+      "5.0",
+      "17.0"
+     ]
+    },
+    {
+     "abbreviation": "vs NY",
+     "displayName": "New York Knicks",
+     "stats": [
+      "1",
+      "34.0",
+      "5.0-13.0",
+      "38.5",
+      "0.0-3.0",
+      "0.0",
+      "4.0-6.0",
+      "66.7",
+      "1.0",
+      "8.0",
+      "9.0",
+      "7.0",
+      "1.0",
+      "1.0",
+      "4.0",
+      "1.0",
+      "14.0"
+     ]
+    }
+   ]
+  }
+ ]
+}

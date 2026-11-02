@@ -18,35 +18,59 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from ..cache import TTLCache
+from ..utils import policy, safe_params, shared_cache
+
+# Endpoints whose answers change while games are on: today's fixtures and games use the policy's "live" row
+LIVE_PATHS = frozenset({"fixtures", "games"})
+
 
 class ApiSportsClient:
     """Minimal wrapper around API‑SPORTS endpoints.
+
+    Every request goes through the shared cache (``cache``, else the process's: data/utils.use_cache) with its
+    kind and the policy table's time to live. The key travels in a header, never in the cache key or a log.
 
     Args:
         api_key: Your API‑SPORTS key.  Required for authenticated access.
         base_url: Base URL for the API.  Defaults to Football v3.  Override
             when using other sports (e.g. https://v1.basketball.api-sports.io).
+        cache: The process's shared TTLCache.
     """
 
-    def __init__(self, api_key: str, base_url: str = "https://v3.football.api-sports.io") -> None:
+    def __init__(self, api_key: str, base_url: str = "https://v3.football.api-sports.io",
+                 cache: Optional[TTLCache] = None) -> None:
         if not api_key:
             raise ValueError("API‑SPORTS key must be provided")
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
+        self.cache = cache
         self.session = requests.Session()
         # API‑SPORTS expects the key in a header named 'x-apisports-key'
         self.session.headers.update({"x-apisports-key": self.api_key})
 
     def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Internal helper to perform GET requests and parse JSON."""
-        url = f"{self.base_url}/{path.lstrip('/')}"
+        """A GET through the shared cache (kind "api_sports"), keyed by the base URL, path and query (never the
+        key). Today's fixtures and games keep for a minute, everything else for the policy's default."""
+        path = path.lstrip("/")
+        today = str((params or {}).get("date") or "") == date.today().isoformat()
+        ttl, stale = policy("api_sports", "live" if path in LIVE_PATHS and today else None)
+        cache = self.cache if self.cache is not None else shared_cache()
+        return cache.get(("api-sports", self.base_url, path, safe_params(params)), ttl,
+                         lambda: self._fetch(path, params), stale=stale, kind="api_sports")
+
+    def _fetch(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """One request to API‑SPORTS and its parsed JSON. Only ever called inside a cache loader."""
+        url = f"{self.base_url}/{path}"
         try:
             response = self.session.get(url, params=params, timeout=15.0)
             response.raise_for_status()
             return response.json()
-        except requests.RequestException as exc:
-            logging.exception("API‑SPORTS request failed: %s", exc)
-            raise RuntimeError(f"API‑SPORTS request failed: {exc}") from exc
+        except (requests.RequestException, ValueError) as exc:
+            # Name the failure only: a request's text can quote its URL and headers
+            reason = getattr(getattr(exc, "response", None), "status_code", None) or type(exc).__name__
+            logging.error("API‑SPORTS request to %s failed (%s)", path, reason)
+            raise RuntimeError(f"API‑SPORTS request to {path} failed ({reason})") from None
 
     def get_fixtures(self, sport: str, match_date: date) -> List[Dict[str, Any]]:
         """Retrieve fixtures for a given sport and date.

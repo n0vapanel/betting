@@ -1,15 +1,35 @@
-"""Unit tests for the bot's session management and tier classification.
+"""Unit tests for the bot's session management, tier classification and handlers.
 
 These tests focus on components that do not require network access or a
 Telegram environment: the SessionManager used to track user state
-across messages and the TierClassifier that assigns predictions to
-confidence tiers.
+across messages, the TierClassifier that assigns predictions to
+confidence tiers, and the bot's screens, buttons and Single/Multi flow
+(run against the shared fake games service).
 """
 
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
+from telegram import User
+from telegram.ext import Application, CallbackQueryHandler, ExtBot, PicklePersistence
+
+from telegram_betting_bot_simple.bot import handlers
+from telegram_betting_bot_simple.bot.handlers import (
+    game_card_text,
+    parse_pick,
+    pick_data,
+    setup_handlers,
+    short_name,
+    slip_text,
+)
 from telegram_betting_bot_simple.bot.session_manager import SessionManager
+from telegram_betting_bot_simple.config import Config
+from telegram_betting_bot_simple.dashboard.service import DashboardService
+from telegram_betting_bot_simple.data.leagues import MAX_LEAGUES, pick_leagues
 from telegram_betting_bot_simple.engine.tier_classifier import TierClassifier
+from telegram_betting_bot_simple.main import build_application
 
 def test_session_manager_reuse() -> None:
     mgr = SessionManager()
@@ -38,3 +58,235 @@ def test_tier_classifier_thresholds() -> None:
     # Hot: below middle threshold
     outcome, tier = classifier.classify({"A": 0.55, "B": 0.45})
     assert tier == "Hot"
+
+def test_pick_leagues_keeps_in_season_game_leagues_popular_first() -> None:
+    sports = [
+        {"key": "soccer_spain_segunda_division", "group": "Soccer", "title": "La Liga 2", "active": True, "has_outrights": False},
+        {"key": "soccer_epl", "group": "Soccer", "title": "EPL", "active": True, "has_outrights": False},
+        {"key": "soccer_fifa_world_cup", "group": "Soccer", "title": "FIFA World Cup", "active": False, "has_outrights": False},
+        {"key": "soccer_epl_winner", "group": "Soccer", "title": "EPL Winner", "active": True, "has_outrights": True},
+        {"key": "basketball_nba", "group": "Basketball", "title": "NBA", "active": True, "has_outrights": False},
+    ]
+    assert [league["key"] for league in pick_leagues(sports, "Soccer")] == ["soccer_epl", "soccer_spain_segunda_division"]
+    many = [
+        {"key": f"soccer_{i:02d}", "group": "Soccer", "title": f"League {i:02d}", "active": True, "has_outrights": False}
+        for i in range(30)
+    ]
+    assert len(pick_leagues(many, "Soccer")) == MAX_LEAGUES
+
+def test_pick_buttons_fit_telegram_and_round_trip() -> None:
+    game_id = "4c1f9e2b7d3a5e6f8a9b0c1d2e3f4a5b"  # The Odds API ids are 32 hex characters
+    data = pick_data("soccer_spain_segunda_division", game_id, "spreads", "away")
+    assert len(data.encode()) <= 64
+    assert parse_pick(data) == {"league": "soccer_spain_segunda_division", "id": game_id[:16],
+                                "market": "spreads", "side": "away"}
+    assert parse_pick("p:nba:abc:zz") is None
+
+def test_short_names() -> None:
+    assert short_name("Oklahoma City Thunder") == "Thunder"
+    assert short_name("Portland Trail Blazers") == "Trail Blazers"
+    assert short_name("Manchester United", "soccer_epl") == "Manchester United"
+
+def test_game_card_shows_prediction_injuries_and_leaders(service) -> None:
+    card = service.game("basketball_nba", "g1")
+    card["injuries"] = {"away": ["Bradley Beal (Out)", "James Harden (Day-To-Day)"], "home": []}
+    card["players"] = {"home": [
+        {"name": "Shai Gilgeous-Alexander", "out": False, "pts": 31.2, "reb": 5.1, "ast": 6.4},
+        {"name": "Nikola Topic", "out": True, "pts": 0.0, "reb": 0.0, "ast": 0.0},
+    ], "away": []}
+    text = game_card_text(card, "7:00 PM EDT")
+    assert "Los Angeles Clippers @ Oklahoma City Thunder" in text
+    assert "AI prediction:</b> Thunder" in text
+    assert "Spread Thunder -13.5: covers" in text
+    assert "Clippers: Bradley Beal" in text and "Harden" not in text  # only players ruled out
+    assert "Shai Gilgeous-Alexander: 31.2 pts, 5.1 reb, 6.4 ast" in text
+    assert "Topic" not in text.split("Projected leaders")[1]
+
+def test_setup_handlers_shares_the_dashboard_service() -> None:
+    config = Config(TELEGRAM_BOT_TOKEN="123456:test", THE_ODDS_API_KEY="odds")
+    application = Application.builder().token(config.telegram_token).build()
+    setup_handlers(application, config)
+    assert isinstance(application.bot_data["service"], DashboardService)
+    buttons = [h for h in application.handlers[0] if isinstance(h, CallbackQueryHandler)]
+    assert buttons[-1].pattern is None  # catch-all for expired menus comes last
+    assert all(h.pattern is not None for h in buttons[:-1])
+    no_key = Application.builder().token(config.telegram_token).build()
+    setup_handlers(no_key, Config(TELEGRAM_BOT_TOKEN="123456:test"))
+    assert no_key.bot_data["service"] is None
+
+def test_a_restart_on_the_server_keeps_the_games_service(tmp_path, monkeypatch) -> None:
+    # The server saves users' state between restarts. A state file from an earlier version also
+    # holds bot_data, which used to replace the live games service on startup ("needs a key")
+    async def get_me(self, *args, **kwargs):  # no network
+        return User(id=123456, first_name="Test bot", is_bot=True)
+
+    async def save_old_state():
+        # How the earlier version ran: every kind of data saved, including bot_data
+        old = Application.builder().token("123456:test").persistence(
+            PicklePersistence(str(tmp_path / "bot_state.pickle"))).build()
+        await old.initialize()
+        old.user_data[42]["mode"] = "multi"
+        old.mark_data_for_update_persistence(user_ids=42)
+        await old.shutdown()
+
+    async def restart(application):
+        await application.initialize()
+        try:
+            return application.bot_data["service"], application.user_data[42].get("mode")
+        finally:
+            await application.shutdown()
+
+    monkeypatch.setattr(ExtBot, "get_me", get_me)
+    asyncio.run(save_old_state())
+    config = Config(TELEGRAM_BOT_TOKEN="123456:test", THE_ODDS_API_KEY="odds", STATE_DIRECTORY=str(tmp_path))
+    for _ in range(2):  # the old state file, then the one this version saves
+        service, mode = asyncio.run(restart(build_application(config)))
+        assert isinstance(service, DashboardService)
+        assert mode == "multi"  # each user's mode and slip still come back
+
+def test_multi_flow_builds_a_slip_priced_at_one_bookmaker(service) -> None:
+    application = Application.builder().token("123456:test").build()
+    setup_handlers(application, Config(TELEGRAM_BOT_TOKEN="123456:test"))
+    application.bot_data["service"] = service
+    context = SimpleNamespace(application=application, user_data={})
+    screens = []
+
+    class FakeQuery:
+        def __init__(self, data):
+            self.data = data
+            self.answers = []
+
+        async def answer(self, text=None, show_alert=False):
+            self.answers.append(text)
+
+        async def edit_message_text(self, text, reply_markup=None, **kwargs):
+            screens.append({"text": text, "buttons": [[(b.text, b.callback_data) for b in row]
+                                                      for row in reply_markup.inline_keyboard]})
+
+    def tap(handler, data):
+        query = FakeQuery(data)
+        asyncio.run(handler(SimpleNamespace(callback_query=query, message=None), context))
+        return query
+
+    tap(handlers.mode_selected, "mode:multi")
+    assert "Multi (parlay)" in screens[-1]["text"]
+    tap(handlers.sport_selected, "sport:Basketball")  # only the NBA in season: straight to games
+    games = screens[-1]
+    assert "Clippers @ Thunder" in games["text"]
+    tap(handlers.game_selected, games["buttons"][0][0][1])
+    thunder_ml = screens[-1]["buttons"][0][1]  # moneyline row: away, home
+    assert thunder_ml[0].startswith("Thunder ML")
+    assert tap(handlers.pick_selected, thunder_ml[1]).answers == ["Added to slip ✓ (1 picks)"]
+    assert screens[-1]["buttons"][0][1][0].startswith("✓ Thunder ML")
+    tap(handlers.game_selected, games["buttons"][1][0][1])
+    tap(handlers.pick_selected, screens[-1]["buttons"][0][0][1])  # Magic ML
+    tap(handlers.show_slip, "slip")
+    slip = screens[-1]["text"]
+    assert "2-leg multi" in slip
+    assert "at FanDuel" in slip  # 1.11 x 3.60 beats DraftKings' 1.10 x 3.50
+    assert "payout <b>$39.96</b>" in slip  # $10 default stake
+    tap(handlers.stake_selected, "stake:25")
+    assert "payout <b>$99.90</b>" in screens[-1]["text"]
+
+def test_single_mode_shows_the_payout_of_one_pick(service) -> None:
+    application = Application.builder().token("123456:test").build()
+    setup_handlers(application, Config(TELEGRAM_BOT_TOKEN="123456:test"))
+    application.bot_data["service"] = service
+    context = SimpleNamespace(application=application, user_data={"mode": "single", "stake": 10})
+    screens = []
+
+    class FakeQuery:
+        data = pick_data("basketball_nba", "g2", "h2h", "away")
+
+        async def answer(self, text=None, show_alert=False):
+            pass
+
+        async def edit_message_text(self, text, reply_markup=None, **kwargs):
+            screens.append(text)
+
+    asyncio.run(handlers.pick_selected(SimpleNamespace(callback_query=FakeQuery(), message=None), context))
+    assert "Single: Orlando Magic to win" in screens[-1]
+    assert "returns <b>$36.00</b>" in screens[-1]  # best price 3.60 at FanDuel
+
+def test_slip_text_lists_reasons() -> None:
+    text = slip_text({"legs": [], "reasons": ["Add at least 2 picks from different games for a multi"]}, [])
+    assert "⚠️ Add at least 2 picks" in text
+
+def test_taps_on_expired_menus_get_an_answer() -> None:
+    application = Application.builder().token("123456:test").build()
+    setup_handlers(application, Config(TELEGRAM_BOT_TOKEN="123456:test"))
+    fallback = [h for h in application.handlers[0] if isinstance(h, CallbackQueryHandler)][-1]
+
+    answers = []
+
+    class FakeQuery:
+        async def answer(self, text=None, show_alert=False):
+            answers.append((text, show_alert))
+
+    asyncio.run(fallback.callback(SimpleNamespace(callback_query=FakeQuery()), None))
+    assert answers == [("This menu has expired. Send /start to begin again.", True)]
+
+def test_anyone_can_make_a_call_and_see_it_scored(service, tmp_path) -> None:
+    from telegram_betting_bot_simple.data.store import Store
+    service.store = Store(str(tmp_path / "betting.db"))
+    application = Application.builder().token("123456:test").build()
+    setup_handlers(application, Config(TELEGRAM_BOT_TOKEN="123456:test"))
+    application.bot_data["service"] = service
+    context = SimpleNamespace(application=application, user_data={})
+    user = SimpleNamespace(id=42, first_name="Sam", username=None)
+    screens = []
+
+    class FakeQuery:
+        def __init__(self, data):
+            self.data = data
+            self.answers = []
+
+        async def answer(self, text=None, show_alert=False):
+            self.answers.append(text)
+
+        async def edit_message_text(self, text, reply_markup=None, **kwargs):
+            screens.append({"text": text, "buttons": [[(b.text, b.callback_data) for b in row]
+                                                      for row in reply_markup.inline_keyboard]})
+
+    def tap(handler, data):
+        query = FakeQuery(data)
+        asyncio.run(handler(SimpleNamespace(callback_query=query, message=None, effective_user=user), context))
+        return query
+
+    tap(handlers.game_selected, "g:basketball_nba:g1")
+    call_button = screens[-1]["buttons"][-2][0]
+    assert call_button == ("🔮 Make your call", "call:basketball_nba:g1")
+    tap(handlers.call_start, call_button[1])
+    assert "Who wins?" in screens[-1]["text"]
+    tap(handlers.call_winner, screens[-1]["buttons"][0][1][1])  # the home team, the Thunder
+    assert "80%: +21.0 if right, -39.0 if wrong" in screens[-1]["text"]
+    assert "AI agrees: it gives them" in screens[-1]["text"]  # the Thunder are big favourites
+    confirm = tap(handlers.call_confirm, "cc:basketball_nba:g1:h:80")
+    assert confirm.answers == ["Call saved ✓"]
+    assert "Call saved: Oklahoma City Thunder at 80%" in screens[-1]["text"]
+    assert all(len(data.encode()) <= 64 for row in screens[-1]["buttons"] for _, data in row)
+    tap(handlers.my_calls, "mycalls")
+    assert "Thunder 80% — ⏳ pending" in screens[-1]["text"]
+    assert service.store.predictions(player="tg:42")[0]["name"] == "Sam"
+
+
+def test_ai_bets_screen_lists_each_risk_level(service) -> None:
+    application = Application.builder().token("123456:test").build()
+    setup_handlers(application, Config(TELEGRAM_BOT_TOKEN="123456:test"))
+    application.bot_data["service"] = service
+    context = SimpleNamespace(application=application, user_data={})
+    screens = []
+
+    class FakeQuery:
+        data = "bets"
+
+        async def answer(self, text=None, show_alert=False):
+            pass
+
+        async def edit_message_text(self, text, reply_markup=None, **kwargs):
+            screens.append(text)
+
+    asyncio.run(handlers.show_bets(SimpleNamespace(callback_query=FakeQuery(), message=None), context))
+    assert "AI bets · NBA" in screens[-1]
+    assert "🛡 <b>Safe</b>" in screens[-1] and "🚀 <b>Crazy</b>" in screens[-1]
+    assert "New York Knicks to win" in screens[-1]  # the safest single on the board

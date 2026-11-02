@@ -1,5 +1,7 @@
 # brain/ — Continuous-Learning Pipeline for the Multi-Sport Betting Brain
 
+> **Retired as a design (2026-10-28):** the learning loop lives in `telegram_betting_bot_simple/learn/`; this document's promotion gate and ECE alert are retired. See `brain/README.md`.
+
 Status: RESEARCH + DESIGN (this document). Nothing here is wired yet except the directory layout.
 
 Context: the repo already has per-sport walk-forward backtests under `backtest/multisport/<sport>[_v2]/` with build/run scripts and per-game prediction CSVs. The verified scoreboard (`MULTISPORT_REPORT.md`, commit `7d8b0ef` / `f24f8fa`) shows exactly one money lane: **MMA v2 (+40.3% flat ROI, CI +36..+44, 2,843 fights 2020-26)** and one candidate lane: **Soccer v2 O/U 2.5 (+28.7% at the ε=0.05 gate, CI not yet clean)**. Everything else (NBA/NHL/MLB/NFL/tennis) is market-efficient and is kept only as a monitoring lane. This design reflects that: heavy machinery where the money is, cheap monitoring everywhere else.

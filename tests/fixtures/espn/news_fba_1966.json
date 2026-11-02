@@ -1,0 +1,67 @@
+{
+ "status": "success",
+ "resultsCount": 5,
+ "feed": [
+  {
+   "type": "Rotowire",
+   "headline": "James (back) isn't listed on the injury report for Sunday's game against Detroit.",
+   "description": "James (back) isn't listed on the injury report for Sunday's game against Detroit.",
+   "published": "2026-10-25T17:06:18Z",
+   "story": "James will suit up in the second half of this back-to-back set after sitting out Saturday's win over Milwaukee. With the star forward back in the lineup, Dean Wade will likely shift to the second unit",
+   "links": {
+    "mobile": {
+     "href": "http://m.espn.go.com/wireless/story?storyId=53600246"
+    }
+   }
+  },
+  {
+   "type": "Rotowire",
+   "headline": "James (back) has been ruled out for Saturday's game against the Bucks.",
+   "description": "James (back) has been ruled out for Saturday's game against the Bucks.",
+   "published": "2026-10-24T17:06:23Z",
+   "story": "James will be held out of the front end of this back-to-back set, with his next chance to play coming Sunday against Detroit. With the star forward sidelined, Dean Wade (ankle), Jabari Walker and Kent",
+   "links": {
+    "mobile": {
+     "href": "http://m.espn.go.com/wireless/story?storyId=53584646"
+    }
+   }
+  },
+  {
+   "type": "Media",
+   "headline": "76ers mount stunning 29-point comeback to beat Cavs in home opener",
+   "description": "76ers mount stunning 29-point comeback to beat Cavs in home opener",
+   "published": "2026-10-23T04:54:43Z",
+   "links": {
+    "web": {
+     "href": "https://www.espn.com/video/clip/_/id/50254359/76ers-mount-stunning-29-point-comeback-beat-cavs-home-opener"
+    }
+   }
+  },
+  {
+   "type": "Media",
+   "headline": "76ers mount stunning 29-point comeback to beat Cavs in home opener",
+   "description": "76ers mount stunning 29-point comeback to beat Cavs in home opener",
+   "published": "2026-10-23T04:54:43Z",
+   "links": {
+    "web": {
+     "href": "https://www.espn.com/video/clip/_/id/50254359/76ers-mount-stunning-29-point-comeback-beat-cavs-home-opener"
+    }
+   }
+  },
+  {
+   "type": "Story",
+   "headline": "Fantasy basketball: Bold predictions for the 2026-27 season",
+   "description": "Our fantasy hoops experts for their boldest predictions for the 2026-27 NBA season.",
+   "published": "2026-10-20T12:33:18Z",
+   "story": "<p><photo1></p>\n<p>Separating yourself in fantasy basketball requires a strong draft and savvy moves on the waiver wire throughout the season. But it also takes some foresight -- seeing things before ",
+   "links": {
+    "web": {
+     "href": "https://www.espn.com/fantasy/basketball/story/_/id/50224864/fantasy-basketball-bold-predictions-nba-2026-2027"
+    },
+    "mobile": {
+     "href": "http://m.espn.go.com/wireless/story?storyId=50224864"
+    }
+   }
+  }
+ ]
+}

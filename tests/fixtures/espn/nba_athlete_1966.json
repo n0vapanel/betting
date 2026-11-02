@@ -1,0 +1,23 @@
+{
+ "athlete": {
+  "id": "1966",
+  "displayName": "LeBron James",
+  "jersey": "23",
+  "headshot": {
+   "href": "https://a.espncdn.com/i/headshots/nba/players/full/1966.png"
+  },
+  "position": {
+   "abbreviation": "F",
+   "displayName": "Forward"
+  },
+  "team": {
+   "id": "20",
+   "abbreviation": "PHI",
+   "displayName": "Philadelphia 76ers"
+  },
+  "status": {
+   "name": "Active",
+   "type": "active"
+  }
+ }
+}

@@ -1,0 +1,72 @@
+{
+ "header": {
+  "id": "633241",
+  "competitions": [
+   {
+    "id": "633241",
+    "date": "2022-04-12T19:00Z",
+    "status": {
+     "type": {
+      "id": "45",
+      "name": "STATUS_FINAL_AET",
+      "state": "post",
+      "completed": true,
+      "description": "Final Score - After Extra Time",
+      "detail": "AET",
+      "shortDetail": "AET"
+     }
+    },
+    "competitors": [
+     {
+      "id": "86",
+      "homeAway": "home",
+      "winner": true,
+      "score": "2",
+      "linescores": [
+       {
+        "displayValue": "0"
+       },
+       {
+        "displayValue": "1"
+       },
+       {
+        "displayValue": "1"
+       },
+       {
+        "displayValue": "0"
+       }
+      ],
+      "team": {
+       "id": "86",
+       "displayName": "Real Madrid"
+      }
+     },
+     {
+      "id": "363",
+      "homeAway": "away",
+      "winner": false,
+      "score": "3",
+      "linescores": [
+       {
+        "displayValue": "1"
+       },
+       {
+        "displayValue": "2"
+       },
+       {
+        "displayValue": "0"
+       },
+       {
+        "displayValue": "0"
+       }
+      ],
+      "team": {
+       "id": "363",
+       "displayName": "Chelsea"
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

@@ -1,0 +1,160 @@
+[
+ {
+  "active": true,
+  "bestAsk": 0.58,
+  "bestBid": 0.57,
+  "closed": false,
+  "endDate": "2026-10-26T23:00:00Z",
+  "events": [
+   {
+    "ended": false,
+    "eventDate": "2026-10-26",
+    "live": true,
+    "slug": "nba-min-cle-2026-10-26",
+    "startTime": "2026-10-26T23:00:00Z",
+    "title": "Timberwolves vs. Cavaliers"
+   }
+  ],
+  "gameStartTime": "2026-10-26 23:00:00+00",
+  "id": "5951677",
+  "lastTradePrice": 0.57,
+  "liquidityNum": 86060.6608,
+  "outcomePrices": "[\"0.575\", \"0.425\"]",
+  "outcomes": "[\"Timberwolves\", \"Cavaliers\"]",
+  "question": "Timberwolves vs. Cavaliers",
+  "slug": "nba-min-cle-2026-10-26",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 3588416.0392039996
+ },
+ {
+  "active": true,
+  "bestAsk": 0.19,
+  "bestBid": 0.18,
+  "closed": false,
+  "endDate": "2026-10-27T23:30:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-27",
+    "slug": "nba-bkn-bos-2026-10-27",
+    "startTime": "2026-10-27T23:30:00Z",
+    "title": "Nets vs. Celtics"
+   }
+  ],
+  "gameStartTime": "2026-10-27 23:30:00+00",
+  "id": "6000454",
+  "lastTradePrice": 0.19,
+  "liquidityNum": 28230.2374,
+  "outcomePrices": "[\"0.185\", \"0.815\"]",
+  "outcomes": "[\"Nets\", \"Celtics\"]",
+  "question": "Nets vs. Celtics",
+  "slug": "nba-bkn-bos-2026-10-27",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 5688.091716999999
+ },
+ {
+  "active": true,
+  "bestAsk": 0.4,
+  "bestBid": 0.39,
+  "closed": false,
+  "endDate": "2026-10-28T00:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-27",
+    "slug": "nba-det-nyk-2026-10-27",
+    "startTime": "2026-10-28T00:00:00Z",
+    "title": "Pistons vs. Knicks"
+   }
+  ],
+  "gameStartTime": "2026-10-28 00:00:00+00",
+  "id": "6000457",
+  "lastTradePrice": 0.39,
+  "liquidityNum": 33760.2569,
+  "outcomePrices": "[\"0.395\", \"0.605\"]",
+  "outcomes": "[\"Pistons\", \"Knicks\"]",
+  "question": "Pistons vs. Knicks",
+  "slug": "nba-det-nyk-2026-10-27",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 2919.2830539999995
+ },
+ {
+  "active": true,
+  "bestAsk": 0.42,
+  "bestBid": 0.41,
+  "closed": false,
+  "endDate": "2026-10-28T03:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-27",
+    "slug": "nba-por-lal-2026-10-27",
+    "startTime": "2026-10-28T03:00:00Z",
+    "title": "Trail Blazers vs. Lakers"
+   }
+  ],
+  "gameStartTime": "2026-10-28 03:00:00+00",
+  "id": "6004693",
+  "lastTradePrice": 0.42,
+  "liquidityNum": 37382.4311,
+  "outcomePrices": "[\"0.415\", \"0.585\"]",
+  "outcomes": "[\"Trail Blazers\", \"Lakers\"]",
+  "question": "Trail Blazers vs. Lakers",
+  "slug": "nba-por-lal-2026-10-27",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 3396.4802910000003
+ },
+ {
+  "active": true,
+  "bestAsk": 0.26,
+  "bestBid": 0.25,
+  "closed": false,
+  "endDate": "2026-10-28T23:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-28",
+    "slug": "nba-was-cle-2026-10-28",
+    "startTime": "2026-10-28T23:00:00Z",
+    "title": "Wizards vs. Cavaliers"
+   }
+  ],
+  "gameStartTime": "2026-10-28 23:00:00+00",
+  "id": "6032749",
+  "lastTradePrice": 0.26,
+  "liquidityNum": 22406.8258,
+  "outcomePrices": "[\"0.255\", \"0.745\"]",
+  "outcomes": "[\"Wizards\", \"Cavaliers\"]",
+  "question": "Wizards vs. Cavaliers",
+  "slug": "nba-was-cle-2026-10-28",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 830.6731559999998
+ },
+ {
+  "active": true,
+  "bestAsk": 0.55,
+  "bestBid": 0.54,
+  "closed": false,
+  "endDate": "2026-10-28T23:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-28",
+    "slug": "nba-phi-ind-2026-10-28",
+    "startTime": "2026-10-28T23:00:00Z",
+    "title": "76ers vs. Pacers"
+   }
+  ],
+  "gameStartTime": "2026-10-28 23:00:00+00",
+  "id": "6032755",
+  "lastTradePrice": 0.56,
+  "liquidityNum": 25853.9204,
+  "outcomePrices": "[\"0.545\", \"0.455\"]",
+  "outcomes": "[\"76ers\", \"Pacers\"]",
+  "question": "76ers vs. Pacers",
+  "slug": "nba-phi-ind-2026-10-28",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 6018.127923000001
+ }
+]

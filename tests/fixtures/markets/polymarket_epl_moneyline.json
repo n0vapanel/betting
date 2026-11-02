@@ -1,0 +1,245 @@
+[
+ {
+  "active": true,
+  "bestAsk": 0.54,
+  "bestBid": 0.53,
+  "closed": false,
+  "endDate": "2026-10-31T12:30:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-che-mun-2026-10-31",
+    "startTime": "2026-10-31T12:30:00Z",
+    "title": "Chelsea FC vs. Manchester United FC"
+   }
+  ],
+  "gameStartTime": "2026-10-31 12:30:00+00",
+  "groupItemTitle": "Chelsea FC",
+  "id": "5851323",
+  "lastTradePrice": 0.54,
+  "liquidityNum": 22703.0119,
+  "outcomePrices": "[\"0.535\", \"0.465\"]",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "question": "Will Chelsea FC win on 2026-10-31?",
+  "slug": "epl-che-mun-2026-10-31-che",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 8904.197171
+ },
+ {
+  "active": true,
+  "bestAsk": 0.25,
+  "bestBid": 0.24,
+  "closed": false,
+  "endDate": "2026-10-31T12:30:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-che-mun-2026-10-31",
+    "startTime": "2026-10-31T12:30:00Z",
+    "title": "Chelsea FC vs. Manchester United FC"
+   }
+  ],
+  "gameStartTime": "2026-10-31 12:30:00+00",
+  "groupItemTitle": "Draw (Chelsea FC vs. Manchester United FC)",
+  "id": "5851325",
+  "lastTradePrice": 0.25,
+  "liquidityNum": 19351.6602,
+  "outcomePrices": "[\"0.245\", \"0.755\"]",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "question": "Will Chelsea FC vs. Manchester United FC end in a draw?",
+  "slug": "epl-che-mun-2026-10-31-draw",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 318.339728
+ },
+ {
+  "active": true,
+  "bestAsk": 0.23,
+  "bestBid": 0.22,
+  "closed": false,
+  "endDate": "2026-10-31T12:30:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-che-mun-2026-10-31",
+    "startTime": "2026-10-31T12:30:00Z",
+    "title": "Chelsea FC vs. Manchester United FC"
+   }
+  ],
+  "gameStartTime": "2026-10-31 12:30:00+00",
+  "groupItemTitle": "Manchester United FC",
+  "id": "5851327",
+  "lastTradePrice": 0.23,
+  "liquidityNum": 21904.8661,
+  "outcomePrices": "[\"0.225\", \"0.775\"]",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "question": "Will Manchester United FC win on 2026-10-31?",
+  "slug": "epl-che-mun-2026-10-31-mun",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 2048.4587890000003
+ },
+ {
+  "active": true,
+  "bestAsk": 0.48,
+  "bestBid": 0.47,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "Aston Villa FC",
+  "id": "5852727",
+  "lastTradePrice": 0.48,
+  "liquidityNum": 26145.6623,
+  "outcomePrices": "[\"0.475\", \"0.525\"]",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "question": "Will Aston Villa FC win on 2026-10-31?",
+  "slug": "epl-ast-ful-2026-10-31-ast",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 5562.194981000001
+ },
+ {
+  "active": true,
+  "bestAsk": 0.27,
+  "bestBid": 0.25,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "Draw (Aston Villa FC vs. Fulham FC)",
+  "id": "5852728",
+  "lastTradePrice": 0.26,
+  "liquidityNum": 24029.3893,
+  "outcomePrices": "[\"0.26\", \"0.74\"]",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "question": "Will Aston Villa FC vs. Fulham FC end in a draw?",
+  "slug": "epl-ast-ful-2026-10-31-draw",
+  "sportsMarketType": "moneyline",
+  "spread": 0.02,
+  "volumeNum": 70.42165200000001
+ },
+ {
+  "active": true,
+  "bestAsk": 0.27,
+  "bestBid": 0.26,
+  "closed": false,
+  "endDate": "2026-10-31T20:00:00Z",
+  "events": [
+   {
+    "eventDate": "2026-10-31",
+    "slug": "epl-ast-ful-2026-10-31",
+    "startTime": "2026-10-31T20:00:00Z",
+    "title": "Aston Villa FC vs. Fulham FC"
+   }
+  ],
+  "gameStartTime": "2026-10-31 20:00:00+00",
+  "groupItemTitle": "Fulham FC",
+  "id": "5852730",
+  "lastTradePrice": 0.26,
+  "liquidityNum": 17639.0822,
+  "outcomePrices": "[\"0.265\", \"0.735\"]",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "question": "Will Fulham FC win on 2026-10-31?",
+  "slug": "epl-ast-ful-2026-10-31-ful",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 100.692308
+ },
+ {
+  "active": true,
+  "bestAsk": 0.32,
+  "bestBid": 0.31,
+  "closed": false,
+  "endDate": "2026-11-01T16:30:00Z",
+  "events": [
+   {
+    "eventDate": "2026-11-01",
+    "slug": "epl-liv-ars-2026-11-01",
+    "startTime": "2026-11-01T16:30:00Z",
+    "title": "Liverpool FC vs. Arsenal FC"
+   }
+  ],
+  "gameStartTime": "2026-11-01 16:30:00+00",
+  "groupItemTitle": "Liverpool FC",
+  "id": "5912766",
+  "lastTradePrice": 0.32,
+  "liquidityNum": 14798.6997,
+  "outcomePrices": "[\"0.315\", \"0.685\"]",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "question": "Will Liverpool FC win on 2026-11-01?",
+  "slug": "epl-liv-ars-2026-11-01-liv",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 2149.3761449999997
+ },
+ {
+  "active": true,
+  "bestAsk": 0.27,
+  "bestBid": 0.26,
+  "closed": false,
+  "endDate": "2026-11-01T16:30:00Z",
+  "events": [
+   {
+    "eventDate": "2026-11-01",
+    "slug": "epl-liv-ars-2026-11-01",
+    "startTime": "2026-11-01T16:30:00Z",
+    "title": "Liverpool FC vs. Arsenal FC"
+   }
+  ],
+  "gameStartTime": "2026-11-01 16:30:00+00",
+  "groupItemTitle": "Draw (Liverpool FC vs. Arsenal FC)",
+  "id": "5912769",
+  "lastTradePrice": 0.27,
+  "liquidityNum": 14461.254,
+  "outcomePrices": "[\"0.265\", \"0.735\"]",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "question": "Will Liverpool FC vs. Arsenal FC end in a draw?",
+  "slug": "epl-liv-ars-2026-11-01-draw",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 157.925927
+ },
+ {
+  "active": true,
+  "bestAsk": 0.42,
+  "bestBid": 0.41,
+  "closed": false,
+  "endDate": "2026-11-01T16:30:00Z",
+  "events": [
+   {
+    "eventDate": "2026-11-01",
+    "slug": "epl-liv-ars-2026-11-01",
+    "startTime": "2026-11-01T16:30:00Z",
+    "title": "Liverpool FC vs. Arsenal FC"
+   }
+  ],
+  "gameStartTime": "2026-11-01 16:30:00+00",
+  "groupItemTitle": "Arsenal FC",
+  "id": "5912774",
+  "lastTradePrice": 0.41,
+  "liquidityNum": 19647.5151,
+  "outcomePrices": "[\"0.415\", \"0.585\"]",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "question": "Will Arsenal FC win on 2026-11-01?",
+  "slug": "epl-liv-ars-2026-11-01-ars",
+  "sportsMarketType": "moneyline",
+  "spread": 0.01,
+  "volumeNum": 1627.681978
+ }
+]

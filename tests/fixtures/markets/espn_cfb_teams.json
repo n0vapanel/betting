@@ -1,0 +1,78 @@
+{
+ "sports": [
+  {
+   "leagues": [
+    {
+     "teams": [
+      {
+       "team": {
+        "abbreviation": "KENN",
+        "displayName": "Kennesaw State Owls",
+        "id": "338",
+        "location": "Kennesaw State",
+        "name": "Owls",
+        "nickname": "Kennesaw St",
+        "shortDisplayName": "Kennesaw St"
+       }
+      },
+      {
+       "team": {
+        "abbreviation": "M-OH",
+        "displayName": "Miami (OH) RedHawks",
+        "id": "193",
+        "location": "Miami (OH)",
+        "name": "RedHawks",
+        "nickname": "Miami OH",
+        "shortDisplayName": "Miami OH"
+       }
+      },
+      {
+       "team": {
+        "abbreviation": "MIA",
+        "displayName": "Miami Hurricanes",
+        "id": "2390",
+        "location": "Miami",
+        "name": "Hurricanes",
+        "nickname": "Miami",
+        "shortDisplayName": "Miami"
+       }
+      },
+      {
+       "team": {
+        "abbreviation": "MICH",
+        "displayName": "Michigan Wolverines",
+        "id": "130",
+        "location": "Michigan",
+        "name": "Wolverines",
+        "nickname": "Michigan",
+        "shortDisplayName": "Michigan"
+       }
+      },
+      {
+       "team": {
+        "abbreviation": "MTSU",
+        "displayName": "Middle Tennessee Blue Raiders",
+        "id": "2393",
+        "location": "Middle Tennessee",
+        "name": "Blue Raiders",
+        "nickname": "MTSU",
+        "shortDisplayName": "MTSU"
+       }
+      },
+      {
+       "team": {
+        "abbreviation": "OSU",
+        "displayName": "Ohio State Buckeyes",
+        "id": "194",
+        "location": "Ohio State",
+        "name": "Buckeyes",
+        "nickname": "Ohio State",
+        "shortDisplayName": "Ohio State"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

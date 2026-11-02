@@ -1,0 +1,131 @@
+{
+ "cursor": "",
+ "events": [
+  {
+   "event_ticker": "KXEPLGAME-26OCT31CFCMUN",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-31T15:30:00Z",
+     "last_price_dollars": "0.5400",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-31T15:30:00Z",
+     "status": "active",
+     "ticker": "KXEPLGAME-26OCT31CFCMUN-CFC",
+     "title": "Chelsea wins",
+     "volume_fp": "16132.52",
+     "yes_ask_dollars": "0.5400",
+     "yes_bid_dollars": "0.5300",
+     "yes_sub_title": "Chelsea"
+    },
+    {
+     "expected_expiration_time": "2026-10-31T15:30:00Z",
+     "last_price_dollars": "0.2400",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-31T15:30:00Z",
+     "status": "active",
+     "ticker": "KXEPLGAME-26OCT31CFCMUN-MUN",
+     "title": "Manchester United wins",
+     "volume_fp": "10099.82",
+     "yes_ask_dollars": "0.2400",
+     "yes_bid_dollars": "0.2300",
+     "yes_sub_title": "Manchester United"
+    },
+    {
+     "expected_expiration_time": "2026-10-31T15:30:00Z",
+     "last_price_dollars": "0.2500",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-31T15:30:00Z",
+     "status": "active",
+     "ticker": "KXEPLGAME-26OCT31CFCMUN-TIE",
+     "title": "Tie is the result",
+     "volume_fp": "1501.06",
+     "yes_ask_dollars": "0.2500",
+     "yes_bid_dollars": "0.2400",
+     "yes_sub_title": "Tie"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXEPLGAME",
+   "sub_title": "CFC vs MUN (Oct 31)",
+   "title": "Chelsea vs Manchester United"
+  },
+  {
+   "event_ticker": "KXEPLGAME-26OCT31BOULEE",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-31T18:00:00Z",
+     "last_price_dollars": "0.4600",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-31T18:00:00Z",
+     "status": "active",
+     "ticker": "KXEPLGAME-26OCT31BOULEE-BOU",
+     "title": "Bournemouth wins",
+     "volume_fp": "6329.10",
+     "yes_ask_dollars": "0.4600",
+     "yes_bid_dollars": "0.4500",
+     "yes_sub_title": "Bournemouth"
+    },
+    {
+     "expected_expiration_time": "2026-10-31T18:00:00Z",
+     "last_price_dollars": "0.2800",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-31T18:00:00Z",
+     "status": "active",
+     "ticker": "KXEPLGAME-26OCT31BOULEE-LEE",
+     "title": "Leeds United wins",
+     "volume_fp": "993.06",
+     "yes_ask_dollars": "0.2800",
+     "yes_bid_dollars": "0.2600",
+     "yes_sub_title": "Leeds United"
+    },
+    {
+     "expected_expiration_time": "2026-10-31T18:00:00Z",
+     "last_price_dollars": "0.2900",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-31T18:00:00Z",
+     "status": "active",
+     "ticker": "KXEPLGAME-26OCT31BOULEE-TIE",
+     "title": "Tie is the result",
+     "volume_fp": "228.07",
+     "yes_ask_dollars": "0.2800",
+     "yes_bid_dollars": "0.2700",
+     "yes_sub_title": "Tie"
+    }
+   ],
+   "mutually_exclusive": true,
+   "series_ticker": "KXEPLGAME",
+   "sub_title": "BOU vs LEE (Oct 31)",
+   "title": "Bournemouth vs Leeds United"
+  }
+ ],
+ "milestones": [
+  {
+   "details": {
+    "league": "EPL",
+    "main_game_event_ticker": "KXEPLGAME-26OCT31CFCMUN",
+    "status": "not_started"
+   },
+   "id": "7214c5d2-7076-5bc4-bd0c-8b9fa28967fc",
+   "primary_event_tickers": [
+    "KXEPLGAME-26OCT31CFCMUN"
+   ],
+   "start_date": "2026-10-31T12:30:00Z",
+   "title": "Chelsea vs Manchester United",
+   "type": "soccer_tournament_multi_leg"
+  },
+  {
+   "details": {
+    "league": "EPL",
+    "main_game_event_ticker": "KXEPLGAME-26OCT31BOULEE",
+    "status": "not_started"
+   },
+   "id": "42d5d75b-a73c-5ac9-8580-a4362848c68e",
+   "primary_event_tickers": [
+    "KXEPLGAME-26OCT31BOULEE"
+   ],
+   "start_date": "2026-10-31T15:00:00Z",
+   "title": "Bournemouth vs Leeds United",
+   "type": "soccer_tournament_multi_leg"
+  }
+ ]
+}

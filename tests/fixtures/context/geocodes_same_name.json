@@ -1,0 +1,54 @@
+{
+ "note": "Open-Meteo geocoder answers (count=10, language=en), captured once on 2026-10-27 and trimmed: same-named US towns where the biggest place is in another state",
+ "source": "https://geocoding-api.open-meteo.com/v1/search",
+ "answers": {
+  "Fayetteville": {"results": [
+   {"name": "Fayetteville", "latitude": 35.05266, "longitude": -78.87836, "elevation": 29.0, "country_code": "US", "admin1": "North Carolina", "timezone": "America/New_York", "population": 201963},
+   {"name": "Fayetteville", "latitude": 36.06258, "longitude": -94.15743, "elevation": 427.0, "country_code": "US", "admin1": "Arkansas", "timezone": "America/Chicago", "population": 82830},
+   {"name": "Fayetteville", "latitude": 33.44873, "longitude": -84.45493, "elevation": 286.0, "country_code": "US", "admin1": "Georgia", "timezone": "America/New_York", "population": 16990},
+   {"name": "Fayetteville", "latitude": 35.15203, "longitude": -86.57055, "elevation": 215.0, "country_code": "US", "admin1": "Tennessee", "timezone": "America/Chicago", "population": 7121},
+   {"name": "Fayetteville", "latitude": 38.05289, "longitude": -81.10399, "elevation": 554.0, "country_code": "US", "admin1": "West Virginia", "timezone": "America/New_York", "population": 2892},
+   {"name": "Fayetteville", "latitude": 43.02979, "longitude": -76.00436, "elevation": 163.0, "country_code": "US", "admin1": "New York", "timezone": "America/New_York", "population": 4180},
+   {"name": "Fayetteville", "latitude": 39.9112, "longitude": -77.54999, "elevation": 249.0, "country_code": "US", "admin1": "Pennsylvania", "timezone": "America/New_York", "population": 3128},
+   {"name": "Fayetteville", "latitude": 39.18673, "longitude": -83.93215, "elevation": 289.0, "country_code": "US", "admin1": "Ohio", "timezone": "America/New_York", "population": 321},
+   {"name": "Fayetteville", "latitude": 29.90578, "longitude": -96.67275, "elevation": 121.0, "country_code": "US", "admin1": "Texas", "timezone": "America/Chicago", "population": 263},
+   {"name": "Fayetteville", "latitude": 33.14567, "longitude": -86.40581, "elevation": 133.0, "country_code": "US", "admin1": "Alabama", "timezone": "America/Chicago", "population": 1284}
+  ]},
+  "Columbia": {"results": [
+   {"name": "Columbia", "latitude": 34.00071, "longitude": -81.03481, "elevation": 89.0, "country_code": "US", "admin1": "South Carolina", "timezone": "America/New_York", "population": 142416},
+   {"name": "Columbia", "latitude": 38.95171, "longitude": -92.33407, "elevation": 215.0, "country_code": "US", "admin1": "Missouri", "timezone": "America/Chicago", "population": 129330},
+   {"name": "Columbia", "latitude": 39.24038, "longitude": -76.83942, "elevation": 124.0, "country_code": "US", "admin1": "Maryland", "timezone": "America/New_York", "population": 99615},
+   {"name": "Columbia", "latitude": 35.61507, "longitude": -87.03528, "elevation": 196.0, "country_code": "US", "admin1": "Tennessee", "timezone": "America/Chicago", "population": 36800},
+   {"name": "Emporia", "latitude": 38.4039, "longitude": -96.18166, "elevation": 348.0, "country_code": "US", "admin1": "Kansas", "timezone": "America/Chicago", "population": 24649},
+   {"name": "Columbia City", "latitude": 41.15727, "longitude": -85.48831, "elevation": 262.0, "country_code": "US", "admin1": "Indiana", "timezone": "America/Indiana/Indianapolis", "population": 8857},
+   {"name": "Columbia", "latitude": 31.25184, "longitude": -89.83758, "elevation": 45.0, "country_code": "US", "admin1": "Mississippi", "timezone": "America/Chicago", "population": 6229},
+   {"name": "Columbia", "latitude": 37.10284, "longitude": -85.30635, "elevation": 228.0, "country_code": "US", "admin1": "Kentucky", "timezone": "America/Chicago", "population": 4644},
+   {"name": "Columbiana", "latitude": 33.17817, "longitude": -86.60721, "elevation": 160.0, "country_code": "US", "admin1": "Alabama", "timezone": "America/Chicago", "population": 4168},
+   {"name": "Telluride", "latitude": 37.93749, "longitude": -107.81229, "elevation": 2680.0, "country_code": "US", "admin1": "Colorado", "timezone": "America/Denver", "population": 2399}
+  ]},
+  "Manhattan": {"results": [
+   {"name": "Manhattan", "latitude": 40.78343, "longitude": -73.96625, "elevation": 35.0, "country_code": "US", "admin1": "New York", "timezone": "America/New_York", "population": 1487536},
+   {"name": "Manhattan Island", "latitude": 40.79028, "longitude": -73.95972, "elevation": 26.0, "country_code": "US", "admin1": "New York", "timezone": "America/New_York", "population": 1619090},
+   {"name": "Manhattan", "latitude": 39.18361, "longitude": -96.57167, "elevation": 311.0, "country_code": "US", "admin1": "Kansas", "timezone": "America/Chicago", "population": 56308},
+   {"name": "Manhattan Beach", "latitude": 33.88474, "longitude": -118.41091, "elevation": 20.0, "country_code": "US", "admin1": "California", "timezone": "America/Los_Angeles", "population": 35818},
+   {"name": "Manhattan", "latitude": 41.42253, "longitude": -87.98589, "elevation": 208.0, "country_code": "US", "admin1": "Illinois", "timezone": "America/Chicago", "population": 7400},
+   {"name": "Manhattan", "latitude": 45.8566, "longitude": -111.33246, "elevation": 1294.0, "country_code": "US", "admin1": "Montana", "timezone": "America/Denver", "population": 1631},
+   {"name": "Manhattan", "latitude": 38.53882, "longitude": -117.07342, "elevation": 2134.0, "country_code": "US", "admin1": "Nevada", "timezone": "America/Los_Angeles"},
+   {"name": "Manhattan", "latitude": 27.50754, "longitude": -82.3187, "elevation": 21.0, "country_code": "US", "admin1": "Florida", "timezone": "America/New_York"},
+   {"name": "Manhattan", "latitude": 39.55504, "longitude": -86.92751, "elevation": 196.0, "country_code": "US", "admin1": "Indiana", "timezone": "America/Indiana/Indianapolis"},
+   {"name": "Manhattan", "latitude": 33.27179, "longitude": -90.85732, "elevation": 35.0, "country_code": "US", "admin1": "Mississippi", "timezone": "America/Chicago"}
+  ]},
+  "Athens": {"results": [
+   {"name": "Athens", "latitude": 37.98376, "longitude": 23.72784, "elevation": 70.0, "country_code": "GR", "admin1": "Attica", "timezone": "Europe/Athens", "population": 664046},
+   {"name": "Athens", "latitude": 33.96095, "longitude": -83.37794, "elevation": 228.0, "country_code": "US", "admin1": "Georgia", "timezone": "America/New_York", "population": 127315},
+   {"name": "Athens", "latitude": 39.32924, "longitude": -82.10126, "elevation": 219.0, "country_code": "US", "admin1": "Ohio", "timezone": "America/New_York", "population": 25044},
+   {"name": "Athens", "latitude": 34.80243, "longitude": -86.97219, "elevation": 220.0, "country_code": "US", "admin1": "Alabama", "timezone": "America/Chicago", "population": 24966},
+   {"name": "Athens", "latitude": 35.44285, "longitude": -84.59299, "elevation": 262.0, "country_code": "US", "admin1": "Tennessee", "timezone": "America/New_York", "population": 13688},
+   {"name": "Athens", "latitude": 32.20487, "longitude": -95.85552, "elevation": 149.0, "country_code": "US", "admin1": "Texas", "timezone": "America/Chicago", "population": 12788},
+   {"name": "Athens", "latitude": 41.9573, "longitude": -76.518, "elevation": 233.0, "country_code": "US", "admin1": "Pennsylvania", "timezone": "America/New_York", "population": 3255},
+   {"name": "New Athens", "latitude": 38.32644, "longitude": -89.87705, "elevation": 121.0, "country_code": "US", "admin1": "Illinois", "timezone": "America/Chicago", "population": 1951},
+   {"name": "Athens", "latitude": 39.96088, "longitude": -89.72399, "elevation": 183.0, "country_code": "US", "admin1": "Illinois", "timezone": "America/Chicago", "population": 1938},
+   {"name": "Athens", "latitude": 42.26036, "longitude": -73.80957, "elevation": 8.0, "country_code": "US", "admin1": "New York", "timezone": "America/New_York", "population": 1617}
+  ]}
+ }
+}

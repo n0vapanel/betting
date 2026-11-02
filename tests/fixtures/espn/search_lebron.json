@@ -1,0 +1,97 @@
+{
+ "count": 4,
+ "items": [
+  {
+   "id": "1966",
+   "displayName": "LeBron James",
+   "type": "player",
+   "sport": "basketball",
+   "league": "nba",
+   "label": "NBA - Philadelphia 76ers",
+   "isActive": true,
+   "position": {
+    "abbreviation": "F"
+   },
+   "headshot": {
+    "href": "https://a.espncdn.com/i/headshots/nba/players/full/1966.png"
+   },
+   "teamRelationships": [
+    {
+     "displayName": "Philadelphia 76ers",
+     "core": {
+      "id": "20",
+      "abbreviation": "PHI"
+     }
+    }
+   ]
+  },
+  {
+   "id": "5313200",
+   "displayName": "LeBron Thomas",
+   "type": "player",
+   "sport": "basketball",
+   "league": "mens-college-basketball",
+   "label": "NCAAM - Green Bay",
+   "isActive": true,
+   "position": {
+    "abbreviation": "G"
+   },
+   "headshot": {
+    "href": "https://a.espncdn.com/i/headshots/mens-college-basketball/players/full/5313200.png"
+   },
+   "teamRelationships": [
+    {
+     "displayName": "Green Bay Phoenix",
+     "core": {
+      "id": "2739",
+      "abbreviation": "GB"
+     }
+    }
+   ]
+  },
+  {
+   "id": "5198939",
+   "displayName": "Justin Lebron",
+   "type": "player",
+   "sport": "baseball",
+   "league": "mlb",
+   "label": "MLB - Cincinnati Reds",
+   "isActive": true,
+   "position": {
+    "abbreviation": "SS"
+   },
+   "headshot": {},
+   "teamRelationships": [
+    {
+     "displayName": "Cincinnati Reds",
+     "core": {
+      "id": "17",
+      "abbreviation": "CIN"
+     }
+    }
+   ]
+  },
+  {
+   "id": "5324317",
+   "displayName": "Antonio Lebrón Diánez",
+   "type": "player",
+   "sport": "soccer",
+   "league": "esp.copa_del_rey",
+   "label": "Spanish Copa del Rey - Lebrijana",
+   "isActive": true,
+   "position": {
+    "abbreviation": "G"
+   },
+   "headshot": {},
+   "teamRelationships": [
+    {
+     "displayName": "UB Lebrijana",
+     "core": {
+      "id": "133844",
+      "abbreviation": "UBL"
+     }
+    }
+   ]
+  }
+ ]
+}

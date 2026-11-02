@@ -6,7 +6,7 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 dist/
-build/
+/build/
 .DS_Store
 .aegis-cache/
 .env

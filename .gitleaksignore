@@ -1,0 +1,2 @@
+# False positives (checked by hand). ESPN's "publishedkey" is a public content id (e.g. soccer401878765), not a secret.
+tests/fixtures/capture/sum_epl.json:generic-api-key:1

@@ -1,5 +1,10 @@
 # Soccer v2 Walk-Forward Backtest — EPL + Big-4 Leagues, 5 Seasons (2017-18 … 2021-22)
 
+> **Correction (2026-10-28): the closing and pre-closing odds columns are swapped.** football-data's plain columns
+> (`AvgH`, `Avg>2.5`) are pre-closing prices and the `C` columns the close; `backtest.py:115-121,165` settles on the
+> pre-close and `:123-153,171-182` feeds the true close in as features. Against the true close the model has no edge
+> (O/U Brier 0.2393 against 0.2377). Kept as research; see the correction at the top of `MULTISPORT_REPORT.md`.
+
 **Data:** football-data.co.uk CSVs (seasons 1718–2122: E0/SP1/D1/I1/F1) + Understat per-match xG/xGA (9026/9027 matches joined by team name + date, ±1 day).
 **Split:** train = all matches before 2022-03-01 (7924 after feature-complete filter; 2017-09-22 – 2022-02-28), test = 2022-03-01 – 2022-05-22 (571 matches — identical window to v1). Walk-forward, strict no-lookahead.
 

@@ -1,0 +1,133 @@
+{
+ "count": 5,
+ "items": [
+  {
+   "lastUpdated": "2026-10-26T23:54Z",
+   "season": 2027,
+   "stats": [
+    {
+     "abbreviation": "BPI",
+     "description": "Basketball Power Index that measures team’s true strength on net points scale; expected point margin vs average opponent on neutral court.",
+     "displayName": "BPI",
+     "displayValue": "8.616",
+     "name": "bpi",
+     "value": 8.616
+    },
+    {
+     "abbreviation": "bpiRank",
+     "description": "Basketball Power Index Rank vs all NBA teams",
+     "displayName": "BPI RANK",
+     "displayValue": "1st",
+     "name": "bpirank",
+     "value": 1.0
+    }
+   ],
+   "team": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2027/teams/25?lang=en&region=us"
+   }
+  },
+  {
+   "lastUpdated": "2026-10-26T23:54Z",
+   "season": 2027,
+   "stats": [
+    {
+     "abbreviation": "BPI",
+     "description": "Basketball Power Index that measures team’s true strength on net points scale; expected point margin vs average opponent on neutral court.",
+     "displayName": "BPI",
+     "displayValue": "4.602",
+     "name": "bpi",
+     "value": 4.602
+    },
+    {
+     "abbreviation": "bpiRank",
+     "description": "Basketball Power Index Rank vs all NBA teams",
+     "displayName": "BPI RANK",
+     "displayValue": "4th",
+     "name": "bpirank",
+     "value": 4.0
+    }
+   ],
+   "team": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2027/teams/2?lang=en&region=us"
+   }
+  },
+  {
+   "lastUpdated": "2026-10-26T23:54Z",
+   "season": 2027,
+   "stats": [
+    {
+     "abbreviation": "BPI",
+     "description": "Basketball Power Index that measures team’s true strength on net points scale; expected point margin vs average opponent on neutral court.",
+     "displayName": "BPI",
+     "displayValue": "3.858",
+     "name": "bpi",
+     "value": 3.858
+    },
+    {
+     "abbreviation": "bpiRank",
+     "description": "Basketball Power Index Rank vs all NBA teams",
+     "displayName": "BPI RANK",
+     "displayValue": "5th",
+     "name": "bpirank",
+     "value": 5.0
+    }
+   ],
+   "team": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2027/teams/18?lang=en&region=us"
+   }
+  },
+  {
+   "lastUpdated": "2026-10-26T23:54Z",
+   "season": 2027,
+   "stats": [
+    {
+     "abbreviation": "BPI",
+     "description": "Basketball Power Index that measures team’s true strength on net points scale; expected point margin vs average opponent on neutral court.",
+     "displayName": "BPI",
+     "displayValue": "3.528",
+     "name": "bpi",
+     "value": 3.528
+    },
+    {
+     "abbreviation": "bpiRank",
+     "description": "Basketball Power Index Rank vs all NBA teams",
+     "displayName": "BPI RANK",
+     "displayValue": "7th",
+     "name": "bpirank",
+     "value": 7.0
+    }
+   ],
+   "team": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2027/teams/8?lang=en&region=us"
+   }
+  },
+  {
+   "lastUpdated": "2026-10-26T23:54Z",
+   "season": 2027,
+   "stats": [
+    {
+     "abbreviation": "BPI",
+     "description": "Basketball Power Index that measures team’s true strength on net points scale; expected point margin vs average opponent on neutral court.",
+     "displayName": "BPI",
+     "displayValue": "-7.574",
+     "name": "bpi",
+     "value": -7.574
+    },
+    {
+     "abbreviation": "bpiRank",
+     "description": "Basketball Power Index Rank vs all NBA teams",
+     "displayName": "BPI RANK",
+     "displayValue": "29th",
+     "name": "bpirank",
+     "value": 29.0
+    }
+   ],
+   "team": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2027/teams/17?lang=en&region=us"
+   }
+  }
+ ],
+ "pageCount": 1,
+ "pageIndex": 1,
+ "pageSize": 400
+}

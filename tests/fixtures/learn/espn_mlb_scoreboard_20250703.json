@@ -1,0 +1,283 @@
+{
+ "events": [
+  {
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "linescores": [
+        {
+         "displayValue": "3"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "1"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        }
+       ],
+       "score": "4",
+       "team": {
+        "abbreviation": "MIA",
+        "displayName": "Miami Marlins",
+        "id": "28"
+       }
+      },
+      {
+       "homeAway": "away",
+       "linescores": [
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "1"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        }
+       ],
+       "score": "1",
+       "team": {
+        "abbreviation": "MIN",
+        "displayName": "Minnesota Twins",
+        "id": "9"
+       }
+      }
+     ],
+     "date": "2025-07-03T16:10Z",
+     "id": "401696211",
+     "neutralSite": false,
+     "status": {
+      "type": {
+       "completed": true,
+       "name": "STATUS_FINAL",
+       "state": "post"
+      }
+     }
+    }
+   ],
+   "date": "2025-07-03T16:10Z",
+   "id": "401696211"
+  },
+  {
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "linescores": [
+        {
+         "displayValue": "2"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "1"
+        },
+        {
+         "displayValue": "2"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "2"
+        },
+        {
+         "displayValue": "0"
+        }
+       ],
+       "score": "7",
+       "team": {
+        "abbreviation": "COL",
+        "displayName": "Colorado Rockies",
+        "id": "27"
+       }
+      },
+      {
+       "homeAway": "away",
+       "linescores": [
+        {
+         "displayValue": "2"
+        },
+        {
+         "displayValue": "1"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "2"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "1"
+        }
+       ],
+       "score": "6",
+       "team": {
+        "abbreviation": "HOU",
+        "displayName": "Houston Astros",
+        "id": "18"
+       }
+      }
+     ],
+     "date": "2025-07-03T19:10Z",
+     "id": "401696214",
+     "neutralSite": false,
+     "status": {
+      "type": {
+       "completed": true,
+       "name": "STATUS_FINAL",
+       "state": "post"
+      }
+     }
+    }
+   ],
+   "date": "2025-07-03T19:10Z",
+   "id": "401696214"
+  },
+  {
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "linescores": [
+        {
+         "displayValue": "5"
+        },
+        {
+         "displayValue": "1"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "1"
+        },
+        {
+         "displayValue": "2"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "2"
+        }
+       ],
+       "score": "11",
+       "team": {
+        "abbreviation": "WSH",
+        "displayName": "Washington Nationals",
+        "id": "20"
+       }
+      },
+      {
+       "homeAway": "away",
+       "linescores": [
+        {
+         "displayValue": "3"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "0"
+        },
+        {
+         "displayValue": "2"
+        },
+        {
+         "displayValue": "2"
+        },
+        {
+         "displayValue": "0"
+        }
+       ],
+       "score": "7",
+       "team": {
+        "abbreviation": "DET",
+        "displayName": "Detroit Tigers",
+        "id": "6"
+       }
+      }
+     ],
+     "date": "2025-07-03T22:45Z",
+     "id": "401696209",
+     "neutralSite": false,
+     "status": {
+      "type": {
+       "completed": true,
+       "name": "STATUS_FINAL",
+       "state": "post"
+      }
+     }
+    }
+   ],
+   "date": "2025-07-03T22:45Z",
+   "id": "401696209"
+  }
+ ]
+}

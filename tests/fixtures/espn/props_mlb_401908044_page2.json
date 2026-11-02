@@ -1,0 +1,116 @@
+{
+ "count": 7,
+ "pageIndex": 2,
+ "pageSize": 4,
+ "pageCount": 2,
+ "items": [
+  {
+   "type": {
+    "id": "235",
+    "name": "Strikeouts Thrown Milestones"
+   },
+   "lastUpdated": "2026-10-25T06:54Z",
+   "current": {
+    "target": {
+     "value": 2.0,
+     "displayValue": "2+"
+    }
+   },
+   "open": {
+    "target": {
+     "value": 6.0,
+     "displayValue": "6+"
+    }
+   },
+   "athlete": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/seasons/2026/athletes/39825?lang=en&region=us"
+   },
+   "odds": {
+    "american": {
+     "value": "-3500",
+     "open": "+112"
+    },
+    "decimal": {
+     "value": "1.02",
+     "open": "2.12"
+    },
+    "total": {
+     "value": "2+",
+     "open": "6+"
+    }
+   }
+  },
+  {
+   "type": {
+    "id": "235",
+    "name": "Strikeouts Thrown Milestones"
+   },
+   "lastUpdated": "2026-10-25T06:48Z",
+   "current": {
+    "target": {
+     "value": 3.0,
+     "displayValue": "3+"
+    }
+   },
+   "open": {
+    "target": {
+     "value": 6.0,
+     "displayValue": "6+"
+    }
+   },
+   "athlete": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/seasons/2026/athletes/39825?lang=en&region=us"
+   },
+   "odds": {
+    "american": {
+     "value": "-850",
+     "open": "+112"
+    },
+    "decimal": {
+     "value": "1.11",
+     "open": "2.12"
+    },
+    "total": {
+     "value": "3+",
+     "open": "6+"
+    }
+   }
+  },
+  {
+   "type": {
+    "id": "234",
+    "name": "Hits Milestones"
+   },
+   "lastUpdated": "2026-10-25T06:48Z",
+   "current": {
+    "target": {
+     "value": 1.0,
+     "displayValue": "1+"
+    }
+   },
+   "open": {
+    "target": {
+     "value": 1.0,
+     "displayValue": "1+"
+    }
+   },
+   "athlete": {
+    "$ref": "http://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/seasons/2026/athletes/31283?lang=en&region=us"
+   },
+   "odds": {
+    "american": {
+     "value": "-169",
+     "open": "-160"
+    },
+    "decimal": {
+     "value": "1.59",
+     "open": "1.62"
+    },
+    "total": {
+     "value": "1+",
+     "open": "1+"
+    }
+   }
+  }
+ ]
+}

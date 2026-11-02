@@ -1,0 +1,305 @@
+{
+ "boxscore": {
+  "teams": [
+   {
+    "homeAway": "home",
+    "statistics": [
+     {
+      "displayValue": "12",
+      "name": "foulsCommitted"
+     },
+     {
+      "displayValue": "1",
+      "name": "yellowCards"
+     },
+     {
+      "displayValue": "0",
+      "name": "redCards"
+     },
+     {
+      "displayValue": "1",
+      "name": "offsides"
+     },
+     {
+      "displayValue": "6",
+      "name": "wonCorners"
+     },
+     {
+      "displayValue": "5",
+      "name": "saves"
+     },
+     {
+      "displayValue": "53.9",
+      "name": "possessionPct"
+     },
+     {
+      "displayValue": "13",
+      "name": "totalShots"
+     },
+     {
+      "displayValue": "5",
+      "name": "shotsOnTarget"
+     },
+     {
+      "displayValue": "0.4",
+      "name": "shotPct"
+     },
+     {
+      "displayValue": "0",
+      "name": "penaltyKickGoals"
+     },
+     {
+      "displayValue": "0",
+      "name": "penaltyKickShots"
+     },
+     {
+      "displayValue": "413",
+      "name": "accuratePasses"
+     },
+     {
+      "displayValue": "488",
+      "name": "totalPasses"
+     },
+     {
+      "displayValue": "0.8",
+      "name": "passPct"
+     },
+     {
+      "displayValue": "10",
+      "name": "accurateCrosses"
+     },
+     {
+      "displayValue": "34",
+      "name": "totalCrosses"
+     },
+     {
+      "displayValue": "0.3",
+      "name": "crossPct"
+     },
+     {
+      "displayValue": "52",
+      "name": "totalLongBalls"
+     },
+     {
+      "displayValue": "27",
+      "name": "accurateLongBalls"
+     },
+     {
+      "displayValue": "0.5",
+      "name": "longballPct"
+     },
+     {
+      "displayValue": "4",
+      "name": "blockedShots"
+     },
+     {
+      "displayValue": "9",
+      "name": "effectiveTackles"
+     },
+     {
+      "displayValue": "15",
+      "name": "totalTackles"
+     },
+     {
+      "displayValue": "0.6",
+      "name": "tacklePct"
+     },
+     {
+      "displayValue": "9",
+      "name": "interceptions"
+     },
+     {
+      "displayValue": "25",
+      "name": "effectiveClearance"
+     },
+     {
+      "displayValue": "25",
+      "name": "totalClearance"
+     }
+    ],
+    "team": {
+     "displayName": "Everton"
+    }
+   },
+   {
+    "homeAway": "away",
+    "statistics": [
+     {
+      "displayValue": "8",
+      "name": "foulsCommitted"
+     },
+     {
+      "displayValue": "2",
+      "name": "yellowCards"
+     },
+     {
+      "displayValue": "0",
+      "name": "redCards"
+     },
+     {
+      "displayValue": "0",
+      "name": "offsides"
+     },
+     {
+      "displayValue": "5",
+      "name": "wonCorners"
+     },
+     {
+      "displayValue": "4",
+      "name": "saves"
+     },
+     {
+      "displayValue": "46.1",
+      "name": "possessionPct"
+     },
+     {
+      "displayValue": "10",
+      "name": "totalShots"
+     },
+     {
+      "displayValue": "5",
+      "name": "shotsOnTarget"
+     },
+     {
+      "displayValue": "0.5",
+      "name": "shotPct"
+     },
+     {
+      "displayValue": "0",
+      "name": "penaltyKickGoals"
+     },
+     {
+      "displayValue": "0",
+      "name": "penaltyKickShots"
+     },
+     {
+      "displayValue": "346",
+      "name": "accuratePasses"
+     },
+     {
+      "displayValue": "430",
+      "name": "totalPasses"
+     },
+     {
+      "displayValue": "0.8",
+      "name": "passPct"
+     },
+     {
+      "displayValue": "4",
+      "name": "accurateCrosses"
+     },
+     {
+      "displayValue": "15",
+      "name": "totalCrosses"
+     },
+     {
+      "displayValue": "0.3",
+      "name": "crossPct"
+     },
+     {
+      "displayValue": "48",
+      "name": "totalLongBalls"
+     },
+     {
+      "displayValue": "13",
+      "name": "accurateLongBalls"
+     },
+     {
+      "displayValue": "0.3",
+      "name": "longballPct"
+     },
+     {
+      "displayValue": "1",
+      "name": "blockedShots"
+     },
+     {
+      "displayValue": "6",
+      "name": "effectiveTackles"
+     },
+     {
+      "displayValue": "17",
+      "name": "totalTackles"
+     },
+     {
+      "displayValue": "0.4",
+      "name": "tacklePct"
+     },
+     {
+      "displayValue": "10",
+      "name": "interceptions"
+     },
+     {
+      "displayValue": "34",
+      "name": "effectiveClearance"
+     },
+     {
+      "displayValue": "34",
+      "name": "totalClearance"
+     }
+    ],
+    "team": {
+     "displayName": "West Ham United"
+    }
+   }
+  ]
+ },
+ "gameInfo": {
+  "venue": {
+   "fullName": "Goodison Park"
+  }
+ },
+ "header": {
+  "competitions": [
+   {
+    "competitors": [
+     {
+      "homeAway": "home",
+      "linescores": [
+       {
+        "displayValue": "0"
+       },
+       {
+        "displayValue": "1"
+       }
+      ],
+      "score": "1",
+      "team": {
+       "abbreviation": "EVE",
+       "displayName": "Everton",
+       "id": "368"
+      }
+     },
+     {
+      "homeAway": "away",
+      "linescores": [
+       {
+        "displayValue": "0"
+       },
+       {
+        "displayValue": "1"
+       }
+      ],
+      "score": "1",
+      "team": {
+       "abbreviation": "WHU",
+       "displayName": "West Ham United",
+       "id": "371"
+      }
+     }
+    ],
+    "date": "2025-03-15T15:00Z",
+    "id": "704565",
+    "neutralSite": false,
+    "status": {
+     "type": {
+      "completed": true,
+      "name": "STATUS_FULL_TIME",
+      "state": "post"
+     }
+    }
+   }
+  ],
+  "id": "704565"
+ },
+ "pickcenter": []
+}

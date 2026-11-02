@@ -1,5 +1,7 @@
 # telegram_betting_bot_simple/requirements.txt
-python-telegram-bot==20.8
+# The server installs requirements.lock (these, pinned with their hashes). After changing a line here, make the
+# lock again with the command at the top of requirements.lock.
+python-telegram-bot==22.8
 pydantic>=2.0
 pydantic-settings>=2.0
 python-dotenv>=1.0
@@ -7,4 +9,11 @@ requests>=2.31
 aiohttp>=3.9
 pandas>=1.5
 numpy>=1.24
+# zoneinfo needs timezone data; servers without the system tz database fall back to this
+tzdata>=2023.3
+# Web dashboard
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+# AI analysts: Claude through the official SDK (DeepSeek's API is called with requests)
+anthropic>=2.3,<3
 pytest>=7.4

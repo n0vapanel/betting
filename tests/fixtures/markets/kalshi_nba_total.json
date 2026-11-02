@@ -1,0 +1,142 @@
+{
+ "cursor": "",
+ "events": [
+  {
+   "event_ticker": "KXNBATOTAL-26OCT28PHIIND",
+   "markets": [
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 231.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBATOTAL-26OCT28PHIIND-232",
+     "title": "Full Game: Over 231.5 points scored",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.8800",
+     "yes_bid_dollars": "0.5300",
+     "yes_sub_title": "Over 231.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 233.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBATOTAL-26OCT28PHIIND-234",
+     "title": "Full Game: Over 233.5 points scored",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.8400",
+     "yes_bid_dollars": "0.5000",
+     "yes_sub_title": "Over 233.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 235.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBATOTAL-26OCT28PHIIND-236",
+     "title": "Full Game: Over 235.5 points scored",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.8100",
+     "yes_bid_dollars": "0.5300",
+     "yes_sub_title": "Over 235.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 237.5,
+     "last_price_dollars": "0.5400",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBATOTAL-26OCT28PHIIND-238",
+     "title": "Full Game: Over 237.5 points scored",
+     "volume_fp": "18.79",
+     "yes_ask_dollars": "0.5400",
+     "yes_bid_dollars": "0.4900",
+     "yes_sub_title": "Over 237.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 239.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBATOTAL-26OCT28PHIIND-240",
+     "title": "Full Game: Over 239.5 points scored",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.5100",
+     "yes_bid_dollars": "0.4400",
+     "yes_sub_title": "Over 239.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 241.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBATOTAL-26OCT28PHIIND-242",
+     "title": "Full Game: Over 241.5 points scored",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.4800",
+     "yes_bid_dollars": "0.3900",
+     "yes_sub_title": "Over 241.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 243.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBATOTAL-26OCT28PHIIND-244",
+     "title": "Full Game: Over 243.5 points scored",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.4900",
+     "yes_bid_dollars": "0.1300",
+     "yes_sub_title": "Over 243.5 points"
+    },
+    {
+     "expected_expiration_time": "2026-10-29T02:00:00Z",
+     "floor_strike": 245.5,
+     "last_price_dollars": "0.0000",
+     "notional_value_dollars": "1.0000",
+     "occurrence_datetime": "2026-10-29T02:00:00Z",
+     "status": "active",
+     "ticker": "KXNBATOTAL-26OCT28PHIIND-246",
+     "title": "Full Game: Over 245.5 points scored",
+     "volume_fp": "0.00",
+     "yes_ask_dollars": "0.4900",
+     "yes_bid_dollars": "0.1300",
+     "yes_sub_title": "Over 245.5 points"
+    }
+   ],
+   "mutually_exclusive": false,
+   "series_ticker": "KXNBATOTAL",
+   "sub_title": "PHI vs IND (Oct 28)",
+   "title": "Philadelphia vs Indiana: Total Points"
+  }
+ ],
+ "milestones": [
+  {
+   "details": {
+    "league": "NBA",
+    "main_game_event_ticker": "KXNBAGAME-26OCT28PHIIND",
+    "status": "scheduled"
+   },
+   "id": "86299cae-6ba4-5838-8e5c-4c872bde1542",
+   "primary_event_tickers": [
+    "KXNBATOTAL-26OCT28PHIIND"
+   ],
+   "start_date": "2026-10-28T23:00:00Z",
+   "title": "PHI 76ers at IND Pacers",
+   "type": "basketball_game"
+  }
+ ]
+}

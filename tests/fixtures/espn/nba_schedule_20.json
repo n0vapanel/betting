@@ -1,0 +1,202 @@
+{
+ "events": [
+  {
+   "id": "401909089",
+   "date": "2026-10-20T23:00Z",
+   "shortName": "PHI @ NY",
+   "competitions": [
+    {
+     "status": {
+      "type": {
+       "state": "post",
+       "name": "STATUS_FINAL"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "team": {
+        "id": "18",
+        "abbreviation": "NY",
+        "displayName": "New York Knicks"
+       }
+      },
+      {
+       "homeAway": "away",
+       "team": {
+        "id": "20",
+        "abbreviation": "PHI",
+        "displayName": "Philadelphia 76ers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909093",
+   "date": "2026-10-22T23:00Z",
+   "shortName": "CLE @ PHI",
+   "competitions": [
+    {
+     "status": {
+      "type": {
+       "state": "post",
+       "name": "STATUS_FINAL"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "team": {
+        "id": "20",
+        "abbreviation": "PHI",
+        "displayName": "Philadelphia 76ers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "team": {
+        "id": "5",
+        "abbreviation": "CLE",
+        "displayName": "Cleveland Cavaliers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909855",
+   "date": "2026-10-24T23:30Z",
+   "shortName": "MIL @ PHI",
+   "competitions": [
+    {
+     "status": {
+      "type": {
+       "state": "post",
+       "name": "STATUS_FINAL"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "team": {
+        "id": "20",
+        "abbreviation": "PHI",
+        "displayName": "Philadelphia 76ers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "team": {
+        "id": "15",
+        "abbreviation": "MIL",
+        "displayName": "Milwaukee Bucks"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909866",
+   "date": "2026-10-25T23:30Z",
+   "shortName": "DET @ PHI",
+   "competitions": [
+    {
+     "status": {
+      "type": {
+       "state": "post",
+       "name": "STATUS_FINAL"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "team": {
+        "id": "20",
+        "abbreviation": "PHI",
+        "displayName": "Philadelphia 76ers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "team": {
+        "id": "8",
+        "abbreviation": "DET",
+        "displayName": "Detroit Pistons"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909884",
+   "date": "2026-10-28T23:00Z",
+   "shortName": "PHI @ IND",
+   "competitions": [
+    {
+     "status": {
+      "type": {
+       "state": "pre",
+       "name": "STATUS_SCHEDULED"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "team": {
+        "id": "11",
+        "abbreviation": "IND",
+        "displayName": "Indiana Pacers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "team": {
+        "id": "20",
+        "abbreviation": "PHI",
+        "displayName": "Philadelphia 76ers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909280",
+   "date": "2026-10-30T23:30Z",
+   "shortName": "NY @ PHI",
+   "competitions": [
+    {
+     "status": {
+      "type": {
+       "state": "pre",
+       "name": "STATUS_SCHEDULED"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "team": {
+        "id": "20",
+        "abbreviation": "PHI",
+        "displayName": "Philadelphia 76ers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "team": {
+        "id": "18",
+        "abbreviation": "NY",
+        "displayName": "New York Knicks"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

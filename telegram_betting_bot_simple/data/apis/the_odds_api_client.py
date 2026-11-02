@@ -48,6 +48,7 @@ class TheOddsApiClient:
         markets: str = "h2h",
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
+        odds_format: str = "decimal",
     ) -> List[Dict[str, Any]]:
         """Fetch odds for upcoming events for a given sport.
 
@@ -57,20 +58,22 @@ class TheOddsApiClient:
             markets: Comma‑separated list of market types (e.g. "h2h", "spreads").
             date_from: Filter events starting after this datetime.
             date_to: Filter events starting before this datetime.
+            odds_format: "decimal" (e.g. 2.5) or "american" (e.g. +150).
 
         Returns:
             A list of event dictionaries, each containing keys:
-            "id", "home_team", "away_team", "start_time" and "markets".
+            "id", "home_team", "away_team", "start_time", "markets" and
+            "bookmaker" (the title of the bookmaker the prices come from).
         """
         url = f"{self.base_url}/sports/{sport}/odds"
         params: Dict[str, Any] = {
             "apiKey": self.api_key,
             "regions": regions,
             "markets": markets,
+            "oddsFormat": odds_format,
         }
         if date_from:
             params["dateFormat"] = "iso"
-            params["oddsFormat"] = "decimal"
             params["dateRangeFrom"] = date_from.isoformat()
         if date_to:
             params["dateRangeTo"] = date_to.isoformat()
@@ -87,8 +90,10 @@ class TheOddsApiClient:
                 away_team = event.get("away_team")
                 commence_time = event.get("commence_time")  # ISO8601
                 markets_dict: Dict[str, Dict[str, float]] = {}
+                bookmaker_title = None
                 # Use the first bookmaker's data as representative
                 for bookmaker in event.get("bookmakers", [])[:1]:
+                    bookmaker_title = bookmaker.get("title")
                     for market in bookmaker.get("markets", []):
                         market_key = market.get("key")
                         outcomes = market.get("outcomes", [])
@@ -108,6 +113,7 @@ class TheOddsApiClient:
                         "away_team": away_team,
                         "start_time": commence_time,
                         "markets": markets_dict,
+                        "bookmaker": bookmaker_title,
                     }
                 )
             except Exception:

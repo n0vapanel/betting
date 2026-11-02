@@ -1,0 +1,43 @@
+{
+"totalGames":1,
+"dates":[
+{
+"date":"2026-10-27",
+"games":[
+{
+"gamePk":849803,
+"gameDate":"2026-10-28T00:00:00Z",
+"doubleHeader":"N",
+"gameNumber":1,
+"dayNight":"night",
+"status":{
+"abstractGameState":"Preview",
+"detailedState":"Scheduled"
+},
+"teams":{
+"home":{
+"team":{
+"id":139,
+"name":"Tampa Bay Rays"
+}
+},
+"away":{
+"team":{
+"id":158,
+"name":"Milwaukee Brewers"
+}
+}
+},
+"venue":{
+"id":12,
+"name":"Tropicana Field",
+"fieldInfo":{
+"roofType":"Dome"
+}
+},
+"weather":{}
+}
+]
+}
+]
+}

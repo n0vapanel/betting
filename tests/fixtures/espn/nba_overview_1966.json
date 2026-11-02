@@ -1,0 +1,113 @@
+{
+ "statistics": {
+  "labels": [
+   "GP",
+   "MIN",
+   "FG%",
+   "3P%",
+   "FT%",
+   "REB",
+   "AST",
+   "BLK",
+   "STL",
+   "PF",
+   "TO",
+   "PTS"
+  ],
+  "names": [
+   "gamesPlayed",
+   "avgMinutes",
+   "fieldGoalPct",
+   "threePointPct",
+   "freeThrowPct",
+   "avgRebounds",
+   "avgAssists",
+   "avgBlocks",
+   "avgSteals",
+   "avgFouls",
+   "avgTurnovers",
+   "avgPoints"
+  ],
+  "displayNames": [
+   "Games Played",
+   "Minutes Per Game",
+   "Field Goal Percentage",
+   "3-Point Field Goal Percentage",
+   "Free Throw Percentage",
+   "Rebounds Per Game",
+   "Assists Per Game",
+   "Blocks Per Game",
+   "Steals Per Game",
+   "Fouls Per Game",
+   "Turnovers Per Game",
+   "Points Per Game"
+  ],
+  "splits": [
+   {
+    "displayName": "Regular Season",
+    "stats": [
+     "2",
+     "33.5",
+     "37.0",
+     "14.3",
+     "76.9",
+     "9.5",
+     "6.0",
+     "1.0",
+     "2.0",
+     "3.5",
+     "3.0",
+     "15.5"
+    ]
+   },
+   {
+    "displayName": "Career",
+    "stats": [
+     "1624",
+     "37.6",
+     "50.7",
+     "34.8",
+     "73.7",
+     "7.5",
+     "7.4",
+     "0.7",
+     "1.5",
+     "1.8",
+     "3.5",
+     "26.8"
+    ]
+   }
+  ]
+ },
+ "nextGame": {
+  "displayName": "Previous Game",
+  "league": {
+   "events": [
+    {
+     "id": "401909866",
+     "date": "2026-10-25T23:30:00.000+00:00",
+     "shortName": "DET @ PHI",
+     "status": "post",
+     "competitors": [
+      {
+       "id": "20",
+       "homeAway": "home",
+       "abbreviation": "PHI",
+       "displayName": "Philadelphia 76ers"
+      },
+      {
+       "id": "8",
+       "homeAway": "away",
+       "abbreviation": "DET",
+       "displayName": "Detroit Pistons"
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "rotowire": {
+  "headline": "James (back) isn't listed on the injury report for Sunday's game against Detroit.",
+  "published": "Sun Oct 25 10:06:18 PDT 2026"
+ }
+}

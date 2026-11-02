@@ -1,0 +1,582 @@
+{
+ "dates": [
+  {
+   "date": "2025-07-03",
+   "games": [
+    {
+     "dayNight": "day",
+     "doubleHeader": "N",
+     "gameDate": "2025-07-03T16:10:00Z",
+     "gameNumber": 1,
+     "gamePk": 777263,
+     "linescore": {
+      "innings": [
+       {
+        "away": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 3,
+         "leftOnBase": 0,
+         "runs": 3
+        },
+        "num": 1
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "num": 2
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 2,
+         "leftOnBase": 0,
+         "runs": 1
+        },
+        "num": 3
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "num": 4
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "num": 5
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "home": {
+         "errors": 1,
+         "hits": 0,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "num": 6
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 3,
+         "leftOnBase": 2,
+         "runs": 1
+        },
+        "home": {
+         "errors": 0,
+         "hits": 2,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "num": 7
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "num": 8
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0
+        },
+        "num": 9
+       }
+      ]
+     },
+     "officialDate": "2025-07-03",
+     "status": {
+      "abstractGameCode": "F",
+      "abstractGameState": "Final",
+      "codedGameState": "F",
+      "detailedState": "Final",
+      "startTimeTBD": false,
+      "statusCode": "F"
+     },
+     "teams": {
+      "away": {
+       "isWinner": false,
+       "score": 1,
+       "team": {
+        "id": 142,
+        "name": "Minnesota Twins"
+       }
+      },
+      "home": {
+       "isWinner": true,
+       "score": 4,
+       "team": {
+        "id": 146,
+        "name": "Miami Marlins"
+       }
+      }
+     },
+     "venue": {
+      "id": 4169,
+      "name": "loanDepot park"
+     },
+     "weather": {
+      "condition": "Roof Closed",
+      "temp": "72",
+      "wind": "0 mph, None"
+     }
+    },
+    {
+     "dayNight": "day",
+     "doubleHeader": "N",
+     "gameDate": "2025-07-03T19:10:00Z",
+     "gameNumber": 1,
+     "gamePk": 777264,
+     "linescore": {
+      "innings": [
+       {
+        "away": {
+         "errors": 0,
+         "hits": 3,
+         "leftOnBase": 1,
+         "runs": 2
+        },
+        "home": {
+         "errors": 0,
+         "hits": 2,
+         "leftOnBase": 0,
+         "runs": 2
+        },
+        "num": 1
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 1,
+         "runs": 1
+        },
+        "home": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "num": 2
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "home": {
+         "errors": 1,
+         "hits": 1,
+         "leftOnBase": 1,
+         "runs": 1
+        },
+        "num": 3
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 3,
+         "leftOnBase": 1,
+         "runs": 2
+        },
+        "num": 4
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "num": 5
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "num": 6
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 3,
+         "leftOnBase": 1,
+         "runs": 2
+        },
+        "home": {
+         "errors": 0,
+         "hits": 4,
+         "leftOnBase": 1,
+         "runs": 2
+        },
+        "num": 7
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 2,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "num": 8
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 3,
+         "leftOnBase": 2,
+         "runs": 1
+        },
+        "home": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0
+        },
+        "num": 9
+       }
+      ]
+     },
+     "officialDate": "2025-07-03",
+     "status": {
+      "abstractGameCode": "F",
+      "abstractGameState": "Final",
+      "codedGameState": "F",
+      "detailedState": "Final",
+      "startTimeTBD": false,
+      "statusCode": "F"
+     },
+     "teams": {
+      "away": {
+       "isWinner": false,
+       "score": 6,
+       "team": {
+        "id": 117,
+        "name": "Houston Astros"
+       }
+      },
+      "home": {
+       "isWinner": true,
+       "score": 7,
+       "team": {
+        "id": 115,
+        "name": "Colorado Rockies"
+       }
+      }
+     },
+     "venue": {
+      "id": 19,
+      "name": "Coors Field"
+     },
+     "weather": {
+      "condition": "Partly Cloudy",
+      "temp": "90",
+      "wind": "5 mph, In From CF"
+     }
+    },
+    {
+     "dayNight": "night",
+     "doubleHeader": "N",
+     "gameDate": "2025-07-03T22:45:00Z",
+     "gameNumber": 1,
+     "gamePk": 777258,
+     "linescore": {
+      "innings": [
+       {
+        "away": {
+         "errors": 0,
+         "hits": 3,
+         "leftOnBase": 1,
+         "runs": 3
+        },
+        "home": {
+         "errors": 0,
+         "hits": 4,
+         "leftOnBase": 1,
+         "runs": 5
+        },
+        "num": 1
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 0,
+         "runs": 1
+        },
+        "num": 2
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "num": 3
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 2,
+         "leftOnBase": 0,
+         "runs": 1
+        },
+        "num": 4
+       },
+       {
+        "away": {
+         "errors": 3,
+         "hits": 0,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 2,
+         "runs": 2
+        },
+        "num": 5
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 2,
+         "leftOnBase": 1,
+         "runs": 0
+        },
+        "num": 6
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 4,
+         "leftOnBase": 2,
+         "runs": 2
+        },
+        "home": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 2,
+         "runs": 0
+        },
+        "num": 7
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 1,
+         "leftOnBase": 1,
+         "runs": 2
+        },
+        "home": {
+         "errors": 0,
+         "hits": 3,
+         "leftOnBase": 1,
+         "runs": 2
+        },
+        "num": 8
+       },
+       {
+        "away": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0,
+         "runs": 0
+        },
+        "home": {
+         "errors": 0,
+         "hits": 0,
+         "leftOnBase": 0
+        },
+        "num": 9
+       }
+      ]
+     },
+     "officialDate": "2025-07-03",
+     "status": {
+      "abstractGameCode": "F",
+      "abstractGameState": "Final",
+      "codedGameState": "F",
+      "detailedState": "Final",
+      "startTimeTBD": false,
+      "statusCode": "F"
+     },
+     "teams": {
+      "away": {
+       "isWinner": false,
+       "score": 7,
+       "team": {
+        "id": 116,
+        "name": "Detroit Tigers"
+       }
+      },
+      "home": {
+       "isWinner": true,
+       "score": 11,
+       "team": {
+        "id": 120,
+        "name": "Washington Nationals"
+       }
+      }
+     },
+     "venue": {
+      "id": 3309,
+      "name": "Nationals Park"
+     },
+     "weather": {
+      "condition": "Clear",
+      "temp": "92",
+      "wind": "3 mph, Out To RF"
+     }
+    },
+    {
+     "doubleHeader": "N",
+     "gameDate": "2025-04-05T20:10:00Z",
+     "gameNumber": 1,
+     "gamePk": 778443,
+     "officialDate": "2025-04-06",
+     "status": {
+      "abstractGameCode": "F",
+      "abstractGameState": "Final",
+      "codedGameState": "D",
+      "detailedState": "Postponed",
+      "reason": "Rain",
+      "startTimeTBD": false,
+      "statusCode": "DR"
+     },
+     "teams": {
+      "away": {
+       "team": {
+        "id": 138,
+        "name": "St. Louis Cardinals"
+       }
+      },
+      "home": {
+       "team": {
+        "id": 111,
+        "name": "Boston Red Sox"
+       }
+      }
+     }
+    }
+   ]
+  }
+ ]
+}
