@@ -142,11 +142,12 @@ def build_slate(config: Config, service: DashboardService) -> SlateBuilder:
 
 
 def build_chat_assistant(config: Config, lab: Lab, store: Store) -> Optional[Any]:
-    """The AI chat assistant, or None without ANTHROPIC_API_KEY (or if it can't start: the app works without it)."""
-    if not config.anthropic_api_key:
+    """The AI chat assistant, or None without a DeepSeek or Anthropic key (or if it can't start: the app works
+    without it). DeepSeek wins when its key is set; Claude is the fallback."""
+    if not (config.deepseek_api_key or config.anthropic_api_key):
         return None
     try:
-        from .ai.assistant import build_assistant  # the SDK is only needed with a key
+        from .ai.assistant import build_assistant  # the SDK/requests are only needed with a key
     except ImportError as exc:
         logging.warning("The AI chat assistant isn't available (%s); the app runs without it", exc)
         return None

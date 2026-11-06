@@ -113,7 +113,7 @@ Updated: 2026-10-24
 - Thorp 2006, *The Kelly Criterion in Blackjack, Sports Betting and the Stock Market*, in Zenios & Ziemba (eds.), Handbook of Asset and Liability Management, Vol. 1: https://books.google.com.sg/books?id=SWFkCIRMNtoC
 - MacLean, Thorp & Ziemba 2011, *Good and Bad Properties of the Kelly Criterion*, in The Kelly Capital Growth Investment Criterion: Theory and Practice: https://www.stat.berkeley.edu/~aldous/157/Papers/Good_Bad_Kelly.pdf
 
-**Brain Implementation:** Default to 0.25-Kelly sizing on model edge vs closing odds, hard-cap every stake at <= 0.5x full Kelly and cap total per-event exposure, since stakes above 2x full Kelly ruin expected log growth.
+**Brain Implementation:** Not implemented in serving code — stakes are user-chosen; the app reports EV and edge only and never sizes a stake from model confidence, so no full-Kelly overbetting risk applies. The 0.25–0.5-Kelly guidance above is sizing advice for manual staking, not an implemented feature.
 
 ---
 

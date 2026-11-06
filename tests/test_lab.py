@@ -1247,7 +1247,7 @@ def test_on_game_day_the_model_projects_the_player_and_prices_each_line(ready, l
 def test_chat_needs_the_assistant_and_passes_requests_through(ready, client, lab) -> None:
     response = client.post("/api/chat", json={"message": "Who wins tonight?"})
     assert response.status_code == 400 and response.json()["detail"] == NO_CHAT
-    assert NO_CHAT == "AI chat isn't set up: add ANTHROPIC_API_KEY on the server"
+    assert NO_CHAT == "AI chat isn't set up: add DEEPSEEK_API_KEY (or ANTHROPIC_API_KEY) on the server"
     lab.assistant = Assistant()
     assert client.get("/api/me").json()["ai_enabled"] is True
     reply = client.post("/api/chat", json={"message": "Build me something", "thread_id": 7,

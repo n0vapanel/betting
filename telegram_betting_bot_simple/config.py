@@ -132,6 +132,11 @@ class Config(BaseSettings):
     ai_chat_daily_total_cents: Optional[int] = Field(None, ge=0, validation_alias="AI_CHAT_DAILY_TOTAL_CENTS")
     ai_chat_model: str = Field("claude-opus-5-5", validation_alias="AI_CHAT_MODEL")
     ai_router_model: str = Field("claude-haiku-5-5", validation_alias="AI_ROUTER_MODEL")
+    # DeepSeek's AI chat assistant (needs DEEPSEEK_API_KEY): the model that chats and calls the brain's tools,
+    # and the cheap model that reads each message first (the router). Both use DeepSeek's OpenAI-compatible
+    # chat completions (ai/deepseek_chat.py); DeepSeek is text-only, so photo slip reading falls back to code
+    deepseek_chat_model: str = Field("deepseek-v4-pro", validation_alias="DEEPSEEK_CHAT_MODEL")
+    deepseek_router_model: str = Field("deepseek-flash", validation_alias="DEEPSEEK_ROUTER_MODEL")
     # The learning loop (v3, learn/): the dashboard's "learner" thread scores the brain every night, tunes its
     # settings weekly behind statistical gates (every change has an Undo), backfills old games gently between 01:00
     # and 06:00 (at most LEARN_BACKFILL_PER_NIGHT requests, one every 2 seconds) and asks whichever AI is linked to

@@ -1325,8 +1325,10 @@ def test_explain_ticket_fills_legs_claude_left_out(lab) -> None:
 # --- wiring -------------------------------------------------------------------------------------------------
 
 def test_build_assistant_needs_a_key_and_reads_the_config(store, lab) -> None:
-    assert build_assistant(Config(TELEGRAM_BOT_TOKEN="1:x"), lab, store) is None
-    config = Config(TELEGRAM_BOT_TOKEN="1:x", ANTHROPIC_API_KEY="sk-ant-test", AI_CHAT_DAILY_CENTS=50,
+    assert build_assistant(Config(TELEGRAM_BOT_TOKEN="1:x", ANTHROPIC_API_KEY=None, DEEPSEEK_API_KEY=None),
+                            lab, store) is None
+    config = Config(TELEGRAM_BOT_TOKEN="1:x", ANTHROPIC_API_KEY="sk-ant-test", DEEPSEEK_API_KEY=None,
+                    AI_CHAT_DAILY_CENTS=50,
                     AI_CHAT_MODEL="claude-sonnet-5-5", AI_ROUTER_MODEL="claude-haiku-5-5")
     built = build_assistant(config, lab, store, client=FakeClaude())
     assert built.daily_cents == 50 and built.chat_model == "claude-sonnet-5-5"
@@ -1337,7 +1339,8 @@ def test_build_assistant_needs_a_key_and_reads_the_config(store, lab) -> None:
     # The shared daily caps: unset, 3 and 10 people's allowance; set, as given (0 switches a group off)
     assert (built.web_cents, built.total_cents) == (150, 500)
     assert (defaults.ai_chat_web_daily_cents, defaults.ai_chat_daily_total_cents) == (None, None)
-    capped = Config(TELEGRAM_BOT_TOKEN="1:x", ANTHROPIC_API_KEY="sk-ant-test", AI_CHAT_WEB_DAILY_CENTS="30",
+    capped = Config(TELEGRAM_BOT_TOKEN="1:x", ANTHROPIC_API_KEY="sk-ant-test", DEEPSEEK_API_KEY=None,
+                    AI_CHAT_WEB_DAILY_CENTS="30",
                     AI_CHAT_DAILY_TOTAL_CENTS=0)
     built = build_assistant(capped, lab, store, client=FakeClaude())
     assert (built.web_cents, built.total_cents) == (30, 0)
@@ -1436,3 +1439,136 @@ def test_fractional_odds_are_checked_as_the_odds_they_stand_for() -> None:
     assert 13.0 in source_numbers(content)
     quotable = source_numbers(pasted_quotable(content, view))
     assert 13.0 not in quotable and {0.7, 1.36} <= quotable
+
+
+# --- the DeepSeek caller --------------------------------------------------------------------------
+
+class FakeDeepSeekResponse:
+    def __init__(self, status, payload):
+        self.status_code = status
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class FakeDeepSeekSession:
+    """A requests.Session stand-in: records one call and answers with a scripted payload (no network)."""
+
+    def __init__(self, payload=None, status=200):
+        self.payload = payload or {}
+        self.status = status
+        self.requests = []
+
+    def post(self, url, json=None, timeout=None, headers=None):
+        self.requests.append({"url": url, "json": json, "headers": headers})
+        return FakeDeepSeekResponse(self.status, self.payload)
+
+
+def _tool_call_payload():
+    return {
+        "model": "deepseek-v4-pro",
+        "choices": [{"message": {"role": "assistant", "content": "Let me look that up.",
+                                  "tool_calls": [{"id": "call_1", "type": "function",
+                                                  "function": {"name": "sports_find_events",
+                                                               "arguments": '{"leagues": ["basketball_nba"], "query": "knicks"}'}}]},
+                     "finish_reason": "tool_calls"}],
+        "usage": {"prompt_tokens": 100, "prompt_cache_hit_tokens": 40, "prompt_cache_miss_tokens": 60,
+                  "completion_tokens": 20},
+    }
+
+
+def test_the_deepseek_caller_translates_to_openai_and_parses_tool_calls() -> None:
+    from telegram_betting_bot_simple.ai.deepseek_chat import DeepSeekCaller
+
+    session = FakeDeepSeekSession(payload=_tool_call_payload())
+    caller = DeepSeekCaller("sk-ds-test", session=session)
+    response = caller.create(
+        "deepseek-v4-pro", max_tokens=1000,
+        system=[{"type": "text", "text": "You are a betting analyst."}],
+        messages=[{"role": "user", "content": "games tonight"},
+                  {"role": "assistant", "content": [{"type": "text", "text": "One moment"},
+                                                    {"type": "tool_use", "id": "call_1", "name": "sports_find_events",
+                                                     "input": {"leagues": ["basketball_nba"], "query": "knicks"}}]},
+                  {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_1",
+                                               "content": "[]"}]}],
+        tools=[{"name": "sports_find_events", "description": "find games",
+                "input_schema": {"type": "object", "properties": {}}}],
+    )
+    [body] = [request["json"] for request in session.requests]
+    assert body["model"] == "deepseek-v4-pro" and body["max_tokens"] == 1000
+    assert body["messages"][0] == {"role": "system", "content": "You are a betting analyst."}
+    assert body["messages"][1] == {"role": "user", "content": "games tonight"}
+    assistant = body["messages"][2]
+    assert assistant["role"] == "assistant" and assistant["tool_calls"][0]["function"]["name"] == "sports_find_events"
+    assert body["messages"][3] == {"role": "tool", "tool_call_id": "call_1", "content": "[]"}
+    assert body["tools"] == [{"type": "function",
+                              "function": {"name": "sports_find_events", "description": "find games",
+                                           "parameters": {"type": "object", "properties": {}}}}]
+    # The OpenAI answer comes back in the Anthropic shape the tool loop already reads
+    assert response.stop_reason == "tool_use" and response.model == "deepseek-v4-pro"
+    blocks = [block for block in response.content if block.type == "tool_use"]
+    assert len(blocks) == 1 and blocks[0].name == "sports_find_events"
+    assert blocks[0].input == {"leagues": ["basketball_nba"], "query": "knicks"} and blocks[0].id == "call_1"
+    dollars, tokens_in, tokens_out = DeepSeekCaller.cost("deepseek-v4-pro", response.usage)
+    assert (tokens_in, tokens_out) == (100, 20)
+    assert dollars == pytest.approx((40 * 0.044 + 60 * 1.32 + 20 * 3.96) / 1e6)
+
+
+def test_the_deepseek_caller_prices_and_keeps_a_request_within_budget() -> None:
+    from telegram_betting_bot_simple.ai.deepseek_chat import DeepSeekCaller
+
+    caller = DeepSeekCaller("sk-ds-test", session=FakeDeepSeekSession())
+    assert caller.prices("deepseek-v4-pro") == (1.32, 3.96)
+    assert caller.prices("deepseek-flash") == (0.30, 1.20)
+    request = {"max_tokens": 1000, "messages": [{"role": "user", "content": "hi"}]}
+    assert caller.max_tokens_within("deepseek-v4-pro", None, request, 1000) == 1000
+    # A zero budget can't buy even the minimum output tokens
+    assert caller.max_tokens_within("deepseek-v4-pro", 0.0, request, 1000) == 0
+    # The worst cost is prompt at the uncached input rate plus max_tokens of output (no 1.25x cache write)
+    worst = caller.worst_cost("deepseek-v4-pro", request, 100)
+    prompt = len(json.dumps({k: v for k, v in request.items() if k != "max_tokens"}, default=str)) / 3
+    assert worst == pytest.approx((prompt * 1.32 + 100 * 3.96) / 1e6)
+
+
+def test_the_deepseek_caller_maps_api_errors_to_plain_ai_errors() -> None:
+    from telegram_betting_bot_simple.ai.deepseek_chat import DeepSeekCaller
+    from telegram_betting_bot_simple.ai.explain import AIError
+
+    for status, temporary, text in ((401, False, "rejected the API key"), (402, False, "out of credit"),
+                                    (429, True, "busy right now"), (500, True, "answered 500")):
+        caller = DeepSeekCaller("sk-ds-test", session=FakeDeepSeekSession(status=status, payload={}))
+        with pytest.raises(AIError) as caught:
+            caller.create("deepseek-v4-pro", messages=[{"role": "user", "content": "hi"}])
+        assert caught.value.temporary is temporary and text in str(caught.value)
+
+
+def test_build_assistant_prefers_deepseek_then_claude_then_off(store, lab) -> None:
+    from telegram_betting_bot_simple.ai.deepseek_chat import DeepSeekCaller
+
+    assert build_assistant(Config(TELEGRAM_BOT_TOKEN="1:x", ANTHROPIC_API_KEY=None, DEEPSEEK_API_KEY=None),
+                            lab, store) is None  # no key: off
+    both = Config(TELEGRAM_BOT_TOKEN="1:x", DEEPSEEK_API_KEY="sk-ds-test", ANTHROPIC_API_KEY="sk-ant-test")
+    built = build_assistant(both, lab, store)
+    assert isinstance(built.caller, DeepSeekCaller)
+    assert (built.chat_model, built.router_model) == ("deepseek-v4-pro", "deepseek-flash")
+    assert built.reader.model == "deepseek-flash" and built.reader.vision is False
+    assert built.disclosure == assistant_module.DEEPSEEK_DISCLOSURE
+    # DeepSeek's own model fields win over the Claude ones, and the env defaults read through
+    custom = Config(TELEGRAM_BOT_TOKEN="1:x", DEEPSEEK_API_KEY="sk-ds-test", DEEPSEEK_CHAT_MODEL="deepseek-flash",
+                    DEEPSEEK_ROUTER_MODEL="deepseek-v4-pro")
+    built = build_assistant(custom, lab, store)
+    assert (built.chat_model, built.router_model) == ("deepseek-flash", "deepseek-v4-pro")
+    # Claude alone still works exactly as before
+    claude_only = Config(TELEGRAM_BOT_TOKEN="1:x", ANTHROPIC_API_KEY="sk-ant-test", DEEPSEEK_API_KEY=None,
+                         AI_CHAT_MODEL="claude-sonnet-5-5")
+    built = build_assistant(claude_only, lab, store, client=FakeClaude())
+    assert built.chat_model == "claude-sonnet-5-5" and built.disclosure == DISCLOSURE
+
+
+def test_the_slip_reader_marks_a_deepseek_caller_as_text_only() -> None:
+    from telegram_betting_bot_simple.ai.deepseek_chat import DeepSeekCaller
+    from telegram_betting_bot_simple.ai.slip_reader import SlipReader
+
+    assert SlipReader(ClaudeCaller(FakeClaude()), "claude-haiku-5-5").vision is True
+    assert SlipReader(DeepSeekCaller("sk-ds-test", session=FakeDeepSeekSession()), "deepseek-flash").vision is False

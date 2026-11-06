@@ -19,3 +19,6 @@ venv/
 node_modules/
 *.log
 .DS_Store
+
+# env backups (may contain keys)
+.env.*

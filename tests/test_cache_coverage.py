@@ -40,6 +40,7 @@ AUDITED = {
     "data/utils.py": "fetch_json through the cache (The Odds API's and NewsAPI's legacy clients use it)",
     "data/markets/common.py": "Polymarket, Kalshi and the rating sites through the Keeper (a TTLCache)",
     "ai/deepseek.py": "AI: allowlisted (chats and forecasts are never cached across people)",
+    "ai/deepseek_chat.py": "AI: allowlisted (the chat assistant's caller is never cached across people)",
     "data/weather.py": "Open-Meteo's forecast and geocoder through the cache (kinds weather, geocode)",
     "data/mlb_stats.py": "MLB StatsAPI's schedule through the cache (kind mlb_schedule)",
     "learn/sources/http.py": "the history backfill (football-data, nflverse, ESPN, MLB StatsAPI) through the cache "
@@ -47,7 +48,8 @@ AUDITED = {
     "capture/http.py": "the raw capture's door (PoliteHttp, urllib): allowlisted by design (raw.db keeps every answer "
                        "untrimmed; per-host token buckets and raw.db's budgets pace it), see allowlisted()",
 }
-AI_FILES = {"ai/claude.py", "ai/explain.py", "ai/assistant.py", "ai/deepseek.py"}  # the anthropic SDK and DeepSeek
+AI_FILES = {"ai/claude.py", "ai/explain.py", "ai/assistant.py", "ai/deepseek.py",
+            "ai/deepseek_chat.py"}  # the anthropic SDK and DeepSeek
 TRANSPORT = {"main.py"}  # python-telegram-bot: the bot's own messaging, not a data fetch (also bot/*)
 HTTP_IMPORT = re.compile(
     r"^\s*(?:import|from)\s+(requests|httpx|urllib3|aiohttp|http\.client|urllib\.request|socket|pycurl|websocket)\b"
@@ -289,6 +291,7 @@ def test_every_public_method_of_an_audited_client_is_classified() -> None:
 
 def _drive_everything(cache: TTLCache) -> None:
     from telegram_betting_bot_simple.ai.deepseek import DeepSeekAnalyst
+    from telegram_betting_bot_simple.ai.deepseek_chat import DeepSeekCaller
     from telegram_betting_bot_simple.data.apis import ApiSportsClient, NewsApiClient, TheOddsApiClient
     from telegram_betting_bot_simple.data.espn_players import PlayerData
     from telegram_betting_bot_simple.data.markets import Kalshi, Polymarket, Ratings
@@ -376,6 +379,12 @@ def _drive_everything(cache: TTLCache) -> None:
         DeepSeekAnalyst("deepseek-key-not-real").analyze("a dossier")
     except Exception:
         pass  # the canned answer isn't a forecast; the call is what counts
+
+    try:
+        DeepSeekCaller("deepseek-key-not-real").create(
+            "deepseek-v4-pro", messages=[{"role": "user", "content": "hi"}])
+    except Exception:
+        pass  # the canned answer isn't a chat completion; the call is what counts
 
     _drive_capture(cache)
 

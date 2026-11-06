@@ -137,11 +137,20 @@ def _quoted(text: str) -> str:
 
 
 class SlipReader:
-    """Reads one slip per call with Claude (``client`` is the Anthropic client, or a fake in tests)."""
+    """Reads one slip per call (``client`` is a caller, or a raw Anthropic client or a fake in tests).
+
+    The caller is whatever the assistant built (ClaudeCaller or DeepSeekCaller): a raw Anthropic client is
+    wrapped in ClaudeCaller as before. ``vision`` follows the caller, so a text-only provider (DeepSeek) never
+    sends a screenshot here.
+    """
 
     def __init__(self, client: Any, model: str) -> None:
-        self.caller = client if isinstance(client, ClaudeCaller) else ClaudeCaller(client)
+        if hasattr(client, "create") and hasattr(client, "cost"):
+            self.caller = client  # already a caller (ClaudeCaller or DeepSeekCaller)
+        else:
+            self.caller = ClaudeCaller(client)
         self.model = model
+        self.vision = bool(getattr(self.caller, "vision", True))
 
     def request(self, text: Optional[str], image: Optional[bytes], media_type: Optional[str]) -> Dict[str, Any]:
         """The request to Claude (max_tokens is set by ``read`` within the budget)."""

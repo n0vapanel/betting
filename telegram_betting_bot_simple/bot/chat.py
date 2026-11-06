@@ -80,7 +80,7 @@ MIN_TEXT_ROOM = 600  # characters kept for the AI's words before a card is dropp
 MAX_CARDS = 3
 MAX_CARD_LEGS = 8
 PRIVATE_MESSAGE = "AI chat is private for now; tap /start to browse games."
-NO_AI_MESSAGE = "The AI chat isn't switched on here (the server needs ANTHROPIC_API_KEY). Tap /start to browse games."
+NO_AI_MESSAGE = "The AI chat isn't switched on here (the server has no AI provider key set). Tap /start to browse games."
 ASK_PROMPT = ("💬 <b>Ask AI</b>\nType your question as a normal message, for example:\n"
               "• <i>Who does the AI favour in the NBA tonight?</i>\n"
               "• <i>Players projected for 20+ points tonight</i>\n"
@@ -112,8 +112,8 @@ NOT_ADDABLE = ("This ticket is {title}: the bot's slip holds one parlay, so it w
 
 def build_chat_assistant(config: Config, service: Any) -> Optional[Any]:
     """The assistant for the bot's chat: the one the games service's Lab already has (services.py builds
-    it), else a new one; None without ANTHROPIC_API_KEY or without the games service."""
-    if service is None or not config.anthropic_api_key:
+    it), else a new one; None without a DeepSeek or Anthropic key, or without the games service."""
+    if service is None or not (config.deepseek_api_key or config.anthropic_api_key):
         return None
     lab = getattr(service, "lab", None)
     if lab is not None and getattr(lab, "assistant", None) is not None:

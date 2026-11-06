@@ -68,6 +68,9 @@ class AIError(Exception):
 class ClaudeCaller:
     """Sends one request to Claude through the official SDK and prices the answer."""
 
+    provider = "claude"
+    vision = True
+
     def __init__(self, client: Any) -> None:
         self.client = client
 

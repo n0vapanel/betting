@@ -157,7 +157,8 @@ MAX_REQUEST_LEAGUES = 4  # each league's odds fetch costs quota
 # at worst) and spends at most MAX_TURN_CENTS; each request asks for no more output than the rest can pay for
 MIN_TURN_CENTS = 5
 MAX_TURN_CENTS = 40
-ROUTER_WORST = 0.0015  # US dollars: the most a router call can cost (2,000 Haiku output tokens and its prompt)
+ROUTER_OUTPUT_TOKENS = 2000  # the router's max_tokens: the most output it may write
+ROUTER_INPUT_ROOM = 3000  # tokens the router's message reads on top of its system prompt, at most
 CONTEXT_ROOM = 1500  # characters the <context> block takes at most, for the worst-case estimate
 # Shared allowances, kept as rows of their own in ai_credits (a "*" never appears in a person's id): every
 # password sign-in together, and the whole app. Their defaults are this many people's daily allowance
@@ -231,6 +232,11 @@ HELPLINE = "Gambling can be addictive · Help 24/7: 1-800-GAMBLER / 0808 8020 13
 DISCLOSURE = ("You're chatting with an AI analyst (Claude, made by Anthropic). Our code works out every number; "
               "the AI picks and explains from them and can still be wrong: no pick is certain, and only you add "
               "bets to your slip.")
+# The same, said of DeepSeek when it is the provider (Anthropic's usage policy requires naming the AI at the
+# start of a session; the provider changes, the wording stays honest about which one is talking)
+DEEPSEEK_DISCLOSURE = ("You're chatting with an AI analyst (DeepSeek). Our code works out every number; "
+                       "the AI picks and explains from them and can still be wrong: no pick is certain, and only "
+                       "you add bets to your slip.")
 SUPPORT_MESSAGE = (
     "I'm going to stop here: I won't suggest any bets for the next 24 hours. Trying to get money back by "
     "betting, or betting to pay bills or debts, usually makes things worse, and the odds are set so that most "
@@ -1038,14 +1044,16 @@ class Assistant:
                  router_model: str = ROUTER_MODEL, daily_cents: int = DAILY_CENTS,
                  tz: ZoneInfo = ZoneInfo("America/New_York"), clock: Callable[[], float] = time.time,
                  web_cents: Optional[float] = None, total_cents: Optional[float] = None,
-                 reader_model: Optional[str] = None) -> None:
-        self.caller = ClaudeCaller(client)
+                 reader_model: Optional[str] = None, caller: Optional[Any] = None) -> None:
+        self.caller = caller if caller is not None else ClaudeCaller(client)
         self.lab = lab
         self.store = store
         self.chat_model = chat_model
         self.router_model = router_model
         # Slips are read by the router model when it takes images and structured outputs (ai/slip_reader.py)
         self.reader = SlipReader(self.caller, reader_model or reading_model(router_model, chat_model))
+        self.disclosure = DEEPSEEK_DISCLOSURE if getattr(self.caller, "provider", "claude") == "deepseek" \
+            else DISCLOSURE
         self.daily_cents = daily_cents
         # What all password sign-ins may spend together a day, and the whole app
         self.web_cents = daily_cents * WEB_POOL_PEOPLE if web_cents is None else web_cents
@@ -1107,10 +1115,15 @@ class Assistant:
         return "Today's AI allowance for the whole app has run out"
 
     def _turn_floor(self, history: Sequence[Dict[str, Any]], text: str) -> float:
-        """The least a turn on this thread can cost at worst (US cents): the router and one short Opus round."""
+        """The least a turn on this thread can cost at worst (US cents): the router and one short chat round."""
         probe = {"system": SYSTEM_PROMPT, "tools": TOOLS, "context": "x" * CONTEXT_ROOM,
                  "messages": self._history(history) + [{"role": "user", "content": text}]}
-        worst = ROUTER_WORST + self.caller.worst_cost(self.chat_model, probe, MIN_OUTPUT_TOKENS)
+        # The router's worst is priced at the router model's own rates (DeepSeek flash costs more per output
+        # token than Claude Haiku), not a Claude-hardcoded constant
+        price_in, price_out = self.caller.prices(self.router_model)
+        router_worst = ((len(ROUTER_PROMPT) / 3 + ROUTER_INPUT_ROOM) * price_in
+                        + ROUTER_OUTPUT_TOKENS * price_out) / 1e6
+        worst = router_worst + self.caller.worst_cost(self.chat_model, probe, MIN_OUTPUT_TOKENS)
         return max(float(MIN_TURN_CENTS), worst * 100)
 
     def picks_paused_until(self, uid: str) -> Optional[float]:
@@ -1319,14 +1332,14 @@ class Assistant:
         if turn.pending:
             stored["pending"] = turn.pending
         if first:
-            stored["disclosure"] = DISCLOSURE
+            stored["disclosure"] = self.disclosure
         index = self.store.add_message(uid, thread["id"], "assistant", stored, tokens=spend.tokens,
                                        cost=round(spend.dollars, 6), now=self.clock())
         # message_idx names this reply in the thread, so a button under it reads this reply and no other
         out: Dict[str, Any] = {"thread_id": thread["id"], "message_idx": index, "reply": reply,
                                "credits": self.credits(uid)}
         if first:
-            out["disclosure"] = DISCLOSURE
+            out["disclosure"] = self.disclosure
         return out
 
     def _turn(self, uid: str, user: Dict[str, Any], thread_id: int, text: str, request: Optional[Mapping[str, Any]],
@@ -1728,7 +1741,10 @@ class Assistant:
 
     def _read(self, uid: str, paste: Paste, spend: Spend, step: Callable[[str], None]) -> Tuple[Optional[Any], Optional[str]]:
         """Claude's read of a slip (paid from the turn's hold), or (None, why the AI didn't read it: "You've
-        used today's AI allowance"), so the free reader reads pasted text instead."""
+        used today's AI allowance"), so the free reader reads pasted text instead. A text-only provider
+        (DeepSeek) never reads a screenshot: it falls back to the code-only reader the same way."""
+        if paste.image and not getattr(self.reader, "vision", True):
+            return None, "the AI reader is text-only, so it can't read a screenshot"
         left = None if spend.budget is None else spend.budget - spend.dollars
         # Under MIN_TURN_CENTS nothing was held (Store.reserve_ai), so nothing may be spent
         if left is not None and (spend.budget * 100 < MIN_TURN_CENTS
@@ -2486,19 +2502,43 @@ def pasted_template(view: Mapping[str, Any], analysis: Mapping[str, Any]) -> str
     return " ".join(parts)
 
 
-def build_assistant(config: Any, lab: Any, store: Any, client: Optional[Any] = None) -> Optional[Assistant]:
-    """The chat assistant, or None without ANTHROPIC_API_KEY (or without a store to keep threads in)."""
-    if not getattr(config, "anthropic_api_key", None) or store is None or lab is None:
-        return None
-    if client is None:
-        import anthropic  # the SDK is only needed with a key
+def build_assistant(config: Any, lab: Any, store: Any, client: Optional[Any] = None,
+                    caller: Optional[Any] = None) -> Optional[Assistant]:
+    """The chat assistant, or None without a DeepSeek or Anthropic key (or without a store to keep threads in).
 
-        # A chat turn should answer in seconds; one retry on a 429 or 5xx keeps it from hanging long
-        client = anthropic.Anthropic(api_key=config.anthropic_api_key, timeout=120.0, max_retries=1)
+    Provider selection: DeepSeek when DEEPSEEK_API_KEY is set, else Claude when ANTHROPIC_API_KEY is set, else
+    off. ``caller`` lets tests inject one directly.
+    """
+    if store is None or lab is None:
+        return None
+    if caller is None:
+        if getattr(config, "deepseek_api_key", None):
+            from .deepseek_chat import DeepSeekCaller  # requests, not the Anthropic SDK
+            caller = DeepSeekCaller(config.deepseek_api_key)
+        elif getattr(config, "anthropic_api_key", None):
+            if client is None:
+                import anthropic  # the SDK is only needed with a key
+
+                # A chat turn should answer in seconds; one retry on a 429 or 5xx keeps it from hanging long
+                client = anthropic.Anthropic(api_key=config.anthropic_api_key, timeout=120.0, max_retries=1)
+            caller = ClaudeCaller(client)
+        else:
+            return None
+    deepseek = getattr(caller, "provider", "claude") == "deepseek"
+    if deepseek:
+        chat_model = getattr(config, "deepseek_chat_model", CHAT_MODEL)
+        router_model = getattr(config, "deepseek_router_model", ROUTER_MODEL)
+        reader_model = getattr(config, "deepseek_router_model", None)  # the cheap model reads text slips
+    else:
+        chat_model = getattr(config, "ai_chat_model", CHAT_MODEL)
+        router_model = getattr(config, "ai_router_model", ROUTER_MODEL)
+        reader_model = None
     return Assistant(
         client, lab, store,
-        chat_model=getattr(config, "ai_chat_model", CHAT_MODEL),
-        router_model=getattr(config, "ai_router_model", ROUTER_MODEL),
+        caller=caller,
+        chat_model=chat_model,
+        router_model=router_model,
+        reader_model=reader_model,
         daily_cents=getattr(config, "ai_chat_daily_cents", DAILY_CENTS),
         tz=ZoneInfo(getattr(config, "timezone", "America/New_York")),
         # The shared daily caps (config fields AI_CHAT_WEB_DAILY_CENTS and AI_CHAT_DAILY_TOTAL_CENTS when the
