@@ -3,9 +3,9 @@
 They start from the old fixed tiers of engine/bets.py (research_notes, sections 5.2-5.7):
 
     Preset  Joint chance  Ticket odds  Legs (Auto)  Leg chance: single / in a multi  Whelan cap
-    Safe    60%+          1.15-1.80    1-3          60% / 72%                        as is
-    Risky   25-60%        1.50-4.50    1-3          25% / 45%                        as is
-    Crazy   3-25%         3.40-36      1-5          8% / 34%                         up to 2 legs past it
+    Safe    60%+          1.50-2.00    1-3          60% / 72%                        as is
+    Risky   25-60%        2.00-5.00    1-3          25% / 45%                        as is
+    Crazy   3-25%         5.00-36      1-5          8% / 34%                         up to 2 legs past it
 
 plus a cautious chance of the blend minus 2 points and moneylines, spreads and totals only. Safe also never
 takes a leg the sources disagree on, a leg whose chance comes only from ratings (low confidence), a thin
@@ -43,12 +43,12 @@ _COMMON = dict(markets=set(DEFAULT_MARKETS), caution_pp=2.0, whelan=True, ticket
                max_per_game=1, max_per_team=1, max_price_age_s=3 * 3600)
 
 PRESETS: Dict[str, Controls] = {
-    "safe": Controls(preset="safe", joint_min=0.60, joint_max=None, odds_min=1.15, odds_max=1.80, legs_max=3,
+    "safe": Controls(preset="safe", joint_min=0.60, joint_max=None, odds_min=1.50, odds_max=2.00, legs_max=3,
                      min_chance=0.60, multi_leg_min=0.72, whelan_slack=0, exclude_disagree=True,
                      exclude_low_conf=True, exclude_model_price=True, exclude_thin=True, **_COMMON),
-    "risky": Controls(preset="risky", joint_min=0.25, joint_max=0.60, odds_min=1.50, odds_max=4.50, legs_max=3,
+    "risky": Controls(preset="risky", joint_min=0.25, joint_max=0.60, odds_min=2.00, odds_max=5.00, legs_max=3,
                       min_chance=0.25, multi_leg_min=0.45, whelan_slack=0, **_COMMON),
-    "crazy": Controls(preset="crazy", joint_min=0.03, joint_max=0.25, odds_min=3.40, odds_max=36.0, legs_max=5,
+    "crazy": Controls(preset="crazy", joint_min=0.03, joint_max=0.25, odds_min=5.00, odds_max=36.0, legs_max=5,
                       min_chance=0.08, multi_leg_min=0.34, whelan_slack=2, **_COMMON),
 }
 

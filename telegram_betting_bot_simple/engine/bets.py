@@ -2,10 +2,10 @@
 
 The tier is set by the AI's chance that the whole ticket wins:
 
-- Safe: 60%+ (1-2 legs, or 3 if every leg is 85%+), paying 1.15x-1.80x.
-- Risky: 25-60% (1-3 legs), paying 1.50x-4.50x.
+- Safe: 60%+ (1-2 legs, or 3 if every leg is 85%+), paying 1.50x-2.00x.
+- Risky: 25-60% (1-3 legs), paying 2.00x-5.00x.
 - Crazy: 3-25% (1-5 legs; legs of a multi 34%+, or a single long shot of
-  8-25%), paying 3.40x-36x.
+  8-25%), paying 5.00x-36x.
 
 Since v3 Stage 3 the search is the Builder's (engine/builder.py): each tier
 is its preset (engine/presets.py: the same windows, leg floors, Whelan caps
@@ -106,11 +106,11 @@ class Tier:
 
 TIERS: Tuple[Tier, ...] = (
     Tier("safe", "Safe", "More likely, small payout. It still loses some of the time.",
-         0.60, 1.01, 3, 0.60, 0.72, -0.05, 0.09, 1.15, 1.80, 0, 3),
+         0.60, 1.01, 3, 0.60, 0.72, -0.05, 0.09, 1.50, 2.00, 0, 3),
     Tier("risky", "Risky", "Balanced: a real chance and a real payout.",
-         0.25, 0.60, 3, 0.25, 0.45, -0.10, 0.14, 1.50, 4.50, 0, 3),
+         0.25, 0.60, 3, 0.25, 0.45, -0.10, 0.14, 2.00, 5.00, 0, 3),
     Tier("crazy", "Crazy", "Long shot, big payout: expect to lose most of these.",
-         0.03, 0.25, 5, 0.08, 0.34, -0.15, 0.22, 3.40, 36.0, 2, 2),
+         0.03, 0.25, 5, 0.08, 0.34, -0.15, 0.22, 5.00, 36.0, 2, 2),
 )
 
 

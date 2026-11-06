@@ -409,9 +409,9 @@ def test_every_relaxation_step_is_recorded(board, controls, steps, words) -> Non
 
 
 def test_the_rounds_follow_the_order_and_loosen_only_what_binds() -> None:
-    # Safe's favourites at 82% priced 1.12: Safe's value rules rule them out (the old tier lays off). Closest effort
+    # Safe's favourites at 62% priced 1.50: Safe's value rules rule them out (the old tier lays off). Closest effort
     # loosens the rule that binds; the run keeps Safe's name, and each ticket says what was loosened for it
-    favourites = [cand(f"h{i}", chance=0.82, price=1.12) for i in range(4)]
+    favourites = [cand(f"h{i}", chance=0.62, price=1.50) for i in range(4)]
     result = build(favourites, PRESETS["safe"], NOW)
     assert result.label == "Safe" and result.tickets
     order = [c["rule"] for r in result.stats["relaxation"] for c in r["changes"]]
@@ -421,10 +421,10 @@ def test_the_rounds_follow_the_order_and_loosen_only_what_binds() -> None:
         assert ticket["label"] == "Safe" and "Safe's expected-result floor (-5%) dropped" in [
             e["words"] for e in ticket["relaxed"]]
     # Per-ticket words name only what that ticket needed: Safe with leg odds of 3.00+ loosens the leg-odds band;
-    # the singles it then finds are 82% likely, so the per-leg floor isn't named even though a round lowered it
+    # the singles it then finds sit in the Safe window, so the per-leg floor isn't named for them
     board = slate(50, 99)
-    wide = build(board, PRESETS["safe"].replace(leg_odds_min=3.0, tickets=5), NOW)
-    assert len(wide.tickets) == 5
+    wide = build(board, PRESETS["safe"].replace(leg_odds_min=3.0, tickets=3), NOW)
+    assert len(wide.tickets) == 3
     assert all([e["rule"] for e in t["relaxed"]] == ["leg_odds_min"] for t in wide.tickets)
 
 

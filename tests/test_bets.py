@@ -30,13 +30,13 @@ def test_ticket_maths_drops_pushed_legs() -> None:
 
 def test_tiers_follow_the_ai_chance_of_the_whole_ticket() -> None:
     slate = [
-        leg("g1", 0.80, 1.22, fair=0.79),   # big favourite
-        leg("g2", 0.76, 1.27, fair=0.76),
-        leg("g3", 0.55, 1.75, fair=0.55),   # near coin flips
-        leg("g4", 0.52, 1.85, fair=0.51),
-        leg("g5", 0.50, 1.95, fair=0.49),
-        leg("g6", 0.20, 4.60, fair=0.20),   # long shot
-        leg("g7", 0.05, 15.0, fair=0.05),   # too long: never used
+        leg("g1", 0.62, 1.55, fair=0.62),   # safe favourite
+        leg("g2", 0.60, 1.60, fair=0.60),
+        leg("g3", 0.55, 2.10, fair=0.55),   # risky
+        leg("g4", 0.40, 2.50, fair=0.40),
+        leg("g5", 0.30, 3.30, fair=0.30),
+        leg("g6", 0.20, 5.50, fair=0.20),   # crazy long shot
+        leg("g7", 0.05, 20.0, fair=0.05),   # too long: never used
     ]
     tiers = {tier.key: tier for tier in bets.TIERS}
     for key, (low, high) in {"safe": (0.60, 1.01), "risky": (0.25, 0.60), "crazy": (0.03, 0.25)}.items():
@@ -62,7 +62,7 @@ def test_legs_the_ai_rates_below_the_market_are_never_used() -> None:
 
 
 def test_safe_skips_legs_far_from_the_market_and_crazy_caps_legs() -> None:
-    slate = [leg("g1", 0.80, 1.40, fair=0.70), leg("g2", 0.70, 1.40, fair=0.70)]
+    slate = [leg("g1", 0.62, 1.55, fair=0.52), leg("g2", 0.62, 1.55, fair=0.62)]
     assert all(l.event_id != "g1" for t in build_tier(bets.TIERS[0], slate) for l in t.legs)
     many = [leg(f"g{i}", 0.52, 1.9) for i in range(9)]
     crazy = build_tier(bets.TIERS[2], many)
@@ -70,15 +70,15 @@ def test_safe_skips_legs_far_from_the_market_and_crazy_caps_legs() -> None:
 
 
 def test_tickets_are_priced_at_one_book() -> None:
-    a = leg("g1", 0.75, 1.30, books=("Only A",))
-    b = leg("g2", 0.80, 1.25, books=("Only B",))
+    a = leg("g1", 0.62, 1.55, books=("Only A",))
+    b = leg("g2", 0.60, 1.60, books=("Only B",))
     safe = build_tier(bets.TIERS[0], [a, b])
     assert all(len(t.legs) == 1 for t in safe)  # no single bookmaker offers both
 
 
 def test_views_are_honest() -> None:
-    out = build_all([leg("g1", 0.80, 1.22, fair=0.80), leg("g2", 0.76, 1.27, fair=0.76),
-                     leg("g3", 0.20, 4.6, fair=0.20)])
+    out = build_all([leg("g1", 0.62, 1.55, fair=0.62), leg("g2", 0.60, 1.60, fair=0.60),
+                     leg("g3", 0.20, 5.5, fair=0.20)])
     safe = out["safe"]["bets"][0]
     assert safe["badge"] in {"For fun", "Close to fair"}  # never "Value" until the AI has a record
     assert safe["expected_cost_per_10"] == pytest.approx(max(0, -safe["ev"]) * 10, abs=0.01)

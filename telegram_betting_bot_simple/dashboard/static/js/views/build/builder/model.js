@@ -367,7 +367,7 @@ export function parseNumber(text, { lo = -Infinity, hi = Infinity, optional = tr
   return { ok: true, value: scale === 1 ? n : Math.round((n / scale) * 1e6) / 1e6 };
 }
 
-/** "1.15–1.80x" for an odds band, "60%+" or "25–60%" for a chance band (formatting the preset's own numbers). */
+/** "1.50–2.00x" for an odds band, "60%+" or "25–60%" for a chance band (formatting the preset's own numbers). */
 export function bandText(lo, hi, kind = "odds") {
   if (kind === "odds") {
     if (lo == null && hi == null) return "";

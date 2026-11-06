@@ -95,6 +95,16 @@ def test_presets_reproduce_the_old_tier_windows() -> None:
     assert set(describe()) == {"safe", "risky", "crazy"} and "36x" in describe()["crazy"]["detail"]
 
 
+def test_preset_odds_windows_match_the_user_spec() -> None:
+    """The user's tiers: safe 1.50-2.00, risky 2.00-5.00, crazy 5.00+ (still capped at 36)."""
+    assert (PRESETS["safe"].odds_min, PRESETS["safe"].odds_max) == (1.50, 2.00)
+    assert (PRESETS["risky"].odds_min, PRESETS["risky"].odds_max) == (2.00, 5.00)
+    assert (PRESETS["crazy"].odds_min, PRESETS["crazy"].odds_max) == (5.00, 36.0)
+    # The AI-built tiers (engine/bets.py) keep the same windows
+    for tier in bets.TIERS:
+        assert (tier.odds_low, tier.odds_high) == (PRESETS[tier.key].odds_min, PRESETS[tier.key].odds_max)
+
+
 @pytest.mark.parametrize("seed", [1, 2, 3])
 def test_each_preset_builds_inside_its_old_window(seed) -> None:
     board = slate(40, seed)
@@ -335,7 +345,7 @@ def brute_force(board, controls):
     Controls(legs_max=4), Controls(target_odds=6.0, tolerance_pct=20), Controls(legs=3, target_odds=5.0),
     Controls(legs_max=4, whelan=False, target_odds=12.0), Controls(legs=2, tickets=5),
     Controls.from_dict({"preset": "risky"}), Controls.from_dict({"preset": "crazy", "legs_max": 4}),
-    Controls.from_dict({"preset": "safe", "exclude_thin": False}),
+    Controls.from_dict({"preset": "safe", "exclude_thin": False, "best_effort": False}),
 ], ids=["auto", "target6", "3legs", "nowhelan", "2legs-5tickets", "risky", "crazy4", "safe"])
 def test_the_exhaustive_search_matches_brute_force(seed, controls) -> None:
     board = slate(9, seed)
@@ -578,17 +588,17 @@ def test_a_fair_odds_leg_is_ranked_as_a_bookmaker_would_price_it() -> None:
     """A goals-model leg at fair odds carries no bookmaker's cut: ranked at that price it would beat every leg a
     person can bet at. The search values it with a typical 5% margin off (its shown price stays the fair odds)."""
     from telegram_betting_bot_simple.engine.builder import MODEL_MARGIN
-    book = cand("a", chance=0.58, price=1.66)  # a 3.7% cut on this side
-    model = cand("b", chance=0.58, price=1.72, flags={"model_price"}, book="Fair odds", market="btts", side="yes",
+    book = cand("a", chance=0.40, price=2.40)  # a 4% cut on this side
+    model = cand("b", chance=0.40, price=2.50, flags={"model_price"}, book="Fair odds", market="btts", side="yes",
                  chance_source="model", fair=None)
     controls = Controls.from_dict({"preset": "risky", "markets": ["h2h", "btts"], "legs": 1, "tickets": 2})
     result = build([model, book], controls, NOW)
     assert [t["legs"][0]["key"] for t in result.tickets] == [book.key, model.key]
-    assert result.tickets[1]["legs"][0]["price"] == "1.72"  # shown at its fair odds
+    assert result.tickets[1]["legs"][0]["price"] == "2.5"  # shown at its fair odds
     cautious = result.tickets[1]["cautious"]["return"]
-    assert cautious == pytest.approx((0.58 - 0.02) * 1.72 / (1 + MODEL_MARGIN), abs=1e-4)
+    assert cautious == pytest.approx((0.40 - 0.02) * 2.50 / (1 + MODEL_MARGIN), abs=1e-4)
     # Without the flag the same price would have come first
-    plain = cand("b", chance=0.58, price=1.72, market="btts", side="yes", chance_source="model", fair=None)
+    plain = cand("b", chance=0.40, price=2.50, market="btts", side="yes", chance_source="model", fair=None)
     assert build([plain, book], controls, NOW).tickets[0]["legs"][0]["key"] == plain.key
 
 
@@ -665,10 +675,10 @@ def test_presets_keep_the_old_tiers_value_rules() -> None:
                                                                                             tier.edge_cap)
     assert VALUE_RULES["safe"]["three_leg_min"] == 0.85 and VALUE_RULES["safe"]["max_gap"] == bets.SAFE_MAX_GAP
     assert value_rules("Custom") == {} and value_rules("Safe") == VALUE_RULES["safe"]
-    # Four heavy favourites at 82% priced 1.12 (an 8% cut each): the old Safe tier lays off, and so does Safe here
-    favourites = [cand(f"h{i}", chance=0.82, price=1.12) for i in range(4)]
+    # Four favourites at 62% priced 1.50 (a 7% cut each): the old Safe tier lays off, and so does Safe here
+    favourites = [cand(f"h{i}", chance=0.62, price=1.50) for i in range(4)]
     old = [bets.Candidate(event_id=f"h{i}", game=f"A{i} @ H{i}", market="h2h", side="home", point=None,
-                          label=f"H{i}", probability=0.82, fair=0.82, prices={"DraftKings": 1.12}) for i in range(4)]
+                          label=f"H{i}", probability=0.62, fair=0.62, prices={"DraftKings": 1.50}) for i in range(4)]
     assert bets.build_tier(bets.TIERS[0], old) == []
     strict = PRESETS["safe"].replace(best_effort=False)  # still Safe: strict or not keeps the preset's name
     safe = build(favourites, strict, NOW)
@@ -677,7 +687,7 @@ def test_presets_keep_the_old_tiers_value_rules() -> None:
     # Any edit makes it Custom, the person's own rules: then they build (and show their expected loss)
     assert build(favourites, PRESETS["safe"].replace(min_chance=0.61), NOW).tickets
     # Safe takes 3 legs only when every leg is 85%+, and no leg 8+ points from the books
-    trio = [cand("a", chance=0.95, price=1.04), cand("b", chance=0.95, price=1.04), cand("c", chance=0.73, price=1.36)]
+    trio = [cand("a", chance=0.95, price=1.15), cand("b", chance=0.95, price=1.15), cand("c", chance=0.73, price=1.35)]
     three = build(trio, PRESETS["safe"].replace(legs=3), NOW)
     assert three.label == "Custom" and three.tickets  # Custom: the 3-leg floor doesn't apply
     trio_safe = build(trio, strict, NOW)
@@ -738,10 +748,10 @@ def test_try_relaxing_follows_what_blocked_the_run() -> None:
     short = build(board, Controls(legs=4, target_odds=1.3, best_effort=False), NOW)
     assert short.blocked["relax"][:2] == ["fewer legs than 4", "a higher target"]
     # ... counted one leg a game: a game's second short price can't go on the same ticket
-    eight = [cand(f"r{i}", chance=0.78, price=1.25) for i in range(10)]
+    eight = [cand(f"r{i}", chance=0.84, price=1.26) for i in range(10)]
     eight.append(cand("r0", side="over", market="totals", point=2.5, chance=0.95, price=1.02))
     band = build(eight, Controls.from_dict({"preset": "risky", "legs": 8, "best_effort": False}), NOW)
-    assert "even the shortest legs that pass pay 4.86x" in band.blocked["message"]
+    assert "even the shortest legs that pass pay 5.14x" in band.blocked["message"]
     assert band.blocked["relax"][:2] == ["fewer legs than 8", "a higher ticket-odds band"]
 
 

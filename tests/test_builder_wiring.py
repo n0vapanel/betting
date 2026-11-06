@@ -707,14 +707,14 @@ def test_the_router_reads_target_odds_and_builds_without_asking_for_a_stake() ->
 def test_an_ai_ticket_is_placed_at_one_bookmaker_that_offers_every_leg() -> None:
     from telegram_betting_bot_simple.engine import bets
     from tests.test_bets import leg
-    a, b = leg("g1", 0.75, 1.30, books=("Only A",)), leg("g2", 0.80, 1.25, books=("Only B",))
+    a, b = leg("g1", 0.62, 1.55, books=("Only A",)), leg("g2", 0.60, 1.60, books=("Only B",))
     # The builder's best Safe ticket (both legs) has no bookmaker offering both: each book is searched alone
     safe = bets.build_tier(bets.TIERS[0], [a, b])
     assert sorted((t.book, [l.event_id for l in t.legs]) for t in safe) == [("Only A", ["g1"]), ("Only B", ["g2"])]
-    both = [leg("g1", 0.80, 1.22, books=("A", "B")), leg("g2", 0.80, 1.25, books=("A", "B"))]
-    both[0].prices["B"] = 1.24  # B pays more on g1: that single is placed at B
+    both = [leg("g1", 0.62, 1.55, books=("A", "B")), leg("g2", 0.60, 1.60, books=("A", "B"))]
+    both[0].prices["B"] = 1.58  # B pays more on g1: that single is placed at B
     single = next(t for t in bets.build_tier(bets.TIERS[0], both) if [l.event_id for l in t.legs] == ["g1"])
-    assert single.book == "B" and single.decimal == pytest.approx(1.24)
+    assert single.book == "B" and single.decimal == pytest.approx(1.58)
 
 
 def test_a_league_with_a_board_is_never_called_unpriced(world) -> None:

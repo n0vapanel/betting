@@ -396,8 +396,8 @@ const EXTRAS = {
   },
   tiers: {
     group: "builder", aka: ["presets"], aliases: ["safe", "risky", "crazy", "risk level", "tier", "preset", "presets", "custom", "value", "for fun"],
-    worked: ["Safe: the brain gives the ticket 60% or more, paying 1.15x to 1.80x on 1 to 3 legs. At 62% it still loses about 4 times in 10.",
-      "Risky: 25% to 60%, paying 1.50x to 4.50x on 1 to 3 legs. Crazy: 3% to 25%, paying 3.40x to 36x on up to 5 legs: expect to lose most of these.",
+    worked: ["Safe: the brain gives the ticket 60% or more, paying 1.50x to 2.00x on 1 to 3 legs. At 62% it still loses about 4 times in 10.",
+      "Risky: 25% to 60%, paying 2.00x to 5.00x on 1 to 3 legs. Crazy: 3% to 25%, paying 5.00x to 36x on up to 5 legs: expect to lose most of these.",
       "Tap Safe and change \"Chance at least\" from 60% to 55%: the run is now Custom (from Safe), and \"Back to Safe\" puts every control back."],
     related: ["one_in", "expected_result", "target_odds", "near_miss"], topic: "builder", see: "#/build/builder", seeLabel: "Open the Builder",
   },
@@ -950,9 +950,9 @@ export const SECTIONS = [
     parts: [
       { p: "Build → Builder makes tickets for you from the prices the app already has (it fetches nothing for a build). Pick a preset, change any control you like, then tap Build tickets. You get 3 tickets by default (up to 5) that share no leg, each with the reasons behind every leg." },
       { terms: [
-        ["Safe", "Tickets that win 60% of the time or more, at total odds of about 1.15 to 1.80, with up to 3 legs. “More likely, small payout. It still loses some of the time.”"],
-        ["Risky", "Tickets that win 25% to 60% of the time, at odds of about 1.50 to 4.50, with up to 3 legs. “Balanced: a real chance and a real payout.”"],
-        ["Crazy", "Tickets that win 3% to 25% of the time, at odds of about 3.40 to 36, with up to 5 legs. “Long shot, big payout: expect to lose most of these.”"],
+        ["Safe", "Tickets that win 60% of the time or more, at total odds of about 1.50 to 2.00, with up to 3 legs. “More likely, small payout. It still loses some of the time.”"],
+        ["Risky", "Tickets that win 25% to 60% of the time, at odds of about 2.00 to 5.00, with up to 3 legs. “Balanced: a real chance and a real payout.”"],
+        ["Crazy", "Tickets that win 3% to 25% of the time, at odds of about 5.00 to 36, with up to 5 legs. “Long shot, big payout: expect to lose most of these.”"],
         ["Odds you want", "The total odds you'd like, like 3.5x. Or fill in Stake and Win about (total back), and the Builder works it out: win about ÷ stake."],
         ["Chance you want", "How often the whole ticket should win: Any, 50% to 90%, or your own number. Every leg has to win, so a higher chance means lower odds."],
         ["Closest effort", "On by default. When nothing fits exactly you still get the closest tickets, marked “Likeliest at your odds”, “Closest to your chance” or “Best balance”, each saying how close it gets and what it relaxed."],

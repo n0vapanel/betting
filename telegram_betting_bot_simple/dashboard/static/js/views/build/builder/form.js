@@ -35,7 +35,7 @@ export const GROUPS = [
 
 // --- presets ---------------------------------------------------------------------------------------------
 
-/** "60%+" and "1.15–1.80x" from a preset's own band (no target): what the chip promises, one short line each. */
+/** "60%+" and "1.50–2.00x" from a preset's own band (no target): what the chip promises, one short line each. */
 function presetSub(p) {
   if (!p) return "";
   return [bandText(p.joint_min, p.joint_max, "chance"), bandText(p.odds_min, p.odds_max, "odds")].filter(Boolean)

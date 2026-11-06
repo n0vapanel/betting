@@ -177,18 +177,18 @@ def test_calls_are_saved_judged_graded_and_ranked(service, store) -> None:
 def test_the_ais_daily_tickets_are_logged_and_graded(service, store) -> None:
     service.store = store
     built = service.ai_bets("basketball_nba")
-    top = built["tiers"]["safe"]["bets"][0]
+    top = built["tiers"]["crazy"]["bets"][0]
     logged = {t["tier"]: t for t in store.ai_tickets()}
     assert set(logged) == {key for key, tier in built["tiers"].items() if tier["bets"]}
-    assert logged["safe"]["payload"]["legs"][0]["home"] == "New York Knicks"
+    assert logged["crazy"]["payload"]["legs"][0]["home"] == "Oklahoma City Thunder"
     with store._connect() as db:
         db.execute("UPDATE ai_tickets SET first_start = '2020-01-01T00:00:00Z', last_start = '2020-01-01T00:00:00Z'")
     service.espn = FinishedGames()  # every game 110-100 to the home team
     service.grade_due()
-    ticket = next(t for t in store.ai_tickets() if t["tier"] == "safe")
+    ticket = next(t for t in store.ai_tickets() if t["tier"] == "crazy")
     assert ticket["status"] == ("won" if top["legs"][0]["side"] == "home" else "lost")
-    safe = service.track_record()["tiers"][0]
-    assert safe["tickets"] == 1 and safe["predicted"] == pytest.approx(top["probability"])
+    crazy = service.track_record()["tiers"][2]
+    assert crazy["tickets"] == 1 and crazy["predicted"] == pytest.approx(top["probability"])
 
 
 def test_calls_close_at_tip_off(service, store) -> None:

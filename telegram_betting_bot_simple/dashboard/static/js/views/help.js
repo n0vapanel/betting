@@ -410,9 +410,9 @@ function brainHtml() {
 
 function builderHtml() {
   const presets = [
-    ["shield", "Safe", "60%+", "1.15–1.80x", "1–3", "Never a leg the sources disagree on, a thin market, a chance from ratings alone or a leg priced at fair odds."],
-    ["scale", "Risky", "25–60%", "1.50–4.50x", "1–3", "A real chance and a real payout."],
-    ["zap", "Crazy", "3–25%", "3.40–36x", "1–5", "Long shots: expect to lose most of these."],
+    ["shield", "Safe", "60%+", "1.50–2.00x", "1–3", "Never a leg the sources disagree on, a thin market, a chance from ratings alone or a leg priced at fair odds."],
+    ["scale", "Risky", "25–60%", "2.00–5.00x", "1–3", "A real chance and a real payout."],
+    ["zap", "Crazy", "3–25%", "5.00–36x", "1–5", "Long shots: expect to lose most of these."],
   ];
   return `<div class="page-head"><span class="eyebrow">Guide</span><h1>The Builder</h1>
       <p>Safe, Risky and Crazy fill every control. Change any of them and the run is yours.</p></div>

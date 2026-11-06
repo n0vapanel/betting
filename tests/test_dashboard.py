@@ -122,7 +122,7 @@ def test_calls_api_judges_saves_and_validates(client) -> None:
 def test_ai_bets_leaderboard_and_record_endpoints(client) -> None:
     bets = client.get("/api/ai-bets", params={"league": "basketball_nba"}).json()
     assert set(bets["tiers"]) == {"safe", "risky", "crazy"}
-    assert bets["tiers"]["safe"]["bets"][0]["legs"][0]["label"] == "New York Knicks to win"
+    assert bets["tiers"]["crazy"]["bets"][0]["legs"][0]["label"] == "Los Angeles Clippers to win"
     assert client.get("/api/ai-bets", params={"league": "basketball_nba", "source": "yolo"}).status_code == 422
     assert client.get("/api/leaderboard").json() == []
     assert client.get("/api/track-record").json()["games"] == 0
