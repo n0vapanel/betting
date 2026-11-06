@@ -23,6 +23,18 @@ Output: fights_features_v2.parquet
 """
 import pandas as pd
 import numpy as np
+
+import importlib.util as _importlib_util
+
+def _load_assign_prior_streak():
+    path = __import__("os").path.join(__import__("os").path.dirname(__file__), "..", "mma", "streak.py")
+    spec = _importlib_util.spec_from_file_location("mma_streak", __import__("os").path.abspath(path))
+    module = _importlib_util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.assign_prior_streak
+
+
+assign_prior_streak = _load_assign_prior_streak()
 import os
 
 base = os.path.dirname(os.path.abspath(__file__))
@@ -210,11 +222,7 @@ g = lm.groupby("fighter")
 lm["n_prior"] = g.cumcount()
 lm["w_prior"] = g["won"].cumsum() - lm["won"]
 lm["l_prior"] = lm["n_prior"] - lm["w_prior"]
-wins_run = g["won"].cumsum()
-loss_flag = (lm["won"] == 0)
-last_loss_winrun = wins_run.where(loss_flag).ffill().fillna(0)
-streak_incl = wins_run - last_loss_winrun
-lm["streak_pre"] = streak_incl - lm["won"]
+assign_prior_streak(lm)
 lm["longest_run_so_far"] = lm.groupby("fighter")["streak_pre"].transform(
     lambda s: s.shift(1).cummax()).fillna(0)
 lm["prev_date"] = g["date"].shift(1)

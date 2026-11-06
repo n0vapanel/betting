@@ -190,6 +190,37 @@ def _score(value: Any) -> Optional[int]:
     return int(number) if number.is_integer() else None
 
 
+
+def fight_points(competition: Any) -> Optional[Tuple[int, int]]:
+    """(home, away) as 1 and 0 from a fight's winner flag.
+
+    The slate shows the lower ``order`` first and calls that side home. A draw is 0-0.
+    None for a team sport (it has home and away), a no contest, or a fight with no winner flag.
+    """
+    if not isinstance(competition, dict):
+        return None
+    kind = (competition.get("status") or {}).get("type") or {}
+    name = str((kind.get("name") if isinstance(kind, dict) else "") or "").upper()
+    if "NO_CONTEST" in name or "NO CONTEST" in name:
+        return None
+    competitors = [c for c in competition.get("competitors") or [] if isinstance(c, dict)]
+    if len(competitors) != 2 or any(c.get("homeAway") in ("home", "away") for c in competitors):
+        return None
+    ordered = sorted(competitors, key=lambda c: int(c.get("order") or 0))
+    flags = []
+    for competitor in ordered:
+        if competitor.get("winner") is None:
+            return None
+        flags.append(bool(competitor.get("winner")))
+    if flags == [True, False]:
+        return 1, 0
+    if flags == [False, True]:
+        return 0, 1
+    if flags == [False, False]:
+        return 0, 0
+    return None
+
+
 def competition_state(competition: Any) -> Optional[Tuple[str, Optional[int], Optional[int], Optional[float]]]:
     """(state, home score, away score, start in epoch seconds) of an ESPN competition: state is "pre", "live" or
     "final" (a postponed or cancelled game counts as final: nothing more will happen to it); None if unreadable."""
@@ -215,8 +246,13 @@ def competition_state(competition: Any) -> Optional[Tuple[str, Optional[int], Op
             start = datetime.datetime.fromisoformat(competition["date"].replace("Z", "+00:00")).timestamp()
         except ValueError:
             start = None
-    return (state, _score((sides.get("home") or {}).get("score")), _score((sides.get("away") or {}).get("score")),
-            start)
+    home = _score((sides.get("home") or {}).get("score"))
+    away = _score((sides.get("away") or {}).get("score"))
+    if state == "final" and home is None and away is None:
+        points = fight_points(competition)
+        if points is not None:
+            home, away = points
+    return (state, home, away, start)
 
 
 class EspnHttpError(RuntimeError):
@@ -294,8 +330,19 @@ class EspnClient:
                 self._states.popitem(last=False)
 
     def _remember_events(self, league: str, events: Any, at: float) -> None:
-        if espn_path(league) is None or league in SCOREBOARD_ONLY:
-            return  # tennis and MMA events are tournaments and cards, not one game
+        if espn_path(league) is None:
+            return
+        if league == "mma_mixed_martial_arts":
+            # A card is many fights. Remember each fight by its own competition id.
+            for event in events or []:
+                if not isinstance(event, dict):
+                    continue
+                for competition in event.get("competitions") or []:
+                    if isinstance(competition, dict):
+                        self._remember(league, competition.get("id"), competition, at)
+            return
+        if league in SCOREBOARD_ONLY:
+            return  # a tennis event is a tournament, not one match
         for event in events or []:
             if isinstance(event, dict):
                 self._remember(league, event.get("id"), (event.get("competitions") or [None])[0], at)
@@ -668,6 +715,58 @@ class EspnClient:
                         "day": day,
                     }
         return None
+
+
+    def mma_result(self, event_id: str, start: Optional[str] = None) -> Dict[str, Any]:
+        """A fight's result from the UFC scoreboard. Home is the lower ``order``, matching the slate.
+
+        ``start`` is the fight's ISO time. The board is read for that Eastern date and the
+        neighbouring day, because a late card crosses midnight UTC. Pending when the fight
+        is not on those boards yet. Void when ESPN calls it off or a no contest.
+        """
+        league = "mma_mixed_martial_arts"
+        days = []
+        if start:
+            try:
+                when = datetime.datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+            except ValueError:
+                when = None
+            if when is not None:
+                eastern = when.astimezone(ESPN_DAY_TZ).date()
+                days.extend([eastern, when.date(), eastern - datetime.timedelta(days=1)])
+        if not days:
+            today = datetime.datetime.now(ESPN_DAY_TZ).date()
+            days = [today, today - datetime.timedelta(days=1)]
+        found = None
+        for day in dict.fromkeys(days):
+            try:
+                events = self.scoreboard(league, day)
+            except Exception:
+                continue
+            for event in events or []:
+                if not isinstance(event, dict):
+                    continue
+                for competition in event.get("competitions") or []:
+                    if isinstance(competition, dict) and str(competition.get("id")) == str(event_id):
+                        found = competition
+                        break
+                if found:
+                    break
+            if found:
+                break
+        if not found:
+            return {"state": "pending"}
+        status = (found.get("status") or {}).get("type") or {}
+        name = str(status.get("name") or "")
+        upper = name.upper()
+        if any(word in upper for word in ("POSTPONED", "CANCELED", "CANCELLED", "FORFEIT", "NO_CONTEST", "NO CONTEST")):
+            return {"state": "void", "status": name}
+        if not status.get("completed"):
+            return {"state": "pending", "status": name}
+        points = fight_points(found)
+        if points is None:
+            return {"state": "pending", "status": name}
+        return {"state": "final", "home": points[0], "away": points[1], "status": name}
 
     def game_result(self, league: str, event_id: str) -> Dict[str, Any]:
         """How a game stands: {"state": "final", "home": pts, "away": pts}, {"state": "void"} if it

@@ -5,15 +5,15 @@ Upgrades vs v1:
   (a) 5 seasons of football-data.co.uk history per league (1718..2122);
   (b) Understat per-match xG/xGA joined by team-name + date (±1 day); rolling
       xGF/xGA/xG-diff features (all/home/away splits, windows 5 & 10);
-  (c) CLV features: opening-vs-closing no-vig drift (same-book chain
-      AvgCH->AvgH, else PSCH->PSH, else B365CH->B365H) + open market probs;
+  (c) CLV features: pre-close to close. Plain columns (AvgH, PSH, B365H) are the
+      pre-close; C columns (AvgCH, PSCH, B365CH) are the close, per football-data notes;
   (d) deeper venue splits (window 10), win/unbeaten/loss streaks, form momentum
       (w5 - w10), xG attack x defense interactions, rest-days diff.
 
 Protocol: strict no-lookahead (features computed from matches with strictly
 earlier kickoff; same-kickoff matches share pre-match state), train = all matches
 before 2022-03-01, test = 2022-03-01 .. end of season (571 matches, identical
-window to v1). Flat $1 at closing Avg odds, edge gates eps in {0, 0.02, 0.05},
+window to v1). Flat $1 at the closing C columns (AvgCH / AvgC>2.5), edge gates eps in {0, 0.02, 0.05},
 bootstrap CI clustered by match date. Targets: 1X2 and O/U 2.5.
 """
 import json
@@ -21,6 +21,7 @@ import os
 import sys
 import numpy as np
 import pandas as pd
+from odds_columns import assign_market_odds
 import lightgbm as lgb
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -112,80 +113,16 @@ def load_footballdata():
             df = df[keep].copy()
             df["League"] = name
             df["Season"] = season
-            # ---- closing 1X2 market odds: Avg -> BbAv -> Pinnacle
-            src = "Avg"
-            if not all(c in cols for c in ["AvgH", "AvgD", "AvgA"]):
-                src = "BbAv" if all(c in cols for c in ["BbAvH", "BbAvD", "BbAvA"]) else "PS"
-            df["c_H"] = df["AvgH"] if src == "Avg" else (df["BbAvH"] if src == "BbAv" else df["PSH"])
-            df["c_D"] = df["AvgD"] if src == "Avg" else (df["BbAvD"] if src == "BbAv" else df["PSD"])
-            df["c_A"] = df["AvgA"] if src == "Avg" else (df["BbAvA"] if src == "BbAv" else df["PSA"])
-            src_counts["close_1x2"][f"{code}_{season}"] = src
-            # ---- opening 1X2 (same-book pairs preferred for CLV): AvgC -> PSC -> B365C -> MaxC
-            src_o = None
-            if all(c in cols for c in ["AvgCH", "AvgCD", "AvgCA"]):
-                src_o = "AvgC"
-                oH, oD, oA = df["AvgCH"], df["AvgCD"], df["AvgCA"]
-            elif all(c in cols for c in ["PSCH", "PSCD", "PSCA"]):
-                src_o = "PSC"
-                oH, oD, oA = df["PSCH"], df["PSCD"], df["PSCA"]
-            elif all(c in cols for c in ["B365CH", "B365CD", "B365CA"]):
-                src_o = "B365C"
-                oH, oD, oA = df["B365CH"], df["B365CD"], df["B365CA"]
-            elif all(c in cols for c in ["MaxCH", "MaxCD", "MaxCA"]):
-                src_o = "MaxC"
-                oH, oD, oA = df["MaxCH"], df["MaxCD"], df["MaxCA"]
-            if src_o:
-                src_counts["open_1x2"][f"{code}_{season}"] = src_o
-                # same-book pair for drift where possible
-                if src_o == "AvgC" and src == "Avg":
-                    drH, drD, drA = df["AvgH"], df["AvgD"], df["AvgA"]
-                elif src_o == "PSC" and "PSH" in cols:
-                    drH, drD, drA = df["PSH"], df["PSD"], df["PSA"]
-                elif src_o == "B365C" and "B365H" in cols:
-                    drH, drD, drA = df["B365H"], df["B365D"], df["B365A"]
-                else:
-                    drH, drD, drA = df["c_H"], df["c_D"], df["c_A"]
-                m_open = np.column_stack([_no_vig(x, y, z) for x, y, z in
-                                          zip(oH.fillna(np.nan), oD.fillna(np.nan), oA.fillna(np.nan))]).T
-                m_clv = np.column_stack([_no_vig(x, y, z) for x, y, z in
-                                         zip(drH.fillna(np.nan), drD.fillna(np.nan), drA.fillna(np.nan))]).T
-                df["m_open_H"], df["m_open_D"], df["m_open_A"] = m_open[:, 0], m_open[:, 1], m_open[:, 2]
-                clv = m_clv - m_open
-                df["clv_H"], df["clv_D"], df["clv_A"] = clv[:, 0], clv[:, 1], clv[:, 2]
-                df["clv_mag"] = np.abs(clv).sum(1)
-            else:
-                src_counts["open_1x2"][f"{code}_{season}"] = None
-                df["m_open_H"] = df["m_open_D"] = df["m_open_A"] = np.nan
-                df["clv_H"] = df["clv_D"] = df["clv_A"] = np.nan
-                df["clv_mag"] = np.nan
-            # ---- closing O/U market odds: Avg -> BbAv
-            src2 = "Avg"
-            if not all(c in cols for c in ["Avg>2.5", "Avg<2.5"]):
-                src2 = "BbAv"
-            df["c_Over"] = df["Avg>2.5"] if src2 == "Avg" else df["BbAv>2.5"]
-            df["c_Under"] = df["Avg<2.5"] if src2 == "Avg" else df["BbAv<2.5"]
-            src_counts["close_ou"][f"{code}_{season}"] = src2
-            # ---- opening O/U (1920+ only)
-            src_o2 = None
-            oOv = oUn = None
-            if all(c in cols for c in ["AvgC>2.5", "AvgC<2.5"]):
-                src_o2 = "AvgC"
-                oOv, oUn = df["AvgC>2.5"], df["AvgC<2.5"]
-            elif all(c in cols for c in ["B365C>2.5", "B365C<2.5"]):
-                src_o2 = "B365C"
-                oOv, oUn = df["B365C>2.5"], df["B365C<2.5"]
-            if src_o2:
-                src_counts["open_ou"][f"{code}_{season}"] = src_o2
-                p_open = oOv.combine(oUn, lambda a, b: _no_vig2(a, b))
-                p_close = df["c_Over"].combine(df["c_Under"], lambda a, b: _no_vig2(a, b))
-                df["m_open_Over"] = p_open
-                df["clv_OU"] = p_close - p_open
-                df["clv_ou_avail"] = 1
-            else:
-                src_counts["open_ou"][f"{code}_{season}"] = None
-                df["m_open_Over"] = np.nan
-                df["clv_OU"] = np.nan
-                df["clv_ou_avail"] = 0
+            priced, src = assign_market_odds(df)
+            for column in ("c_H", "c_D", "c_A", "c_Over", "c_Under",
+                           "m_open_H", "m_open_D", "m_open_A", "m_open_Over",
+                           "clv_H", "clv_D", "clv_A", "clv_mag", "clv_OU", "clv_ou_avail"):
+                df[column] = priced[column].to_numpy() if hasattr(priced[column], "to_numpy") else priced[column]
+            key = f"{code}_{season}"
+            src_counts["close_1x2"][key] = src["close_1x2"]
+            src_counts["open_1x2"][key] = src["open_1x2"]
+            src_counts["close_ou"][key] = src["close_ou"]
+            src_counts["open_ou"][key] = src["open_ou"]
             frames.append(df)
     d = pd.concat(frames, ignore_index=True)
     if "Time" not in d.columns:
@@ -892,7 +829,7 @@ def main():
     A("## Method")
     A(f"- **Features ({len(feat_cols)}):** v1's 45 rolling features (stats w5/w10 + venue v5, Elo) extended with: "
       "venue splits at window 10 for all 14 stats; Understat rolling xGF/xGA and xG-diff (all/home/away, w5/w10); "
-      "CLV drift (opening→closing no-vig, same-book chain AvgC→Avg, else PSC→PS, else B365C→B365) for H/D/A and O/U; "
+      "CLV drift (pre-close→close no-vig; plain columns to the matching C columns) for H/D/A and O/U; "
       "opening market no-vig probabilities (m_open) as features; win/unbeaten/loss streak diffs; rest-days diff; "
       "form momentum (w5−w10) for GF/GA/xGF/xGA; xG attack×defense interactions; league dummies; season index.")
     A("- **No-lookahead protocol:** features are computed from team history with kickoff strictly before the current "
@@ -904,7 +841,7 @@ def main():
       f"(1X2: {W_LR_1X2:.1f} LogReg / {1-W_LR_1X2:.1f} LGBM; O/U: {W_LR_OU:.1f} / {1-W_LR_OU:.1f}).")
     A("- **Betting protocol:** flat $1 stakes; bet the model's max-probability side whenever "
       "`model prob − closing-market no-vig prob > eps`, eps ∈ {0, 0.02, 0.05}. Payouts use closing average decimal odds "
-      "(AvgH/AvgD/AvgA, Avg>2.5/Avg<2.5 — identical benchmark odds to v1 for the test window).")
+      "(AvgCH/AvgCD/AvgCA, AvgC>2.5/AvgC<2.5 — the closing columns, not the pre-close).")
     A("- **Bootstrap CI:** 2000 resamples clustered by match date, on flat-stake ROI. **Kelly:** quarter-Kelly, 5% cap.")
     A("")
     A("### Data coverage notes")

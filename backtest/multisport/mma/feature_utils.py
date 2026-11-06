@@ -18,6 +18,18 @@ import os
 import numpy as np
 import pandas as pd
 
+import importlib.util as _importlib_util
+
+def _load_assign_prior_streak():
+    path = __import__("os").path.join(__import__("os").path.dirname(__import__("os").path.abspath(__file__)), "streak.py")
+    spec = _importlib_util.spec_from_file_location("mma_streak", path)
+    module = _importlib_util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.assign_prior_streak
+
+
+assign_prior_streak = _load_assign_prior_streak()
+
 # ---------------- sources ----------------
 
 
@@ -173,18 +185,7 @@ def build_rolling_features(md, long):
     lm["n_prior"] = g.cumcount()
     lm["w_prior"] = g["won"].cumsum() - lm["won"]
     lm["l_prior"] = lm["n_prior"] - lm["w_prior"]
-    wins_run = g["won"].cumsum()
-    loss_flag = (lm["won"] == 0)
-    last_loss_winrun = wins_run.where(loss_flag).ffill().fillna(0)
-    streak_incl = wins_run - last_loss_winrun
-    lm["streak_pre"] = streak_incl - lm["won"]
-    # Card rows (no outcome yet) were counted as losses above; replace their
-    # streak with the consecutive-win run through their last PRIOR fight.
-    card_rows = lm["has_winner"] == 0
-    if card_rows.any():
-        prev_winrun = g["won"].cumsum().shift(1).fillna(0)
-        prev_llw = last_loss_winrun.shift(1).fillna(0)
-        lm.loc[card_rows, "streak_pre"] = (prev_winrun - prev_llw)[card_rows]
+    assign_prior_streak(lm, known="has_winner")
     lm["longest_run_so_far"] = lm.groupby("fighter")["streak_pre"].transform(
         lambda s: s.shift(1).cummax()).fillna(0)
     lm["prev_date"] = g["date"].shift(1)

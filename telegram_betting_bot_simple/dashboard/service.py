@@ -45,6 +45,12 @@ from ..data.cache import TTLCache, freshest, ttl_for
 from ..data import context as context_mod
 from ..data import slate as slate_mod
 from ..data.espn_client import ESPN_DAY_TZ, LEAGUES as ESPN_LEAGUES, OUT_STATUSES, EspnClient
+
+
+def can_grade(league: str) -> bool:
+    """True when a logged row is one game, or one UFC fight, that has a result to read."""
+    return league in ESPN_LEAGUES or league == "mma_mixed_martial_arts"
+
 from ..data.leagues import SPORTS, pick_leagues
 from ..data.odds_service import OddsService, book_roles, is_price_book, moneylines, summarize_markets
 from ..data.store import Store
@@ -595,7 +601,7 @@ class DashboardService:
         graded = 0
         for row in self.store.context_rows(status="pending", started_before=cutoff):
             try:
-                if row["league"] not in ESPN_LEAGUES:
+                if not can_grade(row["league"]):
                     self.store.grade_context(row["league"], row["game_key"], "void", None,
                                              {"reason": "no game result here"})
                     continue
@@ -1031,6 +1037,8 @@ class DashboardService:
             espn_id = match["event_id"] if match else None
         if not espn_id:
             return {"state": "pending"}
+        if row["league"] == "mma_mixed_martial_arts":
+            return {**self.espn.mma_result(espn_id, start=row.get("start")), "espn_id": espn_id}
         return {**self.espn.game_result(row["league"], espn_id), "espn_id": espn_id}
 
     def grade_due(self) -> int:
@@ -1122,7 +1130,7 @@ class DashboardService:
         hit, Brier score and log loss. While ESPN's boards still show the game on, no summary is asked for; no result
         by the give-up time: void, as for every prediction."""
         try:
-            if row["league"] not in ESPN_LEAGUES:
+            if not can_grade(row["league"]):
                 self.store.grade_ai_prediction(row["league"], row["event_id"], "void", {"reason": "no game result here"})
                 return 0
             if every_game.still_on(self.espn, row, now.timestamp()):
@@ -1273,7 +1281,7 @@ class DashboardService:
             pending = self.store.consensus_rows(status="pending", started_before=cutoff)
         for row in pending:
             try:
-                if row["league"] not in ESPN_LEAGUES:
+                if not can_grade(row["league"]):
                     # Tennis tournaments, MMA cards and leagues ESPN doesn't cover: no single-game result to read
                     self.store.grade_consensus(row["league"], row["game_key"], "void", None,
                                                {"reason": "no game result here"})
