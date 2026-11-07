@@ -21,7 +21,7 @@ import { api, request, isQuiet, qs } from "../api.js";
 import { setTitle, refreshMainButton, leagueTitle, sportEmoji, layout, onLayoutChange } from "../app.js";
 import {
   esc, pct, shortName, timeLabel, section, oddsGrid, splitBar, winChances, badge, explain, skeleton, errorState,
-  notice, priceText, pointText, injuryBadge, segmented, emptyState, searchFailed, SEARCH_MAX,
+  notice, priceText, pointText, injuryBadge, segmented, emptyState, searchFailed, formatStat, SEARCH_MAX,
 } from "../ui.js";
 import { icon } from "../icons.js";
 import { analystsHtml, bindAnalysts, openCallSheet, loadMyCalls, callSummary, CAUTION_GAP } from "../legacy.js";
@@ -132,17 +132,62 @@ function matchupPlayer(game, pl) {
   const photo = pl.headshot
     ? `<img class="matchup-headshot" src="${esc(pl.headshot)}" alt="" width="52" height="52" loading="lazy" data-game-headshot>`
     : `<span class="matchup-headshot blank" aria-hidden="true">${icon("user", { size: 22 })}</span>`;
-  const stats = pl.out ? injuryBadge(pl.status || "Out") : `<div class="matchup-player-stats">
-    <span><b>${pl.pts.toFixed(1)}</b><small>PTS</small></span>
-    <span><b>${pl.reb.toFixed(1)}</b><small>REB</small></span>
-    <span><b>${pl.ast.toFixed(1)}</b><small>AST</small></span>
-  </div>`;
+  const stats = pl.out ? injuryBadge(pl.status || "Out") : `<div class="matchup-player-stats">${playerStatCells(game, pl)}</div>`;
   return `<a class="matchup-player" href="${href}">
     ${photo}
-    <span class="matchup-player-copy"><b>${esc(pl.name)}</b><small>${esc([pl.position, pl.out ? pl.status : `${Math.round(pl.minutes)} min`].filter(Boolean).join(" · "))}</small>${stats}
-      <span class="matchup-player-link">Last 10 + full prediction ${icon("chevron", { size: 14 })}</span>
+    <span class="matchup-player-copy"><b>${esc(pl.name)}</b><small>${esc([pl.position, pl.out ? pl.status : ""].filter(Boolean).join(" · "))}</small>${stats}
+      ${propLinesHtml(pl)}<span class="matchup-player-link">Last 10 + full prediction ${icon("chevron", { size: 14 })}</span>
     </span>
   </a>`;
+}
+
+// The sport's usual stat keys in display order, and the labels the player page also uses (compact abbreviations).
+const MATCHUP_LABELS = {
+  pts: "PTS", reb: "REB", ast: "AST", fg3m: "3PM", stl: "STL", blk: "BLK", tov: "TO",
+  "PASS YDS": "PA YDS", "RUSH YDS": "RU YDS", "REC YDS": "REC YDS", REC: "REC", CMP: "CMP", CAR: "CAR",
+  "PASS TD": "PA TD", "RUSH TD": "RU TD", "REC TD": "REC TD",
+  H: "H", R: "R", RBI: "RBI", HR: "HR", K: "K", BB: "BB", SB: "SB",
+  G: "G", A: "A", PTS: "PTS", SOG: "SOG", SV: "SV", S: "S", SH: "SH", SOT: "SOT", TKL: "TKL",
+};
+const MATCHUP_ORDER = {
+  basketball: ["pts", "reb", "ast", "fg3m", "stl", "blk", "tov"],
+  americanfootball: ["PASS YDS", "RUSH YDS", "REC YDS", "REC", "PASS TD", "RUSH TD", "REC TD"],
+  baseball: ["H", "R", "RBI", "HR", "K", "BB", "SB"],
+  icehockey: ["G", "A", "PTS", "SOG", "SV"],
+  soccer: ["G", "A", "SH", "SOT", "TKL"],
+};
+function statLabel(stat) {
+  return MATCHUP_LABELS[stat] || stat;
+}
+
+/** The stat cells for a player: the NBA model's projection (pts/reb/ast) or the market view's recent averages. */
+function playerStatCells(game, pl) {
+  const cells = [];
+  if (pl.stats && typeof pl.stats === "object") {
+    const sport = String(game.league || "").split("_")[0];
+    for (const stat of (MATCHUP_ORDER[sport] || Object.keys(pl.stats))) {
+      const value = pl.stats[stat];
+      if (value == null) continue;
+      cells.push(`<span><b>${formatStat(value)}</b><small>${esc(statLabel(stat))}</small></span>`);
+      if (cells.length >= 3) break;
+    }
+  } else if (pl.pts != null) {
+    cells.push(`<span><b>${pl.pts.toFixed(1)}</b><small>PTS</small></span>`,
+      `<span><b>${pl.reb.toFixed(1)}</b><small>REB</small></span>`,
+      `<span><b>${pl.ast.toFixed(1)}</b><small>AST</small></span>`);
+  }
+  return cells.join("");
+}
+
+/** The posted market prop lines for a player (over/under plus prices), when DraftKings posted them. */
+function propLinesHtml(pl) {
+  const lines = (pl.props || []).filter((p) => p.line != null).slice(0, 3);
+  if (!lines.length) return "";
+  return `<div class="matchup-props">${lines.map((p) => {
+    const over = p.over ? priceText(p.over) : "–";
+    const under = p.under ? priceText(p.under) : "–";
+    return `<div class="matchup-prop"><span class="muted">${esc(p.name || statLabel(p.stat))}</span><span>${esc(p.line)} · O ${over} / U ${under}</span></div>`;
+  }).join("")}</div>`;
 }
 
 function matchup(game) {
@@ -170,15 +215,18 @@ function matchup(game) {
     return `<div class="matchup-team"><div class="matchup-team-head"><b>${esc(game[side])}</b>${stat ? `<span>${stat}</span>` : ""}</div>
       ${playersHtml}${leadersHtml}<div class="injury-team"><span class="matchup-label">Injuries</span>${injuriesHtml}</div></div>`;
   }).join("");
-  return section("Matchup", `<p class="muted small matchup-intro">Projected leaders. Tap a player for their last 10 games, form and full prediction.</p>
+  return section("Matchup", `<p class="muted small matchup-intro">Projected leaders. Tap a player for their last 10 games, form and props.</p>
     <div class="matchup">${sides}</div>`);
 }
 
 function playerRow(league, pl) {
+  const cells = playerStatCells({ league }, pl);
   const proj = pl.out ? injuryBadge(pl.status || "Out")
-    : `<span class="proj"><span><b>${pl.pts.toFixed(1)}</b> pts</span><span><b>${pl.reb.toFixed(1)}</b> reb</span><span><b>${pl.ast.toFixed(1)}</b> ast</span></span>`;
+    : `<span class="proj">${cells || `<span><b>–</b></span>`}</span>`;
+  const sub = [pl.position, pl.minutes != null && !pl.out ? `${Math.round(pl.minutes)} min` : "",
+    !pl.out && pl.status ? pl.status : ""].filter(Boolean).join(" · ");
   return `<li><a class="player-row${pl.out ? " out" : ""}" href="#/player/${esc(league)}/${esc(pl.id)}">
-    <span class="who"><b>${esc(pl.name)}</b><span>${esc(pl.position || "")}${pl.out ? "" : ` · ${Math.round(pl.minutes)} min`}${!pl.out && pl.status ? ` · ${esc(pl.status)}` : ""}</span></span>
+    <span class="who"><b>${esc(pl.name)}</b><span>${esc(sub)}</span></span>
     ${proj}${icon("chevron", { size: 18 })}</a></li>`;
 }
 
@@ -192,7 +240,7 @@ function playersHtml(game, side) {
   }
   const list = game.players[side] || [];
   return `${segmented("players-side", [{ value: "away", label: shortName(game.away, game.league) }, { value: "home", label: shortName(game.home, game.league) }], side, { label: "Team" })}
-    <p class="muted small" style="margin:10px 0 2px">Projected for this game. Tap a player for their last 10 games and hit rates.</p>
+    <p class="muted small" style="margin:10px 0 2px">Tap a player for their last 10 games, props and hit rates.</p>
     <ul class="player-list">${list.length ? list.map((pl) => playerRow(game.league, pl)).join("") : '<li class="muted small">No roster from ESPN right now.</li>'}</ul>`;
 }
 

@@ -361,6 +361,43 @@ def player_projection_view(projection: Any, roster: Dict[str, Dict[str, Any]]) -
     return row
 
 
+def _prop_price(price: Any) -> Optional[Dict[str, Any]]:
+    """A posted prop price as the app shows it (decimal to 2dp plus the American price), or None when it is
+    missing or not a real price."""
+    if price is None:
+        return None
+    value = Decimal(str(price))
+    if value <= 1:
+        return None
+    return {"decimal": float(value.quantize(Decimal("0.01"))),
+            "american": format_american(decimal_to_american(float(value)))}
+
+
+def market_player_view(card: Mapping[str, Any], props: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    """A player's market prop lines and recent stat averages for the matchup card.
+
+    Only what ESPN actually returned: the card's last-10 per-game averages and the posted DraftKings lines.
+    Nothing is invented — a stat or a line with no source is left out entirely.
+    """
+    stats = {str(key): value for key, value in (card.get("last10") or {}).items() if value is not None}
+    lines: List[Dict[str, Any]] = []
+    for prop in props or []:
+        stat = prop.get("stat")
+        if not stat or prop.get("line") is None:
+            continue
+        lines.append({
+            "stat": stat, "name": prop.get("name") or prop.get("label"), "line": prop.get("line"),
+            "kind": prop.get("kind"), "over": _prop_price(prop.get("over_price")),
+            "under": _prop_price(prop.get("under_price")),
+        })
+    return {
+        "id": str(card.get("id") or ""), "name": card.get("name"), "position": card.get("position"),
+        "headshot": card.get("headshot"), "status": card.get("status"),
+        "out": (str(card.get("status") or "").lower()) in OUT_STATUSES,
+        "stats": stats, "props": lines,
+    }
+
+
 class DashboardService:
     def __init__(
         self,
@@ -385,6 +422,8 @@ class DashboardService:
         self.store = store
         # The AI analysts (Claude, DeepSeek), when an API key for one is set
         self.analysts = analysts
+        # The multi-sport player lookups (data/espn_players.PlayerData), built on the shared ESPN client lazily
+        self._player_data: Any = None
         # The per-person features (dashboard/lab.py) set this; its saved bets and rollover plans are
         # graded with everything else in grade_due
         self.lab: Any = None
@@ -519,6 +558,8 @@ class DashboardService:
             players = None
             if league in AI_LEAGUES and info.get("prediction") and info.get("match") and context:
                 players = self._players(league, info, context)
+            elif league not in AI_LEAGUES and info.get("match"):
+                players = self._market_players(league, info)
             prediction = info.get("prediction")
             model = (prediction.sources.get("model") or {}).get("home_win_prob") if prediction else None
             return {"card": card, "info": info, "players": players, "model": model, "partial": bool(info.get("partial"))}
@@ -998,6 +1039,54 @@ class DashboardService:
             return self.espn.player_seasons(league, athlete_id)
         except Exception:
             return []
+
+    @property
+    def players(self) -> Any:
+        """The multi-sport player lookups (data/espn_players.PlayerData) over the shared ESPN client."""
+        if self._player_data is None:
+            from ..data.espn_players import PlayerData
+            self._player_data = PlayerData(self.espn)
+        return self._player_data
+
+    def _market_players(self, league: str, info: Dict[str, Any]) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+        """The market's posted prop lines and each player's recent averages for the matchup card, for the leagues
+        without the NBA model (NFL/MLB/NHL/WNBA/soccer): the roster and the posted DraftKings props, then the top
+        few players per team that have a line. Never fetches a model, so nothing is predicted — a league ESPN has
+        no roster or props for stays None (the page's "find a player" search shows instead)."""
+        match = info.get("match")
+        if not match or not match.get("event_id"):
+            return None
+        try:
+            found = self.players.props(league, match["event_id"])
+        except Exception as exc:
+            logging.warning("No player props for %s %s: %s", league, match["event_id"], type(exc).__name__)
+            return None
+        props_by_player = found.get("players") or {}
+        if not props_by_player:
+            return None
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for side in ("home", "away"):
+            team_id = match.get(f"{side}_id")
+            try:
+                roster = self.espn.roster(league, team_id)
+            except Exception as exc:
+                logging.warning("No roster for team %s: %s", team_id, type(exc).__name__)
+                out[side] = []
+                continue
+            cards = []
+            for player in roster:
+                posted = props_by_player.get(str(player.get("id")))
+                if not posted:
+                    continue
+                try:
+                    card = self.players.card(league, str(player["id"]))
+                except Exception:
+                    card = {**player, "last10": {}}
+                cards.append(market_player_view(card, posted))
+                if len(cards) >= 3:
+                    break
+            out[side] = cards
+        return out if (out.get("home") or out.get("away")) else None
 
     # --- people's predictions ("calls") and the AI's track record ------------------
 
