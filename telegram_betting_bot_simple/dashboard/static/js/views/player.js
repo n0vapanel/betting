@@ -70,6 +70,62 @@ function label(stat) {
   return LABELS[stat] || stat;
 }
 
+const FORM = {
+  basketball: ["min", "pts", "reb", "ast", "fg3m", "stl", "blk", "tov"],
+  americanfootball: ["PASS YDS", "RUSH YDS", "REC YDS", "REC", "PASS TD", "RUSH TD", "REC TD"],
+  baseball: ["H", "R", "RBI", "HR", "K", "BB", "SB"],
+  icehockey: ["G", "A", "PTS", "SOG", "SV"],
+};
+
+function formKeys(card) {
+  const sport = String(card.league || "").split("_")[0];
+  const bags = [card.season, card.last5, card.last10, card.splits?.home?.stats, card.splits?.away?.stats];
+  const preferred = FORM[sport] || Object.keys(card.season || {});
+  return preferred.filter((key) => bags.some((bag) => bag && bag[key] != null));
+}
+
+function formCell(value) {
+  return value == null ? "–" : formatStat(value);
+}
+
+/** Season, recent and home/away averages already on the card. Counting stats only. */
+function formHtml(card) {
+  const keys = formKeys(card);
+  if (!keys.length) return "";
+  const head = keys.map((key) => `<th>${esc(label(key))}</th>`).join("");
+  const row = (name, bag) => `<tr><th>${esc(name)}</th>${keys.map((key) => `<td>${esc(formCell(bag?.[key]))}</td>`).join("")}</tr>`;
+  const seasonName = `Season${card.sample?.season ? ` (${card.sample.season})` : ""}`;
+  return section("Form", `<div class="table-wrap"><table>
+      <thead><tr><th></th>${head}</tr></thead>
+      <tbody>
+        ${row(seasonName, card.season)}
+        ${row("Last 5", card.last5)}
+        ${row("Last 10", card.last10)}
+        ${card.splits?.home?.stats ? row(`Home${card.splits.home.games ? ` (${card.splits.home.games})` : ""}`, card.splits.home.stats) : ""}
+        ${card.splits?.away?.stats ? row(`Away${card.splits.away.games ? ` (${card.splits.away.games})` : ""}`, card.splits.away.stats) : ""}
+      </tbody>
+    </table></div>`);
+}
+
+/** The last games on the card, one row per game, same columns as the form table. */
+function logHtml(card) {
+  const games = (card.games || []).slice(0, 10);
+  const keys = formKeys(card).filter((key) => games.some((game) => game.stats?.[key] != null));
+  if (!games.length || !keys.length) return "";
+  const head = keys.map((key) => `<th>${esc(label(key))}</th>`).join("");
+  const body = games.map((game) => {
+    const where = game.home == null ? "" : game.home ? "vs" : "@";
+    const opp = `${where} ${game.opponent || ""}`.trim();
+    const result = `${game.result || ""} ${game.score || ""}`.trim();
+    const cells = keys.map((key) => `<td>${esc(formCell(game.stats?.[key]))}</td>`).join("");
+    return `<tr><td>${esc(shortDate(game.date))}</td><td>${esc(opp)}</td><td>${esc(result)}</td>${cells}</tr>`;
+  }).join("");
+  return section("Last games", `<div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Opp</th><th></th>${head}</tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>`);
+}
+
 /** The market chips: the sport's usual stats that this player's log has, then any other posted prop. */
 function marketsFor(card) {
   const sport = String(card.league || "").split("_")[0];
@@ -300,6 +356,8 @@ export async function render(root, params) {
   const draw = () => {
     const ask = `#/ask?player=${encodeURIComponent(`${league}:${id}`)}&name=${encodeURIComponent(card.name || "")}`;
     root.innerHTML = `${headerHtml(card)}
+      ${formHtml(card)}
+      ${logHtml(card)}
       ${markets.length ? `<div class="chip-scroll section" role="toolbar" aria-label="Stat">${markets.map((m) => {
         const prop = postedProp(card, m);
         return chip(`${label(m)}${prop ? ` ${prop.line}` : ""}`, { active: m === stat, attrs: `data-stat="${esc(m)}"` });

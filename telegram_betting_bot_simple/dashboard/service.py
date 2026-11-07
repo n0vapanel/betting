@@ -323,6 +323,44 @@ def _pct(p: float) -> str:
     return f"{p:.0%}"
 
 
+def matchup_view(info: Dict[str, Any]) -> Dict[str, Any]:
+    """Each team's real comparison numbers for the game page's matchup block: the W-L record (from ESPN's summary
+    header), the team model's points-for/against (NBA only), and the season leaders ESPN returned. Nothing is
+    invented: a column without a source is left out, and a side with nothing is left out entirely."""
+    out: Dict[str, Any] = {}
+    records = info.get("records") or {}
+    leaders = info.get("leaders") or {}
+    teams = info.get("teams") or {}
+    for side in ("home", "away"):
+        entry: Dict[str, Any] = {}
+        record = records.get(side)
+        if record:
+            entry["record"] = record
+        team = teams.get(side)
+        rating = getattr(team, "rating", None) if team is not None else None
+        if rating is not None:
+            entry["rating"] = {"points_for": rating.points_for, "points_against": rating.points_against,
+                               "games": rating.games}
+        side_leaders = leaders.get(side)
+        if side_leaders:
+            entry["leaders"] = side_leaders
+        if entry:
+            out[side] = entry
+    return out
+
+
+def player_projection_view(projection: Any, roster: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """JSON-safe projection plus the headshot ESPN supplied for that athlete."""
+    row = {
+        key: (round(value, 1) if isinstance(value, float) else value)
+        for key, value in vars(projection).items()
+    }
+    headshot = (roster.get(str(projection.id)) or {}).get("headshot")
+    if headshot:
+        row["headshot"] = headshot
+    return row
+
+
 class DashboardService:
     def __init__(
         self,
@@ -741,6 +779,7 @@ class DashboardService:
             "prediction": self._prediction_view(game, prediction, info) if prediction else None,
             "espn_home_win": info.get("espn_home_win"),
             "injuries": info.get("injury_names", {}),
+            "matchup": matchup_view(info),
         }
         return card, info
 
@@ -769,6 +808,24 @@ class DashboardService:
                 side: [f"{i['name']} ({i['status']})" for i in injuries.get(match[f"{side}_id"], [])]
                 for side in ("home", "away")
             }
+            # Each team's W-L record and the season leaders, straight from ESPN's summary: only what the feed
+            # returned (a sport that sends no leaders leaves the column out)
+            records: Dict[str, Optional[str]] = {}
+            leaders: Dict[str, List[Dict[str, Any]]] = {}
+            competition = (espn_summary.get("header", {}).get("competitions") or [{}])[0]
+            for competitor in competition.get("competitors") or []:
+                side = competitor.get("homeAway")
+                if side in ("home", "away"):
+                    records[side] = next(
+                        (r.get("summary") for r in competitor.get("record") or [] if r.get("type") == "total"), None)
+            for group in espn_summary.get("leaders") or []:
+                team_id = (group.get("team") or {}).get("id")
+                if team_id == match.get("home_id"):
+                    leaders["home"] = group.get("leaders") or []
+                elif team_id == match.get("away_id"):
+                    leaders["away"] = group.get("leaders") or []
+            info["records"] = records
+            info["leaders"] = leaders
         info["injuries"] = injuries
         if league not in AI_LEAGUES:
             return info
@@ -928,8 +985,9 @@ class DashboardService:
                 margin=prediction.margin if side == "home" else -prediction.margin,
                 home=side == "home", team_games=team_games,
             )
+            roster_by_id = {str(player["id"]): player for player in roster}
             out[side] = [
-                {key: (round(value, 1) if isinstance(value, float) else value) for key, value in vars(p).items()}
+                player_projection_view(p, roster_by_id)
                 for p in projections
                 if p.out or p.minutes >= 8
             ]

@@ -534,6 +534,27 @@ function railSummary() {
   return { count: n, odds, label };
 }
 
+function slipResearchHtml(leg) {
+  const league = leg.ref?.league || leg.league;
+  const id = leg.ref?.id;
+  if (!league || id === null || id === undefined || id === "") return "";
+  const game = `#/game/${encodeURIComponent(league)}/${encodeURIComponent(id)}`;
+  return `<div class="slip-research" aria-label="Research this pick">
+    <a href="${esc(game)}">Matchup & recent form</a>
+    <a href="${esc(`${game}?section=players`)}">Player projections</a>
+  </div>`;
+}
+
+function slipProbabilitiesHtml(ai, market, view, leg) {
+  if (ai == null && market == null) {
+    return '<p class="slip-probs-missing">Chance unavailable — this game has no priced market or model source yet.</p>';
+  }
+  return `<div class="slip-probs" aria-label="Win probabilities">
+    ${ai != null ? `<span><small>${esc(legChanceWord(view || leg))}</small><b>${pct(ai)}</b></span>` : ""}
+    ${market != null ? `<span><small>Market</small><b>${pct(market)}</b></span>` : ""}
+  </div>`;
+}
+
 function legLine(leg, view, removed) {
   const odds = view?.odds || { decimal: leg.price, american: leg.american };
   const ai = view ? view.ai_prob : leg.ai;
@@ -546,8 +567,9 @@ function legLine(leg, view, removed) {
       <div class="row-between"><b>${esc(view?.label || leg.label)}</b><b class="num">${esc(priceText(odds))}</b></div>
       <div class="muted small">${esc(leg.game || view?.game || "")}${leg.start ? ` · ${esc(timeLabel(leg.start))}` : ""}</div>
       ${context ? `<div class="slip-ctx">${context}</div>` : ""}
-      <div class="small">${ai != null ? `${legChanceWord(view || leg)} ${pct(ai)}` : ""}${ai != null && market != null ? " · " : ""}${market != null ? `Market ${pct(market)}` : ""}
-        ${removed ? ` ${icon("alert", { size: 14 })}<span class="warn">No longer offered</span>` : ""}${view?.started ? ` <span class="warn">Started</span>` : ""}</div>
+      ${slipProbabilitiesHtml(ai, market, view, leg)}
+      ${removed ? `<div class="small warn">${icon("alert", { size: 14 })} No longer offered</div>` : ""}${view?.started ? '<div class="small warn">Started</div>' : ""}
+      ${slipResearchHtml(leg)}
     </div>
     <button type="button" class="icon-btn" data-remove-leg="${esc(leg.key)}" aria-label="Remove ${esc(leg.label)}">${icon("trash", { size: 18 })}</button>
   </li>`;

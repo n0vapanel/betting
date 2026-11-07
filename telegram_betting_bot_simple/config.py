@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 # The Odds API bookmakers the league board asks for (checked against its bookmaker list on 27 October 2026):
 # Pinnacle and two exchanges anchor the consensus; the rest are US books people can bet at. Caesars
 # (williamhill_us) is listed for paid plans only, and espnbet is now called "theScore Bet"
-DEFAULT_BOOKMAKERS = ("pinnacle,betfair_ex_eu,matchbook,draftkings,fanduel,betmgm,williamhill_us,espnbet,betrivers,"
+DEFAULT_BOOKMAKERS = ("pinnacle,betfair_ex_eu,matchbook,draftkings,fanduel,betmgm,bet365,betano,betrivers,"
                       "bovada")
 DEFAULT_SHARP_BOOKS = "pinnacle,betfair_ex_eu,matchbook"
 MAX_BOOKMAKERS = 10  # every 10 bookmakers count as one region (3 credits a board for three markets)
@@ -56,6 +56,7 @@ class Config(BaseSettings):
     api_sports_key: Optional[str] = Field(None, validation_alias="API_SPORTS_KEY")
     odds_api_key: Optional[str] = Field(None, validation_alias="THE_ODDS_API_KEY")
     news_api_key: Optional[str] = Field(None, validation_alias="NEWS_API_KEY")
+    statmuse_api_key: Optional[str] = Field(None, validation_alias="STATMUSE_API_KEY")
     log_level: str = Field("INFO", validation_alias="LOG_LEVEL")
     # IANA name of the timezone game start times are shown in
     timezone: str = Field("America/New_York", validation_alias="TIMEZONE")

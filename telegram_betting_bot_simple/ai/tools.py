@@ -228,6 +228,14 @@ TOOLS: List[Dict[str, Any]] = [
      "description": "Dated injury and lineup news with sources: for a player (player = name), one game "
                     "(event_id) or the league's games (both empty strings).",
      "input_schema": _obj({"league": _LEAGUE, "player": _STR, "event_id": _STR})},
+    {"name": "statmuse_ask",
+     "description": "A counting stat from StatMuse for one plain-English question: season averages, results, "
+                    "standings. Leagues: NBA, NFL, NHL, MLB, WNBA, college football, Premier League, LaLiga, "
+                    "Bundesliga, Serie A, Ligue 1, Champions League. Quote only numbers this tool returns. It is "
+                    "not a win probability and it does not change the blend. MMA, MLS and every other league "
+                    "answer unsupported: do not guess.",
+     "input_schema": _obj({"league": _LEAGUE,
+                           "question": {"type": "string", "description": "The stat question, at most 200 characters"}})},
     {"name": "brain_price_legs",
      "description": "The brain's view of each leg on its own: the AI's chance, the market's chance, fair odds, "
                     "edge and the bookmaker's cut. Use it to compare legs; it prices no ticket.",
@@ -432,6 +440,17 @@ class NewsInput(BaseModel):
     event_id: str = Field("", max_length=64)
 
 
+class StatMuseInput(BaseModel):
+    """One StatMuse question. The league picks the sport; the question is clipped to the API's 200 characters."""
+    league: LeagueKey  # type: ignore[valid-type]
+    question: str = Field(min_length=1, max_length=400)
+
+    @field_validator("question")
+    @classmethod
+    def _clip(cls, value: str) -> str:
+        return " ".join(value.split())[:200]
+
+
 class LegsInput(BaseModel):
     legs: List[Ref] = Field(min_length=1, max_length=MAX_LEGS)
 
@@ -492,7 +511,7 @@ class PastedInput(BaseModel):
 INPUTS: Dict[str, type] = {
     "sports_find_events": EventsInput, "odds_get_prices": OddsInput, "markets_consensus": OddsInput,
     "game_context": OddsInput, "player_get_profile": PlayerInput,
-    "player_get_props": PlayerInput, "news_get": NewsInput, "brain_price_legs": LegsInput,
+    "player_get_props": PlayerInput, "news_get": NewsInput, "statmuse_ask": StatMuseInput, "brain_price_legs": LegsInput,
     "ticket_price": TicketInput, "ticket_build": BuildInput, "ticket_analyse": TicketInput,
     "rollover_simulate": RolloverInput, "slip_propose": TicketInput, "user_get_context": NoInput,
     "pasted_slip_analyse": PastedInput, "brain_top_picks": TopPicksInput, "brain_progress": NoInput,
@@ -1166,6 +1185,7 @@ STEPS: Dict[str, Callable[[Dict[str, Any]], str]] = {
     "player_get_profile": lambda a: f"Looking up {a.get('name') or 'the player'}…",
     "player_get_props": lambda a: f"Checking {a.get('name') or 'the player'}'s prop lines…",
     "news_get": lambda a: "Checking injury news…",
+    "statmuse_ask": lambda a: "Looking up the stat…",
     "brain_price_legs": lambda a: f"Running the brain on {len(a.get('legs') or [])} legs…",
     "ticket_price": lambda a: f"Pricing {len(a.get('legs') or [])} legs…",
     "ticket_build": lambda a: "Building tickets…" if not a.get("preset") else f"Building {a['preset'].title()} tickets…",
@@ -1226,7 +1246,7 @@ class Toolbox:
         self.runners: Dict[str, Callable[[Any], Tuple[Dict[str, Any], str, List[Dict[str, Any]]]]] = {
             "sports_find_events": self._events, "odds_get_prices": self._odds, "markets_consensus": self._markets,
             "game_context": self._game_context, "player_get_profile": self._profile,
-            "player_get_props": self._props, "news_get": self._news, "brain_price_legs": self._brain,
+            "player_get_props": self._props, "news_get": self._news, "statmuse_ask": self._statmuse, "brain_price_legs": self._brain,
             "ticket_price": self._price, "ticket_build": self._build, "ticket_analyse": self._analyse,
             "rollover_simulate": self._rollover, "slip_propose": self._propose, "user_get_context": self._context,
             "pasted_slip_analyse": self._pasted, "brain_top_picks": self._top_picks,
@@ -1567,6 +1587,16 @@ class Toolbox:
         content["games"] = [{"game": _game_name(c), "event_id": c.get("id"), "injuries": c.get("injuries") or {}}
                             for c in (today.get("games") or [])[:MAX_EVENTS] if any((c.get("injuries") or {}).values())]
         return trim(content, items=15), f"news_get({data.league})", []
+
+    def _statmuse(self, data: StatMuseInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
+        import os
+
+        from ..data.apis.statmuse import NOTE, StatMuseClient
+        content = StatMuseClient(os.environ.get("STATMUSE_API_KEY") or "").ask(data.league, data.question)
+        content["source"] = "StatMuse"
+        content["note"] = NOTE
+        kind = content.get("type") or content.get("error") or "unsupported"
+        return content, f"statmuse_ask({data.league}): {kind}", []
 
     def _brain(self, data: LegsInput) -> Tuple[Dict[str, Any], str, List[Dict[str, Any]]]:
         refs = [ref.model_dump() for ref in data.legs]

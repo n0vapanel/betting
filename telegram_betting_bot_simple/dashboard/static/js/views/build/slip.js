@@ -128,6 +128,27 @@ function picks(n) {
   return `${n} pick${n === 1 ? "" : "s"}`;
 }
 
+function slipResearchHtml(leg) {
+  const league = leg.ref?.league || leg.league;
+  const id = leg.ref?.id;
+  if (!league || id === null || id === undefined || id === "") return "";
+  const game = `#/game/${encodeURIComponent(league)}/${encodeURIComponent(id)}`;
+  return `<div class="slip-research" aria-label="Research this pick">
+    <a href="${esc(game)}">Matchup & recent form</a>
+    <a href="${esc(`${game}?section=players`)}">Player projections</a>
+  </div>`;
+}
+
+function slipProbabilitiesHtml(ai, market, view, leg) {
+  if (ai == null && market == null) {
+    return '<p class="slip-probs-missing">Chance unavailable — this game has no priced market or model source yet.</p>';
+  }
+  return `<div class="slip-probs" aria-label="Win probabilities">
+    ${ai != null ? `<span><small>${esc(legChanceWord(view || leg))}</small><b>${pct(ai)}</b></span>` : ""}
+    ${market != null ? `<span><small>Market</small><b>${pct(market)}</b></span>` : ""}
+  </div>`;
+}
+
 // --- pieces ----------------------------------------------------------------------------------------
 
 function subHtml() {
@@ -168,7 +189,7 @@ function legRow(leg, view, { gone = false, move = null, weak = false } = {}) {
   const game = gameShort(view?.game || leg.game, league);
   const start = view?.start || leg.start;
   const where = [game, start ? timeLabel(start) : ""].filter(Boolean).join(" · ");
-  const chances = [ai != null ? `${legChanceWord(view || leg)} ${pct(ai)}` : "", market != null ? `Market ${pct(market)}` : "", view?.chance_label || "", view?.book ? `at ${view.book}` : ""].filter(Boolean).join(" · ");
+  const source = [view?.chance_label || "", view?.book ? `at ${view.book}` : ""].filter(Boolean).join(" · ");
   const flags = [
     gone ? badge("No longer offered", "warn", "alert") : "",
     view?.started ? badge("Started", "warn", "clock") : "",
@@ -179,8 +200,10 @@ function legRow(leg, view, { gone = false, move = null, weak = false } = {}) {
     <div class="grow">
       <div class="row-between"><b>${esc(label)}</b><b class="num">${esc(gone ? "–" : priceText(odds))}</b></div>
       ${where ? `<div class="muted small">${esc(where)}</div>` : ""}
-      ${chances ? `<div class="small">${esc(chances)}</div>` : ""}
+      ${slipProbabilitiesHtml(ai, market, view, leg)}
+      ${source ? `<div class="small muted">${esc(source)}</div>` : ""}
       ${flags.length ? `<div class="bx-flags">${flags.join("")}</div>` : ""}
+      ${slipResearchHtml(leg)}
     </div>
     <button type="button" class="icon-btn" data-remove-leg="${esc(leg.key)}" aria-label="Remove ${esc(label)}">${icon("trash", { size: 18 })}</button>
   </li>`;

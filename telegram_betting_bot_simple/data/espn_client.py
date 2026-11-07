@@ -169,10 +169,11 @@ def lean_events(value: Any) -> Any:
 
 
 # The parts of a game summary anything here reads (the game's status and score, ESPN's predictor, the injury lists,
-# the box score and the books' lines: game_result, box_score, closing_line, ratings.parse_predictor, the dashboard's
-# cards). The rest (play-by-play, win probability, news, videos, leaders, standings) is about 90% of a summary
+# the box score, the books' lines and the season stat leaders the game page's matchup block shows when the feed
+# returns them: game_result, box_score, closing_line, ratings.parse_predictor, the dashboard's cards). The rest
+# (play-by-play, win probability, news, videos, standings) is about 90% of a summary
 # (a final NBA game's 516 KB keeps about 57 KB), so it is dropped before the summary is cached
-SUMMARY_KEEP = ("header", "predictor", "injuries", "boxscore", "pickcenter")
+SUMMARY_KEEP = ("header", "predictor", "injuries", "boxscore", "pickcenter", "leaders")
 
 
 def lean_summary(data: Any) -> Any:
@@ -633,9 +634,9 @@ class EspnClient:
                             state=None if season is None else "past")
 
     def roster(self, league: str, team_id: str) -> List[Dict[str, Any]]:
-        """The team's players: id, name, position and injury status ('' when healthy). The NFL's, NHL's and MLB's
-        rosters come in groups (offense, "Centers", "Pitchers", the NFL's practice squad): each of their players also
-        carries his ``group``."""
+        """The team's players: id, name, position, injury status and ESPN headshot when supplied. The NFL's, NHL's and
+        MLB's rosters come in groups (offense, "Centers", "Pitchers", the NFL's practice squad): each player also
+        carries their ``group``."""
         sport, path = LEAGUES[league]
 
         def load() -> List[Dict[str, Any]]:
@@ -649,12 +650,15 @@ class EspnClient:
                     "position": (athlete.get("position") or {}).get("abbreviation", ""),
                     "status": injuries[0].get("status", "") if injuries else "",
                 }
+                headshot = (athlete.get("headshot") or {}).get("href")
+                if headshot:
+                    player["headshot"] = headshot
                 if group is not None:
                     player["group"] = group
                 players.append(player)
             return players
 
-        return self._cached(("espn", "roster", league, str(team_id)), "roster", load)
+        return self._cached(("espn", "roster_v2", league, str(team_id)), "roster", load)
 
     def player_seasons(self, league: str, athlete_id: str) -> List[Dict[str, Any]]:
         """Per-game averages for each season of an NBA/WNBA player's career, oldest first.

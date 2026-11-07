@@ -127,16 +127,51 @@ function prices(game) {
   { info: "spread", aside: "" });
 }
 
-function injuries(game) {
+function matchupPlayer(game, pl) {
+  const href = `#/player/${esc(game.league)}/${esc(pl.id)}`;
+  const photo = pl.headshot
+    ? `<img class="matchup-headshot" src="${esc(pl.headshot)}" alt="" width="52" height="52" loading="lazy" data-game-headshot>`
+    : `<span class="matchup-headshot blank" aria-hidden="true">${icon("user", { size: 22 })}</span>`;
+  const stats = pl.out ? injuryBadge(pl.status || "Out") : `<div class="matchup-player-stats">
+    <span><b>${pl.pts.toFixed(1)}</b><small>PTS</small></span>
+    <span><b>${pl.reb.toFixed(1)}</b><small>REB</small></span>
+    <span><b>${pl.ast.toFixed(1)}</b><small>AST</small></span>
+  </div>`;
+  return `<a class="matchup-player" href="${href}">
+    ${photo}
+    <span class="matchup-player-copy"><b>${esc(pl.name)}</b><small>${esc([pl.position, pl.out ? pl.status : `${Math.round(pl.minutes)} min`].filter(Boolean).join(" · "))}</small>${stats}
+      <span class="matchup-player-link">Last 10 + full prediction ${icon("chevron", { size: 14 })}</span>
+    </span>
+  </a>`;
+}
+
+function matchup(game) {
   const sides = ["away", "home"].map((side) => {
+    const team = game.matchup?.[side] || {};
+    const rating = team.rating;
     const list = game.injuries?.[side] || [];
-    return `<div class="injury-team"><b>${esc(game[side])}</b>${list.length
+    const leaders = team.leaders || [];
+    const players = (game.players?.[side] || []).filter((pl) => !pl.out).slice(0, 3);
+    const injuriesHtml = list.length
       ? `<div class="chip-row wrap">${list.map((entry) => {
         const m = /^(.*) \(([^)]*)\)$/.exec(entry);
         return m ? `<span class="row" style="gap:6px">${esc(m[1])} ${injuryBadge(m[2])}</span>` : `<span>${esc(entry)}</span>`;
-      }).join("")}</div>` : '<span class="muted small">No injuries reported</span>'}</div>`;
+      }).join("")}</div>` : '<span class="muted small">No injuries reported</span>';
+    const leadersHtml = leaders.length
+      ? `<div class="leaders">${leaders.map((group) => {
+        const top = (group.leaders || [])[0];
+        return top ? `<div class="leader-row"><span class="muted">${esc(group.displayName || group.name || "")}</span><span><b>${esc(top.athlete?.displayName || "")}</b> ${esc(top.displayValue || "")}</span></div>` : "";
+      }).join("")}</div>` : "";
+    const stat = [team.record ? `<span class="muted">${esc(team.record)}</span>` : "",
+      rating ? `<span class="muted">${rating.points_for.toFixed(1)} PF · ${rating.points_against.toFixed(1)} PA</span>` : ""].filter(Boolean).join(" · ");
+    const playersHtml = players.length
+      ? `<div class="matchup-players">${players.map((pl) => matchupPlayer(game, pl)).join("")}</div>`
+      : "";
+    return `<div class="matchup-team"><div class="matchup-team-head"><b>${esc(game[side])}</b>${stat ? `<span>${stat}</span>` : ""}</div>
+      ${playersHtml}${leadersHtml}<div class="injury-team"><span class="matchup-label">Injuries</span>${injuriesHtml}</div></div>`;
   }).join("");
-  return section("Injury report", `<div class="injury-list">${sides}</div>`);
+  return section("Matchup", `<p class="muted small matchup-intro">Projected leaders. Tap a player for their last 10 games, form and full prediction.</p>
+    <div class="matchup">${sides}</div>`);
 }
 
 function playerRow(league, pl) {
@@ -230,7 +265,7 @@ export async function render(root, params) {
       ${prices(game)}
       ${goalsSection(game, { short })}
       ${factorsSection(game, { key: fxKey })}
-      ${injuries(game)}
+      ${matchup(game)}
       ${game.prediction || (game.analysts && !Array.isArray(game.analysts)) ? section("AI analysts", `<div data-analysts>${analystsHtml(game)}</div>`, { info: "analysts", id: "analysts" }) : ""}
       ${section("Players", `<div data-players>${playersHtml(game, side)}</div>`, { id: "players" })}
       ${booksTable(game)}
@@ -339,4 +374,11 @@ export async function render(root, params) {
       }
     }, 300);
   });
+  root.addEventListener("error", (event) => {
+    if (!event.target.matches?.("[data-game-headshot]")) return;
+    event.target.replaceWith(Object.assign(document.createElement("span"), {
+      className: "matchup-headshot blank",
+      ariaHidden: "true",
+    }));
+  }, true);
 }

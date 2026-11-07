@@ -302,6 +302,19 @@ def _tour(league: str) -> Optional[str]:
     return next((tour for prefix, tour in TENNIS_PREFIXES.items() if league.startswith(prefix)), None)
 
 
+def _odds_keys(league: str, active: Mapping[str, Any]) -> List[str]:
+    """The Odds API leagues whose boards price ``league``'s games: itself when it is in season there, and for a
+    tennis tour (ESPN lists the tours, tennis_atp and tennis_wta; The Odds API lists one league per tournament, such
+    as tennis_atp_paris_masters) every tournament of that tour in season. Without this a tour game has no board of
+    its own to ask for, so tennis was never preloaded and every tennis match went without a chance or a price."""
+    if league in active:
+        return [league]
+    tour = league if league in TENNIS_PREFIXES.values() else _tour(league)
+    if tour is None:
+        return []
+    return [key for key in active if _tour(key) == tour]
+
+
 def _sport(league: str) -> str:
     """ESPN's sport for a league key ("basketball", "soccer", ...), "" when ESPN doesn't show it."""
     return (espn_path(league) or espn_path(_tour(league) or "") or ("",))[0]
@@ -2216,7 +2229,8 @@ class SlateBuilder:
     def _preload(self, games: Sequence[Mapping[str, Any]], now: float) -> List[str]:
         """The round's preloads (see the module docstring), queued through request_odds' loader with the preloads'
         share of the day's budget: leagues in season at The Odds API with a game ESPN shows (it has an ESPN id) still
-        to start within PRELOAD_HOURS, whose saved odds are older than the odds TTL or missing, the soonest first
+        to start within PRELOAD_HOURS (a tennis tour's games: its in-season tournaments' boards, ``_odds_keys``),
+        whose saved odds are older than the odds TTL or missing, the soonest first
         game first (a tie: more games in the window first). It stops at the reserve or the day's preload share, and
         keeps at most PRELOAD_BACKLOG preloads queued or loading (the next round tops it up). Returns the leagues
         queued."""
@@ -2231,10 +2245,11 @@ class SlateBuilder:
         window: Dict[str, List[float]] = {}
         for game in games:
             ts = game.get("_ts")
-            if game.get("status") != "pre" or not game.get("espn_id") or game.get("league") not in active \
+            if game.get("status") != "pre" or not game.get("espn_id") \
                     or not isinstance(ts, (int, float)) or not now < ts <= horizon:
                 continue
-            window.setdefault(game["league"], []).append(float(ts))
+            for key in _odds_keys(game.get("league"), active):  # a tennis tour's games: its tournaments
+                window.setdefault(key, []).append(float(ts))
         if not window:
             return []
         ttl = self._odds_ttl()
