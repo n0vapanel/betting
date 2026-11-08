@@ -81,6 +81,7 @@ def build_service(config: Config) -> Optional[DashboardService]:
         config.odds_api_key, cache, config.odds_cache_minutes, config.odds_regions,
         store=store, reserve=config.odds_reserve, bookmakers=bookmakers,
         odds_per_day=getattr(config, "slate_odds_per_day", ODDS_PER_DAY),
+        unlimited=getattr(config, "odds_unlimited", False),
     )
     espn = EspnClient(cache)
     service = DashboardService(odds, espn, ZoneInfo(config.timezone), store=store,
@@ -134,6 +135,7 @@ def build_slate(config: Config, service: DashboardService) -> SlateBuilder:
         odds_per_day=config.slate_odds_per_day, ai_leagues=AI_LEAGUES,
         polymarket=polymarket, kalshi=kalshi, ratings=ratings, on_change=service.invalidate_game,
         context=getattr(service, "context", None), preload=getattr(config, "slate_preload", True),
+        refresh_window_hours=getattr(config, "odds_refresh_window_hours", 0),
     )
     service.slate = slate
     if getattr(service, "context", None) is not None:

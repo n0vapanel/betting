@@ -909,7 +909,8 @@ class Store:
             db.execute("COMMIT")
 
     def claim_odds_board(self, day: str, kind: str, *, remaining: Optional[int], limit: int, share: float = 1.0,
-                         reserve: int = 0, cost: int = 0, now: Optional[float] = None) -> Tuple[Optional[str], str]:
+                         reserve: int = 0, cost: int = 0, now: Optional[float] = None,
+                         unlimited: bool = False) -> Tuple[Optional[str], str]:
         """Count one ``kind`` board against ``day``'s budget and hold it as on its way until finish_odds_board (or
         give_back_odds_board) ends its claim: (the claim's id, "ok"), or (None, why: "daily_cap" or "reserve"). One
         transaction, so neither the day nor the reserve can be passed by loads that overlap, in one process or two.
@@ -918,8 +919,9 @@ class Store:
         count then) and fixed again only by a higher count (the month's reset, a new key): a board taken but not yet
         loaded can't make the day look bigger. ``share`` of it may be counted (a preload's part). And the count (the
         lower of ``remaining`` and the latest one reported) less the boards on their way and this one, at ``cost``
-        each, never goes under ``reserve``. A claim not ended within CLAIM_SECONDS no longer counts as on its way (its
-        process died)."""
+        each, never goes under ``reserve``. ``unlimited`` (ODDS_UNLIMITED) skips the day's limit altogether, the frozen
+        one too: a board loads whenever a league's prices are needed, down to the last credit. A claim not ended within
+        CLAIM_SECONDS no longer counts as on its way (its process died)."""
         now = time.time() if now is None else now
         with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
@@ -933,7 +935,7 @@ class Store:
                     day_limit = int(row[1])
                 (total,) = db.execute("SELECT COALESCE(SUM(boards), 0) FROM odds_boards WHERE day = ?",
                                       (day,)).fetchone()
-                if int(total) >= math.floor(day_limit * share + 1e-9):
+                if not unlimited and int(total) >= math.floor(day_limit * share + 1e-9):
                     db.execute("COMMIT")  # keeps the day's limit, counts nothing
                     return None, "daily_cap"
                 latest = db.execute("SELECT remaining FROM api_usage WHERE remaining IS NOT NULL "

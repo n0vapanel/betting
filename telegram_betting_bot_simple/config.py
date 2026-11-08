@@ -95,6 +95,14 @@ class Config(BaseSettings):
     weather_daily_cap: int = Field(1000, ge=0, validation_alias="WEATHER_DAILY_CAP")
     # Below this many Odds API requests left this month, serve saved odds instead of fetching
     odds_reserve: int = Field(50, validation_alias="ODDS_RESERVE")
+    # Only refresh a league's odds board (ODDS_UNLIMITED, no daily cap) while it has a game starting this many hours
+    # away: tonight's and tomorrow's games keep fresh prices, a sport days from its next game costs no credits. 0 keeps
+    # the old 18-hour preload horizon (for a bigger plan)
+    odds_refresh_window_hours: float = Field(6, ge=0, validation_alias="ODDS_REFRESH_WINDOW_HOURS")
+    # No daily limit on odds boards (ODDS_UNLIMITED, on): a league's prices are refreshed when they are needed,
+    # whatever the day has already spent, down to the last credit (the owner pays for more when they run out). The
+    # month's count is still read and every board still counted; ODDS_UNLIMITED=0 brings the daily ration back
+    odds_unlimited: bool = Field(True, validation_alias="ODDS_UNLIMITED")
     # Today's all-sports slate (data/slate.py): seconds between ESPN scoreboard checks for a league with a game
     # live, with games still to play today, with none today, and for the days ahead. Odds boards (3 credits each)
     # load within a daily budget: the month's credits above ODDS_RESERVE spread over the days left in the month, every
@@ -189,7 +197,7 @@ class Config(BaseSettings):
         value = (value or "").strip().rstrip("/")
         return value or None
 
-    @field_validator("markets_enabled", "weather_enabled", "learn_enabled", mode="before")
+    @field_validator("markets_enabled", "weather_enabled", "learn_enabled", "odds_unlimited", mode="before")
     @classmethod
     def _blank_is_on(cls, value: object) -> object:
         # "MARKETS_ENABLED=" (or "WEATHER_ENABLED=", "LEARN_ENABLED=") in .env means the default (on), not a startup

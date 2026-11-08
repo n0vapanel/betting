@@ -139,7 +139,8 @@ from ..engine import consensus
 from ..learn import registry
 from .espn_client import ESPN_DAY_TZ, LEAGUES as ESPN_LEAGUES, SCOREBOARD_ONLY, espn_path, team_match_score
 from .leagues import POPULAR_LEAGUES, SPORTS
-from .odds_service import MARKETS, ODDS_PER_DAY, book_roles, budget_day, day_boards, moneylines, summarize_markets
+from .odds_service import (MARKETS, ODDS_PER_DAY, UNLIMITED_BOARDS, book_roles, budget_day, day_boards, moneylines,
+                              summarize_markets)
 from .store import T24_WINDOW
 
 log = logging.getLogger(__name__)
@@ -774,7 +775,7 @@ class SlateBuilder:
                  on_change: Optional[Callable[..., Any]] = None, context: Any = None,
                  context_every: float = CONTEXT_EVERY, player_board: Any = None,
                  players_every: float = PLAYERS_EVERY, preload: bool = False, capturer: Any = None,
-                 every_game: bool = True) -> None:
+                 every_game: bool = True, refresh_window_hours: float = 0.0) -> None:
         self.odds = odds
         self.espn = espn
         self.store = store
@@ -785,6 +786,9 @@ class SlateBuilder:
         self.idle_seconds = max(self.today_seconds, float(idle_seconds))
         self.future_seconds = max(self.today_seconds, float(future_seconds))
         self.odds_per_day = max(0, int(odds_per_day))
+        # ODDS_REFRESH_WINDOW_HOURS: the preloader refreshes a league's board only while it has a game starting this
+        # soon, so a sport days away from its next game costs no credits (0: the old PRELOAD_HOURS rule)
+        self.refresh_window_hours = max(0.0, float(refresh_window_hours or 0.0))
         self.ai_leagues = frozenset(ai_leagues)
         self._now = now
         self._pool = ThreadPoolExecutor(max_workers=max(1, workers), thread_name_prefix="slate-espn")
@@ -2208,10 +2212,11 @@ class SlateBuilder:
             self._queue_seq += 1
             heapq.heappush(self._queue, (0 if kind == "request" else 1, self._queue_seq, league))
         if kind == "preload":
-            # Never the key: the league, the cost and the count as last reported
-            log.info("Slate: preloading %s odds (%d credits; %s left this month; board %d of today's %d)", league,
-                     self._fetch_cost(), "?" if budget["remaining"] is None else budget["remaining"],
-                     budget["spent"] + 1, budget["boards"])
+            # Never the key: the league, the cost and the count as last reported (no daily limit: ODDS_UNLIMITED)
+            counted = ("board %d, no daily limit" % (budget["spent"] + 1) if budget["boards"] >= UNLIMITED_BOARDS
+                       else "board %d of today's %d" % (budget["spent"] + 1, budget["boards"]))
+            log.info("Slate: preloading %s odds (%d credits; %s left this month; %s)", league, self._fetch_cost(),
+                     "?" if budget["remaining"] is None else budget["remaining"], counted)
         try:
             self._odds_pool.submit(self._load_odds, league)
         except RuntimeError:  # shutting down: nothing will load it, so nothing is spent
@@ -2229,8 +2234,9 @@ class SlateBuilder:
     def _preload(self, games: Sequence[Mapping[str, Any]], now: float) -> List[str]:
         """The round's preloads (see the module docstring), queued through request_odds' loader with the preloads'
         share of the day's budget: leagues in season at The Odds API with a game ESPN shows (it has an ESPN id) still
-        to start within PRELOAD_HOURS (a tennis tour's games: its in-season tournaments' boards, ``_odds_keys``),
-        whose saved odds are older than the odds TTL or missing, the soonest first
+        to start within PRELOAD_HOURS — or within the refresh window when one is set (``refresh_window_hours``, so a
+        league whose next game is days out costs nothing; a tennis tour's games: its in-season tournaments' boards,
+        ``_odds_keys``) — whose saved odds are older than the odds TTL or missing, the soonest first
         game first (a tie: more games in the window first). It stops at the reserve or the day's preload share, and
         keeps at most PRELOAD_BACKLOG preloads queued or loading (the next round tops it up). Returns the leagues
         queued."""
@@ -2241,7 +2247,7 @@ class SlateBuilder:
             room = PRELOAD_BACKLOG - sum(1 for league in self._loading if self._kinds.get(league) == "preload")
         if room <= 0:
             return []
-        horizon = now + PRELOAD_HOURS * 3600
+        horizon = now + (self.refresh_window_hours or PRELOAD_HOURS) * 3600
         window: Dict[str, List[float]] = {}
         for game in games:
             ts = game.get("_ts")
@@ -2294,6 +2300,9 @@ class SlateBuilder:
         spent = self._spent(day)
         remaining = self._remaining()
         reserve, cost = getattr(self.odds, "reserve", 0) or 0, self._fetch_cost()
+        if getattr(self.odds, "unlimited", False):  # no daily ration: a board loads when a league's prices are needed
+            return {"day": day, "boards": UNLIMITED_BOARDS, "preloads": UNLIMITED_BOARDS, "spent": spent,
+                    "remaining": remaining, "proposed": UNLIMITED_BOARDS, "reserve": 0, "cost": cost}
         # The odds service's one rule for every loader (data/odds_service.py's day_boards), boards on their way not yet
         # paid for
         proposed = day_boards(remaining, reserve, cost, spent, now, in_flight=len(self._loading),
@@ -2349,7 +2358,8 @@ class SlateBuilder:
             claim = getattr(self.store, "claim_odds_board", None)
             if callable(claim):
                 return claim(day, kind, remaining=budget["remaining"], limit=budget["proposed"], share=share,
-                             reserve=budget["reserve"], cost=budget["cost"])
+                             reserve=budget["reserve"], cost=budget["cost"],
+                             unlimited=bool(getattr(self.odds, "unlimited", False)))
             taken = self.store.take_odds_board(day, kind, budget["preloads" if kind == "preload" else "boards"])
             return (True, "ok") if taken else (None, "daily_cap")
         self._day_boards = {key: n for key, n in self._day_boards.items() if key[0] == day}
@@ -2398,7 +2408,7 @@ class SlateBuilder:
             log.exception("Couldn't read the odds quota")
             return False
         remaining = quota.get("remaining") if isinstance(quota, Mapping) else None
-        reserve = getattr(self.odds, "reserve", 0) or 0
+        reserve = 0 if getattr(self.odds, "unlimited", False) else getattr(self.odds, "reserve", 0) or 0
         return not isinstance(remaining, int) or remaining - self._fetch_cost() * boards >= reserve
 
     def _load_odds(self, league: str) -> None:

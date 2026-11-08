@@ -58,6 +58,9 @@ QUOTA_RECHECK_SECONDS = 3600.0
 # The day's odds boards (day_boards: every loader's one rule, counted per UTC day in the shared store's odds_boards):
 # while the month's count is unknown (a new install) a day has this many (SLATE_ODDS_PER_DAY)
 ODDS_PER_DAY = 12
+# ODDS_UNLIMITED: the day has no ration. The store still counts every board (the month's burn stays visible)
+# and nothing is fetched at zero credits left; only the daily cap goes.
+UNLIMITED_BOARDS = 10_000_000
 DIRECT = "direct"  # the count's kind for a board this service loads itself (a page or the bot), not the slate's loader
 # The board's bookmakers (config.py's ODDS_BOOKMAKERS default; checked against The Odds API's bookmaker list on
 # 27 October 2026). Ten books are one region: 3 credits a board, as regions=us was
@@ -259,6 +262,7 @@ class OddsService:
         reserve: int = 50,
         bookmakers: Optional[Sequence[str]] = None,
         odds_per_day: int = ODDS_PER_DAY,
+        unlimited: bool = False,
     ) -> None:
         self.api_key = api_key
         self.cache = cache if cache is not None else TTLCache()  # an empty TTLCache is falsy (len 0)
@@ -281,6 +285,8 @@ class OddsService:
         # while the month's count is unknown (SLATE_ODDS_PER_DAY), and the slate's loader's board, counted already
         # (budgeted), for the thread that loads it
         self.odds_per_day = max(0, int(odds_per_day))
+        # No daily ration (ODDS_UNLIMITED): a board loads when a league's prices are needed, whatever the day spent
+        self.unlimited = bool(unlimited)
         self._paid = threading.local()
         self._refused: Dict[str, float] = {}  # league -> when a load past the day's budget was last logged
 
@@ -318,9 +324,11 @@ class OddsService:
             self.recheck_quota()
             remaining = self.quota["remaining"]
             spent = sum(store.odds_boards(day).values())
-            limit = day_boards(remaining, self.reserve, self.board_cost, spent, now, unknown=self.odds_per_day)
-            claim, why = claim_board(day, DIRECT, remaining=remaining, limit=limit, reserve=self.reserve,
-                                     cost=self.board_cost)
+            reserve = 0 if self.unlimited else self.reserve
+            limit = UNLIMITED_BOARDS if self.unlimited else day_boards(
+                remaining, self.reserve, self.board_cost, spent, now, unknown=self.odds_per_day)
+            claim, why = claim_board(day, DIRECT, remaining=remaining, limit=limit, reserve=reserve,
+                                     cost=self.board_cost, unlimited=self.unlimited)
         except Exception as exc:  # the count can't be read or claimed: no load rather than one past the budget
             log.warning("Couldn't count the %s odds board against the day's budget (%s)", sport_key, type(exc).__name__)
             return False, _Board()
